@@ -16,6 +16,7 @@ Layout (all coords in mm, modelspace 1:1):
   Sheet border wraps everything with margin.
 """
 import json, logging, math, io, datetime
+from ezdxf.enums import TextEntityAlignment
 logger = logging.getLogger(__name__)
 
 L_FRAME = 'FRAME'

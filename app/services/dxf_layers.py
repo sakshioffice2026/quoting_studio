@@ -1,6 +1,8 @@
 """
 DXF layer setup and configuration matching CAD standards.
 
+from ezdxf.enums import TextEntityAlignment
+
 Layer Hierarchy (per specification):
   - FRAME_GEOMETRY (White/7) — frame outline, mullions, glass
   - WINDOW_CILL (Yellow/2) — sill/cill projection detail
@@ -172,7 +174,7 @@ def add_dimension_line(msp, p1, p2, label, distance=100, layer='DIMENSIONS'):
     msp.add_text(
         label,
         dxfattribs={'layer': layer, 'height': 30}
-    ).set_placement((mid_x, mid_y + distance), align=1)
+    ).set_placement((mid_x, mid_y + distance), align=TextEntityAlignment.MIDDLE_CENTER)
 
 
 # ═════════════════════════════════════════════════════════════════

@@ -73,7 +73,7 @@ def generate_window_dxf(window, panes, tenant_id: int = None, **params) -> bytes
         return b''
     
     try:
-        profile = _get_profile(tenant_id, getattr(window, 'material', 'Aluminium'))
+        profile = _get_profile(tenant_id, getattr(window, 'material', 'Aluminium'), window)
         return _build(window, panes, profile, tenant_id, **params)
     except Exception as exc:
         logger.exception('DXF generation failed window=%s: %s',
@@ -85,8 +85,13 @@ def generate_window_dxf(window, panes, tenant_id: int = None, **params) -> bytes
 #  PROFILE LOOKUP
 # ================================================================
 
-def _get_profile(tenant_id, material):
-    """Load profile parameters, with fallback to defaults."""
+def _get_profile(tenant_id, material, window=None):
+    """Load profile parameters. Priority:
+       1. window.profile_system_id -> ProfileSystem (same resolution used
+          by the STEP/3D pipeline in frame_assembly.resolve_profiles)
+       2. tenant's is_default=True CadProfile for this material
+       3. hardcoded fallback
+    """
     prof = {
         'bar': _DEFAULT_BAR,
         'wall': _DEFAULT_WALL,
@@ -100,11 +105,24 @@ def _get_profile(tenant_id, material):
         return prof
     
     try:
-        from models.cad_profile import CadProfile
-        p = (CadProfile.query
-             .filter_by(tenant_id=tenant_id, material=material,
-                        is_active=True, is_default=True).first()
-             or CadProfile.query.filter_by(tenant_id=tenant_id, is_active=True).first())
+        from app.models.cad_profile import CadProfile
+        from app.models.profile_system import ProfileSystem
+
+        p = None
+
+        sys_id = getattr(window, 'profile_system_id', None) if window else None
+        if sys_id:
+            psys = ProfileSystem.query.get(sys_id)
+            if psys:
+                slot_id = psys.head_id or psys.jamb_id or psys.cill_id
+                if slot_id:
+                    p = CadProfile.query.get(slot_id)
+
+        if p is None:
+            p = (CadProfile.query
+                 .filter_by(tenant_id=tenant_id, material=material,
+                            is_active=True, is_default=True).first()
+                 or CadProfile.query.filter_by(tenant_id=tenant_id, is_active=True).first())
         
         if p:
             prof.update(

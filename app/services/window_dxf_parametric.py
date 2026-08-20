@@ -14,6 +14,7 @@ import io
 import json
 import logging
 from datetime import date
+from ezdxf.enums import TextEntityAlignment
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def generate_parametric_window_dxf(window, panes, tenant_id=None, **params) -> b
     H = float(window.height_mm)
     
     # Profile
-    profile = _get_profile(tenant_id, getattr(window, 'material', 'Aluminium'))
+    profile = _get_profile(tenant_id, getattr(window, 'material', 'Aluminium'), window)
     bar = profile['bar']
     wall = profile['wall']
     depth = profile['depth']
@@ -233,7 +234,7 @@ def _horizontal_section(msp, W, profile, section_y):
     msp.add_text(
         'HORIZONTAL SECTION A-A',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.5}
-    ).set_placement((W/2, section_bot - bar*1.5), align=1)
+    ).set_placement((W/2, section_bot - bar*1.5), align=TextEntityAlignment.MIDDLE_CENTER)
 
 
 def _draw_profile_box(msp, x, y_bot, w, depth, wall, y_top, mirror=False):
@@ -296,7 +297,7 @@ def _schedule(msp, W, H, panes_data, profile):
         msp.add_text(
             hdr,
             dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': th}
-        ).set_placement((cx + col_w[i]*0.5, ty - rh*0.45), align=1)
+        ).set_placement((cx + col_w[i]*0.5, ty - rh*0.45), align=TextEntityAlignment.MIDDLE_CENTER)
         cx += col_w[i]
     
     # Data rows
@@ -318,7 +319,7 @@ def _schedule(msp, W, H, panes_data, profile):
             msp.add_text(
                 val,
                 dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': th*0.9}
-            ).set_placement((cx + col_w[i]*0.5, ry + rh*0.35), align=1)
+            ).set_placement((cx + col_w[i]*0.5, ry + rh*0.35), align=TextEntityAlignment.MIDDLE_CENTER)
             cx += col_w[i]
 
 
@@ -358,7 +359,7 @@ def _dimensions(msp, W, H, panes_data, section_y, sect_x, depth, bbox):
     msp.add_text(
         f'{W:.0f}',
         dxfattribs={'layer': layer_dim, 'height': 30}
-    ).set_placement((W/2, H + 140), align=1)
+    ).set_placement((W/2, H + 140), align=TextEntityAlignment.MIDDLE_CENTER)
     
     # Overall height — right of section
     msp.add_line(
@@ -376,7 +377,7 @@ def _dimensions(msp, W, H, panes_data, section_y, sect_x, depth, bbox):
     msp.add_text(
         f'{H:.0f}',
         dxfattribs={'layer': layer_dim, 'height': 30}
-    ).set_placement((sect_x + depth*3.8, H/2), align=1)
+    ).set_placement((sect_x + depth*3.8, H/2), align=TextEntityAlignment.MIDDLE_CENTER)
 
 
 def _sheet_border(msp, bbox, bar):
@@ -431,7 +432,7 @@ def _titleblock(msp, window, profile, bbox, bar, section_y, side_bottom_y):
     msp.add_text(
         company.upper(),
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': tb_h*0.2}
-    ).set_placement((bx0 + bw*0.1, tb_y0 + tb_h*0.6), align=1)
+    ).set_placement((bx0 + bw*0.1, tb_y0 + tb_h*0.6), align=TextEntityAlignment.MIDDLE_CENTER)
     
     # Drawing info
     w_mm = int(window.width_mm)
@@ -441,7 +442,7 @@ def _titleblock(msp, window, profile, bbox, bar, section_y, side_bottom_y):
     msp.add_text(
         info_text,
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': tb_h*0.15}
-    ).set_placement((bx0 + bw*0.35, tb_y0 + tb_h*0.5), align=0)
+    ).set_placement((bx0 + bw*0.35, tb_y0 + tb_h*0.5), align=TextEntityAlignment.MIDDLE_CENTER)
     
     # Drawing number & date
     drw_no = f'QS-{getattr(window, "id", "?")}'
@@ -450,7 +451,7 @@ def _titleblock(msp, window, profile, bbox, bar, section_y, side_bottom_y):
     msp.add_text(
         f'Drw: {drw_no}',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': tb_h*0.12}
-    ).set_placement((bx1 - bw*0.15, tb_y0 + tb_h*0.6), align=2)
+    ).set_placement((bx1 - bw*0.15, tb_y0 + tb_h*0.6), align=TextEntityAlignment.MIDDLE_RIGHT)
     
     msp.add_text(
         f'Date: {date_str}',
@@ -462,8 +463,13 @@ def _titleblock(msp, window, profile, bbox, bar, section_y, side_bottom_y):
 #  HELPERS
 # ═══════════════════════════════════════════════════════════════
 
-def _get_profile(tenant_id, material):
-    """Load profile parameters, with fallback to defaults."""
+def _get_profile(tenant_id, material, window=None):
+    """Load profile parameters. Priority:
+       1. window.profile_system_id -> ProfileSystem (same resolution used
+          by the STEP/3D pipeline in frame_assembly.resolve_profiles)
+       2. tenant's is_default=True CadProfile for this material
+       3. hardcoded fallback
+    """
     prof = {
         'bar': _DEFAULT_BAR,
         'wall': _DEFAULT_WALL,
@@ -477,11 +483,24 @@ def _get_profile(tenant_id, material):
         return prof
     
     try:
-        from models.cad_profile import CadProfile
-        p = (CadProfile.query
-             .filter_by(tenant_id=tenant_id, material=material, is_active=True, is_default=True)
-             .first() or
-             CadProfile.query.filter_by(tenant_id=tenant_id, is_active=True).first())
+        from app.models.cad_profile import CadProfile
+        from app.models.profile_system import ProfileSystem
+
+        p = None
+
+        sys_id = getattr(window, 'profile_system_id', None) if window else None
+        if sys_id:
+            psys = ProfileSystem.query.get(sys_id)
+            if psys:
+                slot_id = psys.head_id or psys.jamb_id or psys.cill_id
+                if slot_id:
+                    p = CadProfile.query.get(slot_id)
+
+        if p is None:
+            p = (CadProfile.query
+                 .filter_by(tenant_id=tenant_id, material=material, is_active=True, is_default=True)
+                 .first() or
+                 CadProfile.query.filter_by(tenant_id=tenant_id, is_active=True).first())
         
         if p:
             prof.update(

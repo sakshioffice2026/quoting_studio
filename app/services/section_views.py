@@ -1,3 +1,5 @@
+from ezdxf.enums import TextEntityAlignment
+
 """
 Orthographic section views (A-A horizontal, B-B vertical) with Y-coordinate alignment.
 
@@ -126,12 +128,12 @@ def draw_vertical_section(msp, frame_height, profile, sect_x, has_cill=False):
     msp.add_text(
         'VERTICAL SECTION B-B',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.55}
-    ).set_placement((label_x, section_bottom - bar*1.4), align=1)
+    ).set_placement((label_x, section_bottom - bar*1.4), align=TextEntityAlignment.MIDDLE_CENTER)
     
     msp.add_text(
         f'PROFILE: {profile["ref"]} | {bar:.0f}mm FRAME | {wall:.0f}mm WALL | {depth:.0f}mm DEPTH',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.34}
-    ).set_placement((label_x, section_bottom - bar*2.2), align=1)
+    ).set_placement((label_x, section_bottom - bar*2.2), align=TextEntityAlignment.MIDDLE_CENTER)
     
     # ─────────────────────────────────────────────────────────────────
     # DIMENSION CALLOUTS (head and sill heights)
@@ -155,7 +157,7 @@ def draw_vertical_section(msp, frame_height, profile, sect_x, has_cill=False):
     msp.add_text(
         f'{bar_s/scale:.0f}',
         dxfattribs={'layer': 'DIMENSIONS', 'height': 25}
-    ).set_placement((dim_x + bar*0.4, (ty0 + ty1)/2), align=0)
+    ).set_placement((dim_x + bar*0.4, (ty0 + ty1)/2), align=TextEntityAlignment.MIDDLE_CENTER)
     
     # Sill dimension
     msp.add_line(
@@ -173,7 +175,7 @@ def draw_vertical_section(msp, frame_height, profile, sect_x, has_cill=False):
     msp.add_text(
         f'{bar_s/scale:.0f}',
         dxfattribs={'layer': 'DIMENSIONS', 'height': 25}
-    ).set_placement((dim_x + bar*0.4, (by0 + by1)/2), align=0)
+    ).set_placement((dim_x + bar*0.4, (by0 + by1)/2), align=TextEntityAlignment.MIDDLE_CENTER)
     
     return section_bottom
 
@@ -232,7 +234,7 @@ def _draw_profile_section(msp, x, y, width, height, wall, rebate, mirror=False, 
         msp.add_text(
             profile_type,
             dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': 20}
-        ).set_placement((label_x, label_y), align=1)
+        ).set_placement((label_x, label_y), align=TextEntityAlignment.MIDDLE_CENTER)
 
 
 def draw_horizontal_section(msp, frame_width, profile, section_y):
@@ -309,12 +311,12 @@ def draw_horizontal_section(msp, frame_width, profile, section_y):
     msp.add_text(
         'HORIZONTAL SECTION A-A',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.5}
-    ).set_placement((frame_width/2, section_bot - bar*1.4), align=1)
+    ).set_placement((frame_width/2, section_bot - bar*1.4), align=TextEntityAlignment.MIDDLE_CENTER)
     
     msp.add_text(
         f'PROFILE: {profile["ref"]} | {bar:.0f}mm FRAME | {wall:.0f}mm WALL | {depth:.0f}mm DEPTH',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.34}
-    ).set_placement((frame_width/2, section_bot - bar*2.2), align=1)
+    ).set_placement((frame_width/2, section_bot - bar*2.2), align=TextEntityAlignment.MIDDLE_CENTER)
     
     return section_bot
 

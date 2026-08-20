@@ -210,7 +210,7 @@ def draw_cill_section_profile(msp, x0, y0, depth_s, bar_s, wall_s, lip_s, bar):
     msp.add_text(
         'CILL PROFILE',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.34, 'color': 2}
-    ).set_placement((label_x, oy0 - bar*0.55), align=1)
+    ).set_placement((label_x, oy0 - bar*0.55), align=TextEntityAlignment.MIDDLE_CENTER)
     
     # ─────────────────────────────────────────────────────────────────
     # RETURN TOP SURFACE Y-COORDINATE (for glass placement in main view)
