@@ -1190,7 +1190,7 @@ function importJSON(evt){
   reader.readAsText(file);
   evt.target.value='';
 }
-function exportDxf(){ window.location.href=`${API}/windows/${QS_WINDOW_ID}/dxf`; }
+function exportDxf(){ window.location.href=`${API}/windows/${QS_WINDOW_ID}/engineering.dxf`; }
 function exportDwg(){ window.location.href=`${API}/windows/${QS_WINDOW_ID}/dwg`; }
 function view3D(){ window.open(`/projects/${QS_PROJECT_ID}/windows/${QS_WINDOW_ID}/3d`,'_blank'); }
 function toggle3DMenu(){ const m=document.getElementById('menu3d'); m.style.display=m.style.display==='none'?'block':'none'; }
