@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in — Quoting Studio</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
+</head>
+<body>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="flash-stack">
+      {% for cat, msg in messages %}
+        <div class="flash flash-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+<div class="auth-shell">
+  <div class="auth-card">
+    <div class="auth-logo">Quoting Studio</div>
+    <div class="auth-sub">Window & door quoting platform</div>
+
+    <h2>Sign in</h2>
+
+    <form method="POST" action="{{ url_for('auth.login') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="form-group">
+        <label class="form-label" for="email">Email address</label>
+        <input class="form-control" type="email" id="email" name="email"
+               value="{{ request.form.get('email', '') }}"
+               autocomplete="email" autofocus required>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input class="form-control" type="password" id="password" name="password"
+               autocomplete="current-password" required>
+      </div>
+
+      <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="remember" name="remember" style="accent-color:var(--copper);">
+        <label for="remember" style="font-size:13px;color:#566;cursor:pointer;">Keep me signed in</label>
+      </div>
+
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+        Sign in
+      </button>
+    </form>
+
+    <div class="auth-footer">
+      Don't have an account?
+      <a href="{{ url_for('auth.register') }}">Create one free</a>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

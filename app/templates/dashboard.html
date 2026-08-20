@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+{% block title %}Projects — Quoting Studio{% endblock %}
+
+{% block body %}
+<div class="dash-layout">
+
+  {# ---- Sidebar ---- #}
+  <aside class="dash-sidebar">
+    <a href="{{ url_for('dashboard.index') }}" class="dash-sidebar-item active">Projects</a>
+    <a href="{{ url_for('customers.index') }}"
+       class="dash-sidebar-item {{ 'active' if request.endpoint == 'customers.index' }}">Customers</a>
+    <a href="{{ url_for('reports.index') }}"
+       class="dash-sidebar-item {{ 'active' if request.endpoint == 'reports.index' }}">Reports</a>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('settings.pricing') }}" class="dash-sidebar-item">Products &amp; pricing</a>
+    <a href="{{ url_for('settings.company') }}" class="dash-sidebar-item">Branding</a>
+    <a href="{{ url_for('settings.team') }}"    class="dash-sidebar-item">Team</a>
+    {% endif %}
+  </aside>
+
+  {# ---- Main content ---- #}
+  <div class="dash-content">
+
+    {# Page header #}
+    <div class="page-header">
+      <div>
+        <h1>Projects</h1>
+        <div class="sub mono">{{ current_user.tenant.name }} · {{ stats.total }} project{{ 's' if stats.total != 1 }}</div>
+      </div>
+      <a href="{{ url_for('projects.new') }}" class="btn btn-primary">+ New Project</a>
+    </div>
+
+    {# Stats row #}
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-label">Total projects</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.sent }}</div>
+        <div class="stat-label">Quotes sent</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.won }}</div>
+        <div class="stat-label">Won</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.win_rate }}%</div>
+        <div class="stat-label">Win rate</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="font-size:22px;">
+          £{{ '{:,.0f}'.format(stats.pipeline) }}
+        </div>
+        <div class="stat-label">Pipeline value</div>
+      </div>
+    </div>
+
+    {# Project table #}
+    {% if projects %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Address</th>
+          <th>Windows</th>
+          <th>Latest quote</th>
+          <th>Status</th>
+          <th>Updated</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in projects %}
+        <tr>
+          <td class="link-cell">
+            <a href="{{ url_for('projects.detail', project_id=p.id) }}">{{ p.customer_name }}</a>
+          </td>
+          <td class="muted">{{ p.address or '—' }}</td>
+          <td class="mono" style="font-size:12px;">{{ p.window_count }}</td>
+          <td class="mono" style="font-size:12px;">
+            {% if p.latest_quote and p.latest_quote.total %}
+              £{{ '{:,.2f}'.format(p.latest_quote.total) }}
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge badge-{{ p.status }}">{{ p.status_label }}</span>
+          </td>
+          <td class="muted mono" style="font-size:11px;">
+            {{ p.updated_at.strftime('%d %b %Y') }}
+          </td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('projects.detail', project_id=p.id) }}"
+               class="btn btn-secondary btn-sm">Open</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% else %}
+    <div class="empty-state">
+      <div class="icon">◱</div>
+      <p>No projects yet. Create your first one to start quoting.</p>
+      <a href="{{ url_for('projects.new') }}" class="btn btn-primary">+ New Project</a>
+    </div>
+    {% endif %}
+
+  </div>{# /dash-content #}
+</div>{# /dash-layout #}
+{% endblock %}

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Quoting Studio{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+  {% block head %}{% endblock %}
+</head>
+<body class="app-shell">
+
+  {# ---- Flash messages ---- #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-stack" id="flashStack">
+        {% for cat, msg in messages %}
+          <div class="flash flash-{{ cat }}" style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+            <span>{{ msg }}</span>
+            <button onclick="this.parentElement.remove()"
+                    style="background:none;border:none;cursor:pointer;font-size:14px;color:inherit;opacity:.6;flex-shrink:0;padding:0;line-height:1;">&#x2715;</button>
+          </div>
+        {% endfor %}
+      </div>
+      <script>
+        (function(){
+          var stack = document.getElementById('flashStack');
+          if (!stack) return;
+          Array.from(stack.querySelectorAll('.flash')).forEach(function(el, i){
+            setTimeout(function(){
+              el.style.transition = 'opacity .4s, transform .4s';
+              el.style.opacity = '0';
+              el.style.transform = 'translateX(20px)';
+              setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 420);
+            }, 4000 + i * 600);
+          });
+        })();
+      </script>
+    {% endif %}
+  {% endwith %}
+
+  {# ---- Top bar ---- #}
+  {% if current_user.is_authenticated %}
+  <header class="topbar">
+    <span class="topbar-logo">Quoting Studio</span>
+    <div class="topbar-sep"></div>
+    <span class="topbar-tenant">{{ current_user.tenant.name }}</span>
+    <div class="topbar-spacer"></div>
+    <nav class="topbar-nav">
+      <a href="{{ url_for('dashboard.index') }}"
+         class="{{ 'active' if request.endpoint == 'dashboard.index' }}">Projects</a>
+      {% if current_user.is_authenticated and current_user.is_admin %}
+      <a href="{{ url_for('settings.company') }}"
+         class="{{ 'active' if request.endpoint and request.endpoint.startswith('settings.') }}">Settings</a>
+      {% endif %}
+    </nav>
+    <div class="topbar-user">
+      <span class="user-avatar">{{ current_user.initials }}</span>
+      <span>{{ current_user.full_name }}</span>
+      <a href="{{ url_for('auth.logout') }}" style="color:#9AA4B8;font-size:12px;margin-left:4px;">Sign out</a>
+    </div>
+  </header>
+  {% endif %}
+
+  {# ---- Page body ---- #}
+  <main class="app-main">
+    {% block body %}{% endblock %}
+  </main>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

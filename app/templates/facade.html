@@ -1,0 +1,408 @@
+{% extends 'base.html' %}
+{% block title %}Facade — {{ project.customer_name }} — Quoting Studio{% endblock %}
+
+{% block head %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<style>
+body{overflow:hidden;}
+.fac-wrap{display:flex;flex-direction:column;height:calc(100vh - 52px);}
+.fac-top{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:var(--navy);flex-shrink:0;}
+.fac-crumb{font-family:var(--font-mono);font-size:12px;color:#B7C0CE;}
+.fac-crumb a{color:#B7C0CE;text-decoration:none;}
+.fac-acts{display:flex;gap:7px;align-items:center;}
+.fac-body{display:flex;flex:1;overflow:hidden;min-height:0;}
+.fac-area{flex:1;position:relative;overflow:hidden;background:#BFD8E4;min-width:0;}
+#fc{display:block;width:100%;height:100%;}
+.fac-hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:rgba(27,36,48,.78);color:rgba(255,255,255,.9);font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:20px;pointer-events:none;white-space:nowrap;}
+.fac-panel{width:250px;background:#FCFBF8;border-left:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;}
+.fac-scroll{flex:1;overflow-y:auto;padding:16px;}
+.fac-sec{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--steel);font-weight:600;margin:0 0 8px;}
+.fac-field{margin-bottom:10px;}
+.fac-field label{font-size:11px;color:#566;display:block;margin-bottom:4px;}
+.fac-field input{width:100%;border:1px solid var(--line);border-radius:4px;padding:7px 9px;font-size:13px;font-family:var(--font-mono);}
+.fac-field input:focus{outline:none;border-color:var(--copper);}
+.fac-divider{height:1px;background:var(--line);margin:14px 0;}
+.fac-unit-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px;cursor:pointer;}
+.fac-unit-row:hover{color:var(--copper);}
+.fac-unit-row.sel{color:var(--copper);font-weight:600;}
+.fac-unit-row .dim{font-family:var(--font-mono);font-size:10px;color:var(--steel);}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="fac-wrap">
+  <div class="fac-top">
+    <div class="fac-crumb">
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.customer_name }}</a>
+      &nbsp;/&nbsp;Facade View
+    </div>
+    <div class="fac-acts">
+      <button class="btn btn-ghost btn-sm" onclick="autoArrange()">Auto-arrange</button>
+      <button class="btn btn-ghost btn-sm" onclick="resetFacade()">Reset</button>
+      <button class="btn btn-primary btn-sm" onclick="saveFacade()">Save layout</button>
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}" class="btn btn-ghost btn-sm">← Project</a>
+    </div>
+  </div>
+
+  <div class="fac-body">
+    <div class="fac-area" id="facArea">
+      <canvas id="fc"></canvas>
+      <div class="fac-hint" id="facHint">Drag units to reposition · double-click to open in editor</div>
+    </div>
+    <div class="fac-panel">
+      <div class="fac-scroll">
+        <div class="fac-sec">Building</div>
+        <div class="fac-field"><label>Width (mm)</label>
+          <input type="number" id="bldW" value="9000" step="500" oninput="drawFacade()"></div>
+        <div class="fac-field"><label>Height (mm)</label>
+          <input type="number" id="bldH" value="6500" step="500" oninput="drawFacade()"></div>
+        <div class="fac-divider"></div>
+        <div class="fac-sec">Units on facade (<span id="unitCount">0</span>)</div>
+        <div id="facUnitList"></div>
+        <div class="fac-divider"></div>
+        <div style="font-size:11px;color:var(--steel);line-height:1.6;">
+          Drag units onto the wall to show the client how the elevation looks.
+          Positions save with the project.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PROJECT_ID = {{ project.id }};
+const CSRF = document.querySelector('meta[name=csrf-token]').content;
+const UNITS = {{ units|tojson }};
+const SAVED  = {{ facade_state|safe }};
+
+/* ── shape outline path (rectangle/arched/gothic/circular) — mirrors
+   drawing-engine.js _shapePath(), converted from SVG to Canvas Path2D ── */
+function shapePath2D(shape, ux, uy, W, H, insetMm, archRise) {
+  const x0 = ux + insetMm * facS;
+  const x1 = ux + (W - insetMm) * facS;
+  const y0 = uy + insetMm * facS;
+  const y1 = uy + H * facS;
+  const w  = x1 - x0;
+  const cx = x0 + w / 2;
+  const rise = Math.max(0, archRise != null ? archRise : Math.min(W * 0.25, 400));
+  const springY = y0 + rise * facS;
+  const p = new Path2D();
+  if (shape === 'circular') {
+    const h = y1 - y0, ry = Math.max(h / 2, 0.01), cy = y0 + ry, rx = Math.max(w / 2, 0.01);
+    p.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    return p;
+  }
+  if (shape === 'arched') {
+    const rx = Math.max(w / 2, 0.01), ry = Math.max(springY - y0, 0.01);
+    p.moveTo(x0, y1);
+    p.lineTo(x0, springY);
+    p.ellipse(cx, springY, rx, ry, 0, Math.PI, Math.PI * 2, false);
+    p.lineTo(x1, y1);
+    p.closePath();
+    return p;
+  }
+  if (shape === 'gothic') {
+    const apexY = y0;
+    const ctrlY = apexY * 0.6 + springY * 0.4;
+    p.moveTo(x0, y1);
+    p.lineTo(x0, springY);
+    p.quadraticCurveTo(x0, ctrlY, cx, apexY);
+    p.quadraticCurveTo(x1, ctrlY, x1, springY);
+    p.lineTo(x1, y1);
+    p.closePath();
+    return p;
+  }
+  p.rect(x0, y0, w, y1 - y0); // rectangle fallback
+  return p;
+}
+
+/* screen-space rect for one pane, with per-edge mullion inset — mirrors
+   drawing-engine.js _renderPane() insets */
+function paneScreenRect(pane, ux, uy, W, H, barMm) {
+  const mb = barMm * 0.6, half = mb / 2, eps = 0.001;
+  const insL = (pane.x <= eps)           ? barMm : half;
+  const insT = (pane.y <= eps)           ? barMm : half;
+  const insR = (pane.x + pane.w >= 1 - eps) ? barMm : half;
+  const insB = (pane.y + pane.h >= 1 - eps) ? barMm : half;
+  const x = ux + (pane.x * W) * facS + insL * facS;
+  const y = uy + (pane.y * H) * facS + insT * facS;
+  const w = (pane.w * W) * facS - (insL + insR) * facS;
+  const h = (pane.h * H) * facS - (insT + insB) * facS;
+  return { x, y, w, h };
+}
+
+/* draws the frame band (shape-aware) + real pane grid + glazing bars for one
+   unit, using its actual design.panes/design.shape instead of a placeholder box */
+function drawUnitDesign(u, ux, uy, uw, uh) {
+  const d       = u.design || {};
+  const shape   = d.shape || 'rectangle';
+  const barMm   = (d.frame && d.frame.thickness) || 58;
+  const col     = (d.frame && d.frame.color) || '#2B2F33';
+  const panes   = (d.panes && d.panes.length) ? d.panes
+                : [{ x: 0, y: 0, w: 1, h: 1, glazingBars: [] }];
+
+  const outerPath = shapePath2D(shape, ux, uy, u.width, u.height, 0, d.archRise);
+  const innerPath = shapePath2D(shape, ux, uy, u.width, u.height, barMm, d.archRise);
+
+  // frame band = outer minus inner (evenodd ring)
+  const ring = new Path2D();
+  ring.addPath(outerPath);
+  ring.addPath(innerPath);
+  fCtx.fillStyle = col;
+  fCtx.fill(ring, 'evenodd');
+  fCtx.strokeStyle = '#3A2010';
+  fCtx.lineWidth = 1.2;
+  fCtx.stroke(outerPath);
+
+  // panes + glazing bars, clipped to the inner (glass) shape
+  fCtx.save();
+  fCtx.clip(innerPath);
+  fCtx.fillStyle = col;           // mullion/sash backdrop shows through pane gaps
+  fCtx.fillRect(ux, uy, uw, uh);
+  panes.forEach(p => {
+    const r = paneScreenRect(p, ux, uy, u.width, u.height, barMm);
+    if (r.w <= 0 || r.h <= 0) return;
+    fCtx.fillStyle = 'rgba(141,189,201,.5)';
+    fCtx.fillRect(r.x, r.y, r.w, r.h);
+    fCtx.strokeStyle = 'rgba(0,0,0,.22)';
+    fCtx.lineWidth = 0.75;
+    fCtx.strokeRect(r.x, r.y, r.w, r.h);
+    (p.glazingBars || []).forEach(gb => {
+      const t = Math.max(1, (gb.thickness || 18) * facS);
+      fCtx.fillStyle = col;
+      if (gb.type === 'vertical') {
+        const bx = r.x + r.w * gb.pos;
+        fCtx.fillRect(bx - t / 2, r.y, t, r.h);
+      } else {
+        const by = r.y + r.h * gb.pos;
+        fCtx.fillRect(r.x, by - t / 2, r.w, t);
+      }
+    });
+  });
+  fCtx.restore();
+}
+
+/* state */
+let facPlace = [], facSel = null, facDrag = null;
+let facS = 1, facOx = 0, facOy = 0;
+
+const fc = document.getElementById('fc');
+const fCtx = fc.getContext('2d');
+
+function bldDims() {
+  return {
+    w: +document.getElementById('bldW').value || 9000,
+    h: +document.getElementById('bldH').value || 6500
+  };
+}
+
+/* coordinate helpers — identical to reference */
+function getFS() {
+  const { w, h } = bldDims();
+  facS  = Math.min((fc.width - 40) / w, (fc.height - 40) / h) * 0.9;
+  facOx = (fc.width  - w * facS) / 2;
+  facOy = fc.height - (fc.height - h * facS) / 2;
+}
+function fX(mm) { return facOx + mm * facS; }
+function fY(mm) { return facOy - mm * facS; }
+function toMM(sx, sy) { return { x: (sx - facOx) / facS, y: (facOy - sy) / facS }; }
+
+function autoArrange() {
+  const { w, h } = bldDims();
+  const n = UNITS.length || 1;
+  const cols = Math.ceil(Math.sqrt(n));
+  const cellW = w / (cols + 1);
+  facPlace = UNITS.map((u, i) => {
+    const row = Math.floor(i / cols), col = i % cols;
+    return { unitIdx: i, x: cellW * (col + 0.3), y: Math.max(200, h * 0.15 + row * h * 0.4) };
+  });
+  drawFacade();
+}
+
+function resetFacade() { facSel = null; facPlace = []; autoArrange(); }
+
+function drawFacade() {
+  /* size canvas to fill container */
+  const area = document.getElementById('facArea');
+  fc.width  = area.clientWidth  || fc.parentElement.clientWidth;
+  fc.height = area.clientHeight || fc.parentElement.clientHeight;
+  if (!fc.width || !fc.height) return;
+
+  getFS();
+  const { w: fw, h: fh } = bldDims();
+  fCtx.clearRect(0, 0, fc.width, fc.height);
+
+  /* sky */
+  const sky = fCtx.createLinearGradient(0, 0, 0, fc.height);
+  sky.addColorStop(0,   '#BDD8E4');
+  sky.addColorStop(0.6, '#DDD4B8');
+  sky.addColorStop(1,   '#C4AE80');
+  fCtx.fillStyle = sky;
+  fCtx.fillRect(0, 0, fc.width, fc.height);
+
+  /* ground */
+  fCtx.fillStyle = '#7A9B5A';
+  fCtx.fillRect(0, fY(0), fc.width, fc.height - fY(0));
+
+  /* wall */
+  const bx = fX(0), by = fY(fh), bw = fw * facS, bh = fh * facS;
+  fCtx.fillStyle = '#CBBFA5';
+  fCtx.fillRect(bx, by, bw, bh);
+
+  /* roof */
+  fCtx.fillStyle = '#4A3824';
+  fCtx.beginPath();
+  fCtx.moveTo(bx - bw * 0.03, by);
+  fCtx.lineTo(bx + bw / 2, by - bh * 0.22);
+  fCtx.lineTo(bx + bw + bw * 0.03, by);
+  fCtx.closePath();
+  fCtx.fill();
+
+  /* wall outline */
+  fCtx.strokeStyle = '#8C7A60';
+  fCtx.lineWidth = 2;
+  fCtx.strokeRect(bx, by, bw, bh);
+
+  /* storey line */
+  fCtx.setLineDash([8, 6]);
+  fCtx.strokeStyle = 'rgba(100,80,50,.25)';
+  fCtx.lineWidth = 1;
+  fCtx.beginPath();
+  fCtx.moveTo(bx, fY(fh / 2));
+  fCtx.lineTo(bx + bw, fY(fh / 2));
+  fCtx.stroke();
+  fCtx.setLineDash([]);
+
+  /* units */
+  facPlace.forEach((pl, pli) => {
+    const u = UNITS[pl.unitIdx];
+    if (!u) return;
+    const ux  = fX(pl.x), uy = fY(pl.y + u.height);
+    const uw  = u.width * facS, uh = u.height * facS;
+
+    /* real pane grid + glazing bars + shape outline, not a placeholder box */
+    drawUnitDesign(u, ux, uy, uw, uh);
+
+    /* selection ring */
+    if (facSel === pli) {
+      fCtx.strokeStyle = '#C97B3D';
+      fCtx.lineWidth = 2.5;
+      fCtx.strokeRect(ux - 3, uy - 3, uw + 6, uh + 6);
+    }
+
+    /* label */
+    fCtx.fillStyle = 'rgba(27,36,48,.78)';
+    fCtx.fillRect(ux, uy + uh, uw, 16);
+    fCtx.fillStyle = 'white';
+    fCtx.font = '9px "IBM Plex Mono",monospace';
+    fCtx.textAlign = 'center';
+    fCtx.textBaseline = 'middle';
+    fCtx.fillText((u.label || 'Unit').slice(0, 22), ux + uw / 2, uy + uh + 8);
+  });
+
+  /* side panel unit list */
+  document.getElementById('unitCount').textContent = UNITS.length;
+  document.getElementById('facUnitList').innerHTML = UNITS.map((u, i) => {
+    const pli = facPlace.findIndex(p => p.unitIdx === i);
+    const sel = facSel === pli;
+    return `<div class="fac-unit-row ${sel ? 'sel' : ''}"
+      onclick="facSel=facPlace.findIndex(p=>p.unitIdx===${i});drawFacade()">
+      <span>${u.label || ('Unit ' + (i + 1))}</span>
+      <span class="dim">${u.width}&times;${u.height}</span>
+    </div>`;
+  }).join('');
+}
+
+/* mouse — drag */
+fc.addEventListener('mousedown', e => {
+  const r = fc.getBoundingClientRect();
+  const { x: mx, y: my } = toMM(e.clientX - r.left, e.clientY - r.top);
+  for (let i = facPlace.length - 1; i >= 0; i--) {
+    const pl = facPlace[i], u = UNITS[pl.unitIdx];
+    if (!u) continue;
+    if (mx >= pl.x && mx <= pl.x + u.width && my >= pl.y && my <= pl.y + u.height) {
+      facDrag = { pli: i, sx: mx - pl.x, sy: my - pl.y };
+      facSel = i;
+      drawFacade();
+      return;
+    }
+  }
+  facSel = null;
+  drawFacade();
+});
+
+window.addEventListener('mousemove', e => {
+  if (!facDrag) return;
+  const r = fc.getBoundingClientRect();
+  const { x: mx, y: my } = toMM(e.clientX - r.left, e.clientY - r.top);
+  facPlace[facDrag.pli].x = Math.max(0, Math.round((mx - facDrag.sx) / 10) * 10);
+  facPlace[facDrag.pli].y = Math.max(0, Math.round((my - facDrag.sy) / 10) * 10);
+  drawFacade();
+});
+
+window.addEventListener('mouseup', () => { facDrag = null; });
+
+fc.addEventListener('dblclick', e => {
+  const r = fc.getBoundingClientRect();
+  const { x: mx, y: my } = toMM(e.clientX - r.left, e.clientY - r.top);
+  for (let i = facPlace.length - 1; i >= 0; i--) {
+    const pl = facPlace[i], u = UNITS[pl.unitIdx];
+    if (!u) continue;
+    if (mx >= pl.x && mx <= pl.x + u.width && my >= pl.y && my <= pl.y + u.height) {
+      window.location.href = `/projects/${PROJECT_ID}/windows/${u.id}/edit`;
+      return;
+    }
+  }
+});
+
+/* save */
+async function saveFacade() {
+  const payload = { facade: { building: bldDims(), placements: facPlace } };
+  try {
+    const res = await fetch(`/projects/${PROJECT_ID}/facade/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      const h = document.getElementById('facHint');
+      const old = h.textContent;
+      h.textContent = '✓ Layout saved';
+      setTimeout(() => h.textContent = old, 1800);
+    }
+  } catch(err) { console.warn('save error', err); }
+}
+
+/* resize */
+let _rt = null;
+window.addEventListener('resize', () => { clearTimeout(_rt); _rt = setTimeout(drawFacade, 60); });
+
+/* init */
+function init() {
+  if (SAVED && SAVED.placements && SAVED.placements.length) {
+    facPlace = SAVED.placements.filter(p => UNITS[p.unitIdx]);
+    if (SAVED.building) {
+      document.getElementById('bldW').value = SAVED.building.w;
+      document.getElementById('bldH').value = SAVED.building.h;
+    }
+    UNITS.forEach((u, i) => {
+      if (!facPlace.find(p => p.unitIdx === i))
+        facPlace.push({ unitIdx: i, x: 500, y: 500 });
+    });
+  } else {
+    const { w, h } = bldDims();
+    const n = UNITS.length || 1;
+    const cols = Math.ceil(Math.sqrt(n));
+    const cellW = w / (cols + 1);
+    facPlace = UNITS.map((u, i) => {
+      const row = Math.floor(i / cols), col = i % cols;
+      return { unitIdx: i, x: cellW * (col + 0.3), y: Math.max(200, h * 0.15 + row * h * 0.4) };
+    });
+  }
+  /* double-rAF ensures canvas is sized by browser before first draw */
+  requestAnimationFrame(() => requestAnimationFrame(drawFacade));
+}
+
+window.addEventListener('load', init);
+</script>
+{% endblock %}

@@ -1,0 +1,1709 @@
+{% extends 'base.html' %}
+{% block title %}{{ window.label }} — Designer — Quoting Studio{% endblock %}
+
+{% block head %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<script src="{{ url_for('static', filename='js/drawing-engine.js') }}"></script>
+<script src="{{ url_for('static', filename='js/drawing-phase2.js') }}"></script>
+<script src="{{ url_for('static', filename='js/drawing-phase3.js') }}"></script>
+<style>
+body { overflow:hidden; }
+.app-main { height:calc(100vh - 52px); overflow:hidden; display:block; }
+.dz { display:flex; flex-direction:column; width:100%; height:calc(100vh - 52px); }
+
+/* top framebar */
+.dz-top { display:flex;align-items:center;justify-content:space-between;
+  padding:8px 16px;background:var(--navy);flex-shrink:0; }
+.dz-crumb { font-family:var(--font-mono);font-size:12px;color:#B7C0CE; }
+.dz-crumb a { color:#B7C0CE;text-decoration:none; }
+.dz-actions { display:flex;gap:7px;align-items:center; }
+
+/* config tab nav (Framepoint style) */
+.dz-nav { display:flex;background:#FCFBF8;border-bottom:1px solid var(--line);
+  padding:0 12px;flex-shrink:0; }
+.dz-tab { padding:12px 20px;font-size:12px;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--steel);cursor:pointer;border-bottom:2px solid transparent; }
+.dz-tab:hover { color:var(--navy); }
+.dz-tab.on { color:var(--copper);border-bottom-color:var(--copper); }
+
+/* body */
+.dz-body { display:flex;flex:1;overflow:hidden;min-height:0; }
+
+/* tool rail */
+.dz-rail { width:52px;background:var(--navy);display:flex;flex-direction:column;
+  align-items:center;padding:12px 0;gap:3px;flex-shrink:0; }
+.dz-tool { width:38px;height:38px;border-radius:7px;display:flex;align-items:center;
+  justify-content:center;color:#9AA4B8;font-size:16px;cursor:pointer;border:none;
+  background:transparent;position:relative; }
+.dz-tool.on { background:var(--copper);color:white; }
+.dz-tool:hover:not(.on){ background:#2A3445; }
+.dz-tool .tip { position:absolute;left:46px;background:var(--navy);color:var(--paper);
+  font-family:var(--font-mono);font-size:10px;padding:4px 8px;border-radius:3px;
+  white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s;z-index:50; }
+.dz-tool:hover .tip{ opacity:1; }
+.dz-sep{ width:26px;height:1px;background:#2A3445;margin:5px 0; }
+
+/* canvas */
+.dz-canvas-wrap { flex:1;position:relative;overflow:hidden;
+  background:#FCFBF8;min-width:0; }
+#dzsvg { width:100%;height:100%;display:block; }
+.dz-hud { position:absolute;top:12px;left:12px;display:flex;gap:8px;pointer-events:none; }
+.hud-pill{ background:rgba(255,255,255,.9);border:1px solid var(--line);font-size:10px;
+  padding:5px 9px;border-radius:4px;font-family:var(--font-mono);color:#566;backdrop-filter:blur(4px); }
+.dz-zoom{ position:absolute;bottom:14px;right:14px;display:flex;flex-direction:column;gap:4px; }
+.dz-zoom button{ width:34px;height:34px;border-radius:6px;border:1px solid var(--line);
+  background:white;cursor:pointer;font-size:16px;color:var(--navy); }
+.dz-zoom button:hover{ background:var(--paper); }
+.dz-hint{ position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+  background:rgba(27,36,48,.78);color:rgba(255,255,255,.9);font-size:11px;
+  font-family:var(--font-mono);padding:6px 14px;border-radius:20px;pointer-events:none; }
+
+/* right panel */
+.dz-panel { width:290px;background:#FCFBF8;border-left:1px solid var(--line);
+  display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;min-height:0; }
+.dz-scroll{ flex:1;overflow-y:auto;padding:16px;min-height:0; }
+.sec-head{ font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);
+  font-weight:600;margin:0 0 10px; }
+.field{ margin-bottom:12px; }
+.field label{ font-size:11px;color:#566;display:block;margin-bottom:4px;font-weight:500; }
+.field select,.field input{ width:100%;border:1px solid var(--line);border-radius:4px;
+  padding:7px 10px;font-size:13px;background:white;color:var(--navy);outline:none; }
+.field select:focus,.field input:focus{ border-color:var(--copper); }
+.row2{ display:grid;grid-template-columns:1fr 1fr;gap:8px; }
+.swatches{ display:flex;gap:7px;flex-wrap:wrap;margin-top:4px; }
+.sw{ width:26px;height:26px;border-radius:50%;border:2px solid white;
+  box-shadow:0 0 0 1px var(--line);cursor:pointer;transition:transform .1s; }
+.sw.sel{ box-shadow:0 0 0 2.5px var(--copper);transform:scale(1.12); }
+.divider{ height:1px;background:var(--line);margin:14px 0; }
+.split-btns{ display:flex;gap:8px;margin-bottom:12px; }
+.split-btn{ flex:1;padding:8px;font-size:11px;font-weight:600;border:1px solid var(--line);
+  border-radius:4px;background:white;cursor:pointer;color:var(--navy); }
+.split-btn:hover{ background:var(--copper);color:white;border-color:var(--copper); }
+.price-row{ display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px;color:#566; }
+.price-total{ font-family:var(--font-display);font-size:20px;color:var(--navy);
+  display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--line); }
+.toggle-row{ display:flex;align-items:center;justify-content:space-between;padding:8px 0; }
+.toggle-row label{ font-size:12px;color:var(--navy); }
+.switch{ position:relative;width:40px;height:22px;flex-shrink:0; }
+.switch input{ opacity:0;width:0;height:0; }
+.slider{ position:absolute;inset:0;background:#ccc;border-radius:22px;cursor:pointer;transition:.2s; }
+.slider:before{ content:'';position:absolute;width:16px;height:16px;left:3px;top:3px;
+  background:white;border-radius:50%;transition:.2s; }
+.switch input:checked + .slider{ background:var(--sage); }
+.switch input:checked + .slider:before{ transform:translateX(18px); }
+
+/* status bar */
+.dz-status{ height:26px;background:var(--navy);display:flex;align-items:center;
+  padding:0 16px;gap:18px;flex-shrink:0; }
+.st-item{ font-family:var(--font-mono);font-size:10px;color:#5A6A80; }
+.st-item.on{ color:#9AE6C7; }
+
+/* template picker modal */
+.modal-back{ position:fixed;inset:0;background:rgba(27,36,48,.55);display:none;
+  align-items:center;justify-content:center;z-index:200; }
+.modal-back.show{ display:flex; }
+.modal{ background:white;border-radius:10px;width:640px;max-width:92vw;
+  max-height:86vh;overflow:auto;box-shadow:0 24px 60px rgba(0,0,0,.3); }
+.modal-head{ padding:16px 22px;border-bottom:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center; }
+.modal-head h3{ margin:0;font-family:var(--font-display);font-size:18px; }
+.modal-body{ padding:22px; }
+.tpl-grid{ display:grid;grid-template-columns:repeat(3,1fr);gap:14px; }
+.tpl-card{ border:1px solid var(--line);border-radius:8px;padding:14px;cursor:pointer;
+  text-align:center;transition:.12s; }
+.tpl-card:hover{ border-color:var(--copper);background:#FCF7F1; }
+.tpl-card svg{ width:100%;height:90px; }
+.tpl-card .nm{ font-size:12px;font-weight:600;margin-top:8px;color:var(--navy); }
+
+
+
+/* hardware product cards */
+.p3-hw-grid{ display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-height:300px;overflow-y:auto;margin-top:10px; }
+.p3-hw-card{ border:1px solid var(--line);border-radius:8px;padding:12px;cursor:pointer;text-align:center;transition:.12s; }
+.p3-hw-card:hover{ border-color:var(--copper); }
+.p3-hw-card.sel{ border-color:var(--copper);box-shadow:0 0 0 2px var(--copper);background:#EAF3EF; }
+.p3-hw-sw{ width:44px;height:60px;border-radius:4px;margin:0 auto 8px;border:1px solid rgba(0,0,0,.15); }
+.p3-hw-nm{ font-size:11px;font-weight:600;color:var(--navy); }
+.p3-hw-sum{ font-size:12px;color:#566;padding:3px 0; }
+
+
+/* shape + door pickers */
+.shape-grid{ display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px; }
+.shape-card{ border:1.5px solid var(--line);border-radius:5px;padding:8px 4px;text-align:center;
+  cursor:pointer;font-size:10px;color:#566;background:white;display:flex;flex-direction:column;
+  align-items:center;gap:3px;transition:.12s; }
+.shape-card svg{ color:#566; }
+.shape-card:hover{ border-color:var(--copper); }
+.shape-card.on{ border-color:var(--copper);color:var(--copper);background:#FCF7F1; }
+.shape-card.on svg{ color:var(--copper); }
+.door-grid{ display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:10px; }
+.door-card{ border:1.5px solid var(--line);border-radius:5px;padding:7px 3px;text-align:center;
+  cursor:pointer;font-size:9px;font-weight:600;color:#566;background:white;transition:.12s; }
+.door-card:hover{ border-color:var(--copper); }
+.door-card.on{ border-color:var(--sage);color:var(--sage);background:#EFF4F1; }
+
+
+/* frame group + tab context header */
+.frame-group-hd{ display:flex;justify-content:space-between;align-items:center;
+  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--copper);background:#FCF7F1;border:1px solid var(--line);border-radius:6px;
+  padding:9px 11px;cursor:pointer;margin-bottom:12px;user-select:none; }
+.frame-group-hd:hover{ background:#F8EEE2; }
+.tab-context-hd{ font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--navy);background:var(--paper);border-left:3px solid var(--copper);
+  padding:7px 10px;margin-bottom:12px;border-radius:0 4px 4px 0; }
+
+/* ===== PHASE 3 ===== */
+.p3-gtoolbar{ display:flex;flex-wrap:wrap;gap:4px;background:white;border:1px solid var(--line);
+  border-radius:6px;padding:5px; }
+.p3-gtool{ flex:1;min-width:70px;display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:7px 4px;font-size:9px;font-weight:600;border:none;background:transparent;
+  border-radius:4px;cursor:pointer;color:var(--steel);text-transform:uppercase;letter-spacing:.02em; }
+.p3-gtool .ic{ font-size:15px; }
+.p3-gtool:hover{ background:var(--paper);color:var(--navy); }
+.p3-gtool.on{ background:var(--copper);color:white; }
+
+.p3-note{ font-size:12px;color:var(--steel);margin-bottom:14px;line-height:1.5; }
+.p3-row2{ display:grid;grid-template-columns:1fr 1fr;gap:10px; }
+.p3-field{ margin-bottom:12px; }
+.p3-field label{ font-size:11px;color:#566;display:block;margin-bottom:5px;font-weight:500; }
+.p3-field input,.p3-field select{ width:100%;border:1px solid var(--line);border-radius:5px;
+  padding:8px 10px;font-size:13px;background:white;color:var(--navy); }
+.p3-btn{ padding:9px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;
+  border:1px solid var(--line);font-family:var(--font-body); }
+.p3-btn.ghost{ background:white;color:var(--navy); }
+.p3-btn.ghost:hover{ background:var(--paper); }
+.p3-btn.primary{ background:var(--sage);color:white;border-color:var(--sage); }
+.p3-btn.primary:hover{ background:#2D5445; }
+
+.p3-toggle-row{ display:flex;align-items:center;gap:12px;padding:8px 0; }
+.p3-toggle-row label{ font-size:13px;color:var(--navy); }
+.p3-switch{ position:relative;width:42px;height:23px;flex-shrink:0; }
+.p3-switch input{ opacity:0;width:0;height:0; }
+.p3-slider{ position:absolute;inset:0;background:#ccc;border-radius:23px;cursor:pointer;transition:.2s; }
+.p3-slider:before{ content:'';position:absolute;width:17px;height:17px;left:3px;top:3px;
+  background:white;border-radius:50%;transition:.2s; }
+.p3-switch input:checked + .p3-slider{ background:var(--sage); }
+.p3-switch input:checked + .p3-slider:before{ transform:translateX(19px); }
+
+/* dimension editor */
+.p3-dim-line{ display:flex;align-items:center;gap:10px;margin-bottom:8px; }
+.p3-dim-idx{ font-family:var(--font-mono);font-size:11px;color:var(--sage);font-weight:600;width:28px; }
+.p3-dim-in{ width:90px;border:1px solid var(--line);border-radius:5px;padding:7px 9px;
+  font-size:14px;font-family:var(--font-mono);color:var(--navy); }
+.p3-dim-in:focus{ border-color:var(--copper);outline:none; }
+.p3-sightline{ font-size:11px;color:var(--steel); }
+.p3-sightline b{ color:var(--copper);font-family:var(--font-mono); }
+
+/* extras */
+.p3-extra{ display:flex;align-items:center;gap:10px;margin-bottom:6px; }
+.p3-extra .p3-toggle-row{ flex:1; }
+.p3-price{ font-size:11px;color:var(--copper);font-family:var(--font-mono);margin-left:4px; }
+.p3-qty{ width:56px;border:1px solid var(--line);border-radius:5px;padding:6px 8px;
+  font-size:13px;font-family:var(--font-mono);text-align:center; }
+.p3-qty:disabled{ background:#F0EEE8;color:#bbb; }
+
+
+/* glass list rows */
+.p2-glass-list{ display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto; }
+.p2-glass-row{ display:flex;justify-content:space-between;align-items:center;
+  border:1px solid var(--line);border-radius:8px;padding:12px 14px;cursor:pointer;transition:.12s; }
+.p2-glass-row:hover{ border-color:var(--copper);background:#FCF7F1; }
+.p2-glass-row.sel{ border-color:var(--copper);box-shadow:0 0 0 2px var(--copper);background:#EAF3EF; }
+.p2-glass-icons{ display:flex;gap:6px;font-size:13px; }
+
+
+/* member placement popup */
+#memberPop{ display:none;position:absolute;background:white;border:1px solid var(--line);
+  border-radius:6px;box-shadow:0 8px 26px rgba(27,36,48,.22);padding:13px;z-index:60;min-width:210px; }
+#memberPop h5{ font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--steel);margin:0 0 9px; }
+.mp-row{ display:flex;align-items:center;gap:8px;margin-bottom:7px; }
+.mp-row label{ font-size:10px;color:#566;flex:1; }
+.mp-row input{ width:80px;border:1px solid var(--line);border-radius:4px;padding:6px 8px;
+  font-size:13px;font-family:var(--font-mono);text-align:center; }
+.mp-row input:focus{ outline:none;border-color:var(--copper); }
+.mp-hint{ font-size:9px;color:var(--steel);margin-bottom:9px; }
+.mp-btns{ display:flex;gap:6px; }
+.quick-axis-btn.on{ background:var(--copper);color:white;border-color:var(--copper); }
+
+/* ===== PHASE 2 MODALS ===== */
+.p2-modal-back{ position:fixed;inset:0;background:rgba(27,36,48,.55);display:flex;
+  align-items:center;justify-content:center;z-index:300;opacity:0;transition:opacity .15s; }
+.p2-modal-back.show{ opacity:1; }
+.p2-modal{ background:white;border-radius:10px;width:660px;max-width:94vw;max-height:88vh;
+  display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.3); }
+.p2-modal-head{ padding:16px 22px;border-bottom:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center; }
+.p2-modal-head h3{ margin:0;font-family:var(--font-display);font-size:17px;color:var(--navy); }
+.p2-x{ border:none;background:transparent;font-size:18px;color:var(--steel);cursor:pointer; }
+.p2-x:hover{ color:var(--navy); }
+.p2-modal-body{ padding:22px;overflow-y:auto;flex:1; }
+.p2-modal-foot{ padding:14px 22px;border-top:1px solid var(--line);
+  display:flex;justify-content:center;gap:10px; }
+.p2-btn{ padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;
+  border:1px solid var(--line);font-family:var(--font-body); }
+.p2-btn.ghost{ background:white;color:var(--navy); }
+.p2-btn.ghost:hover{ background:var(--paper); }
+.p2-btn.primary{ background:var(--sage);color:white;border-color:var(--sage); }
+.p2-btn.primary:hover{ background:#2D5445; }
+
+.p2-tabs{ display:flex;border-bottom:1px solid var(--line);margin-bottom:18px; }
+.p2-tab{ padding:10px 18px;font-size:12px;font-weight:600;letter-spacing:.04em;
+  color:var(--steel);cursor:pointer;border-bottom:2px solid transparent; }
+.p2-tab.on{ color:var(--copper);border-bottom-color:var(--copper); }
+
+.p2-field{ margin-bottom:14px; }
+.p2-field label{ font-size:11px;color:#566;display:block;margin-bottom:5px;font-weight:500; }
+.p2-field select{ width:100%;border:1px solid var(--line);border-radius:5px;padding:8px 10px;
+  font-size:13px;background:white;color:var(--navy); }
+.p2-field.inline{ display:inline-block;width:48%;margin-right:2%; }
+.p2-note{ font-size:12px;color:var(--steel);margin-bottom:12px; }
+
+/* openers grid */
+.p2-open-grid{ display:grid;grid-template-columns:repeat(5,1fr);gap:12px; }
+.p2-open-card{ border:1px solid var(--line);border-radius:8px;padding:10px;cursor:pointer;
+  text-align:center;transition:.12s; }
+.p2-open-card:hover{ border-color:var(--copper);background:#FCF7F1; }
+.p2-open-card.sel{ border-color:var(--copper);background:#EAF3EF;box-shadow:0 0 0 2px var(--copper); }
+.p2-open-vis svg{ width:100%;height:52px; }
+.p2-open-lbl{ font-size:10px;font-weight:600;margin-top:6px;color:var(--navy); }
+
+/* profile / toggles */
+.p2-prof-body{ min-height:140px; }
+.p2-toggle-row{ display:flex;align-items:center;gap:12px;padding:10px 0; }
+.p2-toggle-row label{ font-size:13px;color:var(--navy); }
+.p2-switch{ position:relative;width:42px;height:23px;flex-shrink:0; }
+.p2-switch input{ opacity:0;width:0;height:0; }
+.p2-slider{ position:absolute;inset:0;background:#ccc;border-radius:23px;cursor:pointer;transition:.2s; }
+.p2-slider:before{ content:'';position:absolute;width:17px;height:17px;left:3px;top:3px;
+  background:white;border-radius:50%;transition:.2s; }
+.p2-switch input:checked + .p2-slider{ background:var(--sage); }
+.p2-switch input:checked + .p2-slider:before{ transform:translateX(19px); }
+
+/* finish colour grid */
+.p2-finish-controls{ display:flex;gap:12px;margin-bottom:8px; }
+.p2-colour-grid{ display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-height:340px;overflow-y:auto; }
+.p2-colour-card{ border:1px solid var(--line);border-radius:8px;padding:12px;cursor:pointer;
+  text-align:center;transition:.12s; }
+.p2-colour-card:hover{ border-color:var(--copper); }
+.p2-colour-card.sel{ border-color:var(--copper);box-shadow:0 0 0 2px var(--copper);background:#EAF3EF; }
+.p2-colour-sw{ width:100%;height:70px;border-radius:5px;border:1px solid rgba(0,0,0,.1); }
+.p2-colour-nm{ font-size:12px;font-weight:600;margin-top:8px;color:var(--navy); }
+.p2-colour-ral{ font-size:10px;color:var(--steel);font-family:var(--font-mono); }
+
+/* glass */
+.p2-glass-body{ min-height:180px; }
+.p2-glass-grid{ display:grid;grid-template-columns:repeat(2,1fr);gap:12px; }
+.p2-glass-card{ border:1px solid var(--line);border-radius:8px;padding:16px;cursor:pointer;
+  text-align:center;transition:.12s; }
+.p2-glass-card:hover{ border-color:var(--copper);background:#FCF7F1; }
+.p2-glass-card.sel{ border-color:var(--copper);box-shadow:0 0 0 2px var(--copper);background:#EAF3EF; }
+.p2-glass-nm{ font-size:13px;font-weight:600;color:var(--navy); }
+
+
+/* ── Profiles tab: PWQ-3645 cross-section cards ── */
+.qs-prc{ background:white;border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:.12s; }
+.qs-prc:hover{ border-color:var(--copper);background:#FCF7F1; }
+.qs-prc .lbl{ font-size:9px;font-family:var(--font-mono);color:var(--copper); }
+.qs-prc .nm{ font-size:12px;font-weight:600;margin:2px 0;color:var(--navy); }
+.qs-prc .dm{ font-size:10px;color:var(--steel);font-family:var(--font-mono); }
+/* ── JSON tab: code box ── */
+.qs-jb{ font-family:var(--font-mono);font-size:9px;background:var(--navy);color:#9AE6C7;padding:10px;border-radius:6px;max-height:280px;overflow:auto;white-space:pre;line-height:1.55; }
+/* ── Profile cross-section modal ── */
+.qs-modal{ display:none;position:fixed;inset:0;background:rgba(27,36,48,.55);z-index:1000;align-items:center;justify-content:center; }
+.qs-modal.on{ display:flex; }
+.qs-modal-box{ background:white;border-radius:10px;padding:24px;max-width:440px;width:90%;box-shadow:0 24px 60px rgba(0,0,0,.3); }
+.qs-modal-box h3{ margin:0 0 4px;font-family:var(--font-display);font-weight:500;font-size:18px;color:var(--navy); }
+.qs-modal-box p{ font-size:12px;color:var(--steel);margin-bottom:14px; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="dz">
+
+  <!-- top bar -->
+  <div class="dz-top">
+    <div class="dz-crumb">
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.customer_name }}</a>
+      &nbsp;/&nbsp;{{ window.label }}
+      &nbsp;·&nbsp;<span style="color:#5A6A80;">Window {{ current_idx+1 }} of {{ all_windows|length }}</span>
+    </div>
+    <div class="dz-actions">
+      <button class="btn btn-ghost btn-sm" id="btnUndo" onclick="dc.undo()" title="Undo (Ctrl+Z)" disabled>↶</button>
+      <button class="btn btn-ghost btn-sm" id="btnRedo" onclick="dc.redo()" title="Redo (Ctrl+Y)" disabled>↷</button>
+      <button class="btn btn-ghost btn-sm" onclick="openTemplates()">Templates</button>
+      <button class="btn btn-ghost btn-sm" onclick="exportJSON()">Export JSON</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importJson').click()">Import JSON</button>
+      <input type="file" id="importJson" accept=".json" style="display:none" onchange="importJSON(event)">
+      <button class="btn btn-ghost btn-sm" onclick="exportDxf()">DXF</button>
+      <button class="btn btn-ghost btn-sm" id="btnDwg" onclick="exportDwg()" title="DWG export (requires ODA)">DWG</button>
+      <div style="position:relative;display:inline-block;" id="btn3dWrap">
+        <button class="btn btn-ghost btn-sm" onclick="toggle3DMenu()" style="background:#2D5445;color:#D8DEE6;">3D ⬢ ▾</button>
+        <div id="menu3d" style="display:none;position:absolute;top:100%;right:0;background:white;
+          border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.18);
+          z-index:200;min-width:130px;padding:4px 0;">
+          <div onclick="export3d('glb')" style="padding:9px 16px;cursor:pointer;font-size:13px;" onmouseover="this.style.background='#f5f3ef'" onmouseout="this.style.background=''">GLB (viewer)</div>
+          <div onclick="export3d('stl')" style="padding:9px 16px;cursor:pointer;font-size:13px;" onmouseover="this.style.background='#f5f3ef'" onmouseout="this.style.background=''">STL (print)</div>
+          <div onclick="export3d('step')" style="padding:9px 16px;cursor:pointer;font-size:13px;" onmouseover="this.style.background='#f5f3ef'" onmouseout="this.style.background=''">STEP (CAD)</div>
+          <div onclick="view3D()" style="padding:9px 16px;cursor:pointer;font-size:13px;border-top:1px solid var(--line);" onmouseover="this.style.background='#f5f3ef'" onmouseout="this.style.background=''">3D Viewer →</div>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveNow()">Save</button>
+      {% if next_window %}
+      <a href="{{ url_for('editor.edit', project_id=project.id, window_id=next_window.id) }}"
+         class="btn btn-primary btn-sm"
+         onclick="event.preventDefault();saveAndNext(this.href)">Save &amp; Next →</a>
+      {% endif %}
+      <button class="btn btn-primary btn-sm" onclick="sendToVisualiser()"
+              style="background:var(--sage);">→ Visualise</button>
+    </div>
+  </div>
+
+  <!-- config tab nav -->
+  <div class="dz-nav">
+    <div class="dz-tab on" data-tab="openers"  onclick="setTab('openers')">Openers</div>
+    <div class="dz-tab" data-tab="profile"  onclick="setTab('profile')">Frame Settings</div>
+    <div class="dz-tab" data-tab="finish"   onclick="setTab('finish')">Finish</div>
+    <div class="dz-tab" data-tab="glass"    onclick="setTab('glass')">Glass</div>
+    <div class="dz-tab" data-tab="easydraw" onclick="setTab('easydraw')">Easy Draw</div>
+    <div class="dz-tab" data-tab="hardware" onclick="setTab('hardware')">Hardware</div>
+    <div class="dz-tab" data-tab="extras"   onclick="setTab('extras')">Extras</div>
+    <div class="dz-tab" data-tab="profiles" onclick="setTab('profiles')">Profile Library</div>
+    <div class="dz-tab" data-tab="json"     onclick="setTab('json')">JSON</div>
+  </div>
+
+  <div class="dz-body">
+    <!-- tool rail -->
+    <div class="dz-rail">
+      <button class="dz-tool on" id="tlSelect" onclick="setTool('select')">▭<span class="tip">Select pane</span></button>
+      <button class="dz-tool" id="tlVSplit" onclick="setTool('vsplit')">┃<span class="tip">Mullion — click pane for exact mm</span></button>
+      <button class="dz-tool" id="tlHSplit" onclick="setTool('hsplit')">━<span class="tip">Transom — click pane for exact mm</span></button>
+      <button class="dz-tool" id="tlMerge" onclick="setTool('merge')">▚<span class="tip">Merge pane</span></button>
+      <div class="dz-sep"></div>
+      <button class="dz-tool" id="tlEasy" onclick="setTool('easydraw')">✎<span class="tip">Easy Draw bars</span></button>
+      <button class="dz-tool" id="tlPan" onclick="setTool('pan')">✥<span class="tip">Pan (or Alt+drag)</span></button>
+    </div>
+
+    <!-- canvas -->
+    <div class="dz-canvas-wrap" id="canvasWrap">
+      <svg id="dzsvg"></svg>
+      <div class="dz-hud">
+        <div class="hud-pill" id="hudDim">— × — MM</div>
+        <div class="hud-pill" id="hudTool">TOOL: SELECT</div>
+        <div class="hud-pill" id="hudPanes">PANES: —</div>
+        <div class="hud-pill">SNAP: ON</div>
+        <div class="hud-pill">UNITS: MM</div>
+      </div>
+      <div class="dz-zoom">
+        <button onclick="dc.zoomIn()">+</button>
+        <button onclick="dc.zoomOut()">−</button>
+        <button onclick="dc.resetZoom()" title="Fit">⊡</button>
+        <button onclick="toggleSectionCut()" id="btnSectionCut" title="Show Section Cut">▤</button>
+      </div>
+      <div id="qsSectionCutPanel" style="display:none;position:absolute;right:12px;bottom:56px;
+           background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;
+           box-shadow:0 4px 14px rgba(0,0,0,.12);z-index:20;max-width:320px;">
+        <div style="font-size:10px;font-weight:700;color:var(--navy);margin-bottom:8px;
+             display:flex;justify-content:space-between;align-items:center;">
+          <span>2D SECTION CUT — this design</span>
+          <span style="cursor:pointer;color:var(--steel);" onclick="toggleSectionCut()">✕</span>
+        </div>
+        <div id="qsSectionCutBody" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+      </div>
+      <div class="dz-hint" id="hint">Click pane to select · use tools to split · scroll to zoom · Alt-drag to pan</div>
+
+      <!-- exact-mm member placement popup -->
+      <div id="memberPop">
+        <h5 id="mpTitle">Add Member</h5>
+        <div class="mp-row"><label id="mpLabel">Distance (mm)</label>
+          <input type="number" id="mpVal" step="5"></div>
+        <div class="mp-hint" id="mpHint"></div>
+        <div class="mp-row" style="margin-top:6px;">
+          <label style="font-size:10px;color:var(--steel);">Equalise into</label>
+          <input type="number" id="mpDivisions" value="2" min="2" max="20"
+                 style="width:48px;border:1px solid var(--line);border-radius:3px;padding:3px 5px;font-size:12px;">
+          <span style="font-size:10px;color:var(--steel);">equal parts</span>
+        </div>
+        <div class="mp-btns">
+          <button class="btn btn-primary btn-sm" style="flex:1;" onclick="confirmMember()">Place</button>
+          <button class="btn btn-secondary btn-sm" onclick="equalisePane()">Equalise</button>
+          <button class="btn btn-ghost btn-sm" onclick="cancelMemberPop()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- right panel -->
+    <div class="dz-panel">
+      <div class="dz-scroll">
+
+        <div class="frame-group-hd" onclick="toggleFrameGroup()">
+          <span>◆ Frame &amp; unit (applies to whole unit)</span>
+          <span id="frameGroupChevron">▾</span>
+        </div>
+        <div id="tabBlockAnchor"></div>
+        <div id="frameGroup">
+        <div class="sec-head">Frame shape</div>
+        <div class="shape-grid">
+          <div class="shape-card on" id="shp-rectangle" onclick="setShape('rectangle')">
+            <svg width="34" height="26"><rect x="3" y="3" width="28" height="20" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            <span>Rectangle</span></div>
+          <div class="shape-card" id="shp-arched" onclick="setShape('arched')">
+            <svg width="34" height="26"><path d="M3 23 L3 13 A14 10 0 0 1 31 13 L31 23 Z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            <span>Arched</span></div>
+          <div class="shape-card" id="shp-gothic" onclick="setShape('gothic')">
+            <svg width="34" height="26"><path d="M3 23 L3 13 Q3 3 17 3 Q31 3 31 13 L31 23 Z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            <span>Gothic</span></div>
+          <div class="shape-card" id="shp-circular" onclick="setShape('circular')">
+            <svg width="34" height="26"><ellipse cx="17" cy="13" rx="13" ry="10" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            <span>Circular</span></div>
+        </div>
+
+        <div class="sec-head">Frame dimensions</div>
+        <div class="row2">
+          <div class="field"><label>Width (mm)</label>
+            <input type="number" id="fW" value="{{ window.width_mm }}" step="50" oninput="setSize()"></div>
+          <div class="field"><label>Height (mm)</label>
+            <input type="number" id="fH" value="{{ window.height_mm }}" step="50" oninput="setSize()"></div>
+        </div>
+        <div class="field" id="riseRow" style="display:none;"><label>Arch rise (mm)</label>
+          <input type="number" id="archR" value="400" step="10" oninput="setArchRise()"></div>
+        <div class="field"><label>Material</label>
+          <select id="fMat" onchange="setMaterial()">
+            <option>Aluminium</option><option>PVCu</option><option>Timber</option><option>Steel</option>
+          </select>
+        </div>
+
+        <div class="sec-head" style="margin-top:12px;">Appearance</div>
+        <div style="display:flex;gap:14px;margin-bottom:8px;">
+          <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;">
+            <input type="checkbox" id="fCill" onchange="setCill()" style="accent-color:var(--copper);">Cill</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;">
+            <input type="checkbox" id="fHorns" onchange="setHorns()" style="accent-color:var(--copper);">Sash horns</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;">
+            <input type="checkbox" id="fFlush" onchange="setFlush()" style="accent-color:var(--copper);">Flush sash</label>
+        </div>
+        <div class="field"><label>Handle type</label>
+          <select id="fHandleType" onchange="setHandleType()">
+            <option value="lever">Lever</option>
+            <option value="monkeytail">Monkey-tail</option>
+            <option value="tbar">T-bar / pull</option>
+            <option value="cockspur">Cockspur pad</option>
+            <option value="knob">Centre knob</option>
+          </select>
+        </div>
+        <div class="field"><label>Handle colour</label>
+          <select id="fHandle" onchange="setHandleColor()">
+            <option value="chrome">Chrome</option><option value="black">Black</option>
+            <option value="gold">Gold</option><option value="white">White</option>
+          </select>
+        </div>
+        <div class="field"><label>Sash colour</label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="color" id="fSashCol" onchange="setSashColor(this.value)"
+                   style="width:38px;height:28px;padding:1px;border:1px solid var(--line);border-radius:4px;cursor:pointer;">
+            <button class="btn btn-ghost btn-sm" onclick="setSashColor('')" title="Match frame colour">Same as frame</button>
+          </div>
+        </div>
+
+        <div id="doorCfg" style="display:none;">
+          <div class="sec-head">Door type</div>
+          <div class="door-grid">
+            <div class="door-card on" id="door-single" onclick="setDoorType('single')">Single</div>
+            <div class="door-card" id="door-double" onclick="setDoorType('double')">Double</div>
+            <div class="door-card" id="door-sl" onclick="setDoorType('sl')">+ Side L</div>
+            <div class="door-card" id="door-sr" onclick="setDoorType('sr')">+ Side R</div>
+            <div class="door-card" id="door-fan" onclick="setDoorType('fan')">+ Fanlight</div>
+            <div class="door-card" id="door-full" onclick="setDoorType('full')">Full set</div>
+          </div>
+          <div class="row2">
+            <div class="field"><label>Side L (mm)</label><input type="number" id="dSlL" value="0" step="10" oninput="setDoorDims()"></div>
+            <div class="field"><label>Side R (mm)</label><input type="number" id="dSlR" value="0" step="10" oninput="setDoorDims()"></div>
+          </div>
+          <div class="field"><label>Fanlight H (mm)</label><input type="number" id="dFlH" value="0" step="10" oninput="setDoorDims()"></div>
+        </div>
+
+        </div><!-- /frameGroup -->
+
+        <div class="divider"></div>
+        <!-- Tab-specific content -->
+        <div id="tabBlock">
+          <div class="tab-context-hd" id="tabContextHd">OPENERS</div>
+          <div id="tabContent"></div>
+        </div>
+
+        <div id="paneInspector">
+        <div class="divider"></div>
+        <div class="sec-head">Selected pane <span id="selId" style="color:var(--copper);font-size:9px;"></span></div>
+        <div class="split-btns">
+          <button class="split-btn" onclick="doSplit('v')">▏▏ Split V (½)</button>
+          <button class="split-btn" onclick="doSplit('h')">☰ Split H (½)</button>
+        </div>
+        <div class="sec-head" style="margin-top:4px;">Place member at exact mm</div>
+        <div class="split-btns" style="margin-bottom:6px;">
+          <button class="split-btn quick-axis-btn on" data-a="v" onclick="setQuickAxis('v')">┃ Mullion</button>
+          <button class="split-btn quick-axis-btn" data-a="h" onclick="setQuickAxis('h')">━ Transom</button>
+        </div>
+        <div class="row2" style="align-items:end;">
+          <div class="field" style="margin:0;"><label>Distance (mm)</label>
+            <input type="number" id="quickPos" value="500" step="10"></div>
+          <button class="split-btn" style="height:34px;" onclick="quickPlaceMember()">Place</button>
+        </div>
+        <div style="font-size:10px;color:var(--steel);margin:5px 0 0;">
+          Tip: pick the ┃/━ tool, then click a pane to place at the exact click point.
+        </div>
+        </div><!-- /paneInspector -->
+
+        <div class="divider"></div>
+        <div class="sec-head">Live pricing</div>
+        <div class="price-row"><span>Frame &amp; glass</span><span id="pFrame">—</span></div>
+        <div class="price-row"><span>Hardware</span><span id="pHw">—</span></div>
+        <div class="price-row"><span>Extras</span><span id="pExtras">—</span></div>
+        <div class="price-row"><span>Fitting</span><span id="pFit">—</span></div>
+        <div class="price-total"><span>Total</span><span id="pTotal">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  </div><!-- /dz-body -->
+
+  <!-- status bar -->
+  <div class="dz-status">
+    <div class="st-item on" id="stEngine">● SVG engine ready</div>
+    <div class="st-item" id="stSave">○ Saved</div>
+    <div class="st-item" id="stPanes">Panes: —</div>
+    <div class="st-item" id="stZoom">Zoom: —</div>
+    <div class="st-item" style="margin-left:auto;">Quoting Studio Designer</div>
+  </div>
+</div>
+
+<!-- SVG defs (gradients) -->
+<svg width="0" height="0" style="position:absolute;">
+  <defs>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c5dae0"/>
+      <stop offset="50%" stop-color="#a9c6cf"/>
+      <stop offset="100%" stop-color="#93b3bd"/>
+    </linearGradient>
+    <linearGradient id="glassSel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#d3e6ea"/>
+      <stop offset="50%" stop-color="#b6d3db"/>
+      <stop offset="100%" stop-color="#9cc0c9"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<!-- template picker modal -->
+<div class="modal-back" id="tplModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="tplModalTitle">Choose a style</h3>
+      <button class="btn btn-ghost btn-sm" onclick="closeTemplates()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="tpl-grid" id="tplGrid"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const QS_WINDOW_ID = {{ window.id }};
+const QS_PROJECT_ID = {{ project.id }};
+const API = '/api/v1';
+const CSRF = document.querySelector('meta[name=csrf-token]').content;
+const GLASS_UNITS = {{ glass_units | tojson }};
+
+const FRAME_COLORS = [
+  {hex:'#2B2F33',name:'Anthracite'},{hex:'#E8E4DA',name:'White'},
+  {hex:'#7C8AA0',name:'Slate'},{hex:'#5C4733',name:'Bronze'},
+  {hex:'#1B2430',name:'Midnight'},{hex:'#4A6741',name:'Sage'},
+];
+
+let model, dc, currentTab='openers', saveTimer=null;
+
+/* ---------- boot ---------- */
+function boot() {
+  const {WindowModel, DrawingCanvas} = window.QSDraw;
+  const initial = {{ design_json|safe if design_json else 'null' }};
+  if (initial) {
+    model = WindowModel.fromJSON(typeof initial === 'string' ? JSON.parse(initial) : initial);
+  } else {
+    model = new WindowModel({
+      width: {{ window.width_mm }}, height: {{ window.height_mm }},
+      material: '{{ window.material }}',
+      color: '{{ window.frame_colour_hex or "#2B2F33" }}',
+    });
+  }
+  /* ── Sync ALL form fields from model (works whether from design_json or defaults) ── */
+  const _fW=document.getElementById('fW'); if(_fW) _fW.value=model.width;
+  const _fH=document.getElementById('fH'); if(_fH) _fH.value=model.height;
+  document.getElementById('fMat').value = model.frame.material || 'Aluminium';
+  document.getElementById('archR').value = model.archRise || 400;
+  // shape cards
+  document.querySelectorAll('.shape-card').forEach(c=>c.classList.remove('on'));
+  const _shpEl=document.getElementById('shp-'+(model.shape||'rectangle'));
+  if(_shpEl) _shpEl.classList.add('on');
+  document.getElementById('riseRow').style.display=
+    (model.shape==='arched'||model.shape==='gothic')?'block':'none';
+  // appearance controls
+  const _fc=document.getElementById('fCill');   if(_fc) _fc.checked=!!model.frame.cill;
+  const _fh=document.getElementById('fHorns');  if(_fh) _fh.checked=!!model.frame.sashHorns;
+  const _ff=document.getElementById('fFlush');  if(_ff) _ff.checked=!!model.frame.flushSash;
+  const _fhc=document.getElementById('fHandle');if(_fhc) _fhc.value=model.frame.handleColor||'chrome';
+  const _fht=document.getElementById('fHandleType');if(_fht) _fht.value=model.frame.handleType||'lever';
+  const _fsc=document.getElementById('fSashCol');
+  if(_fsc) _fsc.value = model.frame.sashColor || model.frame.color || '#2B2F33';
+  // door config
+  document.getElementById('doorCfg').style.display=
+    model.unitType==='door'?'block':'none';
+  if(model.unitType==='door' && model.door){
+    document.querySelectorAll('.door-card').forEach(c=>c.classList.remove('on'));
+    const _dtEl=document.getElementById('door-'+(model.door.dtype||'single'));
+    if(_dtEl) _dtEl.classList.add('on');
+    const _dSlL=document.getElementById('dSlL'); if(_dSlL) _dSlL.value=model.door.slL||0;
+    const _dSlR=document.getElementById('dSlR'); if(_dSlR) _dSlR.value=model.door.slR||0;
+    const _dFlH=document.getElementById('dFlH'); if(_dFlH) _dFlH.value=model.door.flH||0;
+  }
+
+  const svg = document.getElementById('dzsvg');
+  dc = new DrawingCanvas(svg, model, {
+    onSelect: onPaneSelect,
+    onChange: (skipHistory) => {
+      if (!skipHistory && dc) dc._pushHistory();
+      renderTab(); updateHud(); scheduleSave(); fetchPricing(); updateUndoButtons();
+    },
+    onHistoryChange: () => { updateHud(); updateUndoButtons(); },
+    onMemberPlace: (info) => openMemberPop(info),
+  });
+
+  // Expose to Phase 2 / Phase 3 modules (they reference window.model / window.dc etc.)
+  window.model = model;
+  window.dc = dc;
+  window.scheduleSave = scheduleSave;
+  window.fetchPricing = fetchPricing;
+  window.renderTab = renderTab;
+  window.setTool = setTool;
+  window.buildSwatches = buildSwatches;
+  window._quickAxis = 'v';
+
+  requestAnimationFrame(() => { dc.fitView(); updateHud(); });
+  applyUnitTabs();
+  renderTab();
+  updateHud();
+  fetchPricing();
+  buildTemplateGrid();
+}
+
+/* ---------- tabs ---------- */
+function toggleFrameGroup(){
+  const g=document.getElementById('frameGroup');
+  const c=document.getElementById('frameGroupChevron');
+  const hidden=g.style.display==='none';
+  g.style.display=hidden?'block':'none';
+  c.textContent=hidden?'▾':'▸';
+}
+function setTab(t){
+  currentTab=t;
+  document.querySelectorAll('.dz-tab').forEach(el=>el.classList.toggle('on',el.dataset.tab===t));
+  const hd=document.getElementById('tabContextHd'); if(hd) hd.textContent=t.toUpperCase();
+  const pi=document.getElementById('paneInspector'); if(pi) pi.style.display=(t==='profile')?'none':'block';
+  // FINISH tab: render its section at the TOP of the right-side inspector
+  // panel (swatches + "Applies to" + "Manage Frame Finish…"), above the
+  // collapsible Frame & Unit group. Every other tab keeps the normal order.
+  const scroll=document.querySelector('.dz-panel .dz-scroll');
+  const tabBlock=document.getElementById('tabBlock');
+  const anchor=document.getElementById('tabBlockAnchor');
+  if(t==='finish' && scroll && tabBlock) scroll.insertBefore(tabBlock, scroll.firstElementChild);
+  else if(anchor && tabBlock) anchor.insertAdjacentElement('afterend', tabBlock);
+  if(t==='easydraw'){ setTool('easydraw'); }
+  renderTab();
+}
+
+function renderTab(){
+  const el=document.getElementById('tabContent');
+  // ── New tabs (from final prototype) ──
+  if(currentTab==='profiles'){qsBuildProfs&&qsBuildProfs();return;}
+  if(currentTab==='json'){
+    el.innerHTML=`<div class="sec-head">Spec JSON (PWQ-3645 / devDept)</div>
+      <div class="qs-jb" id="jsonBox"></div>
+      <button class="btn btn-primary btn-sm" style="width:100%;margin-top:7px;font-size:10px;" onclick="qsExportSpecJSON()">Download JSON</button>
+      <div style="height:1px;background:var(--line);margin:10px 0;"></div>
+      <div style="font-size:10px;color:var(--steel);line-height:1.7;">Layers: TIMBER-FRAME · TIMBER-SASH · GLAZING-IGU · GENERAL<br>Units: mm · Origin: bottom-left inner<br>DXF: AC1032 (R2018)</div>`;
+    qsBuildSpecJSON&&qsBuildSpecJSON();return;
+  }
+  const pane = model.panes.find(p=>p.id===dc.selectedPaneId);
+  if(currentTab==='openers'){
+    el.innerHTML = `
+      <div class="sec-head">Opening type</div>
+      <div class="field">
+        <select id="openSel" onchange="setOpening()">
+          ${['Fixed','Sliding','Left Open','Right Open','Top Hung','Bottom Hung',
+             'Tilt','Tilt & Turn','French','Casement'].map(o=>
+            `<option ${pane&&pane.opening===o?'selected':''}>${o}</option>`).join('')}
+        </select>
+      </div>
+      <div style="font-size:11px;color:var(--steel);margin-bottom:10px;">Select a pane, then choose how it opens.</div>
+      <button class="split-btn" style="width:100%;" onclick="QSPhase2.openOpeners()">⊞ Opener chooser…</button>`;
+  } else if(currentTab==='profile'){
+    el.innerHTML = `
+      <div class="sec-head">Frame profiles</div>
+      <div class="toggle-row"><label>Slim Mullion Clip</label>
+        <label class="switch"><input type="checkbox" id="slimClip" ${model.frame.slimMullionClip?'checked':''} onchange="setProfileToggle()"><span class="slider"></span></label></div>
+      <div class="toggle-row"><label>Staff Bead</label>
+        <label class="switch"><input type="checkbox" id="staffBead" ${model.frame.staffBead?'checked':''} onchange="setProfileToggle()"><span class="slider"></span></label></div>
+      <div class="field" style="margin-top:12px;"><label>Frame thickness (mm)</label>
+        <input type="number" id="frThick" value="${model.frame.thickness}" step="2" oninput="setThickness()"></div>
+      <button class="split-btn" style="width:100%;margin-top:4px;" onclick="QSPhase2.openProfile()">⊞ Manage Frame Profiles…</button>`;
+  } else if(currentTab==='finish'){
+    el.innerHTML = `
+      <div class="sec-head">Frame colour / finish</div>
+      <div class="swatches" id="swatches"></div>
+      <div class="field" style="margin-top:12px;"><label>Applies to</label>
+        <select><option>All frames</option><option>This frame only</option></select></div>
+      <button class="split-btn" style="width:100%;" onclick="QSPhase2.openFinish()">⊞ Manage Frame Finish…</button>`;
+    buildSwatches();
+  } else if(currentTab==='glass'){
+    const paneGlazing = pane ? pane.glazing : '';
+    const glassRows = GLASS_UNITS.length
+      ? GLASS_UNITS.map(u => {
+          const sel = paneGlazing === u.code || paneGlazing === u.name;
+          const tip = [u.build_up ? 'Build-up: '+u.build_up : '',
+                       u.u_value != null ? 'U: '+u.u_value+' W/m²K' : '',
+                       u.g_value != null ? 'g: '+u.g_value : ''].filter(Boolean).join(' · ');
+          const uColor = u.u_value == null ? '' :
+                         u.u_value <= 0.8 ? 'color:#166534;font-weight:700;' :
+                         u.u_value >= 1.4 ? 'color:#92400E;' : 'color:#1B2430;';
+          return `<div class="p2-glass-row${sel?' sel':''}"
+                    onclick="selectGlassUnit(${u.id},'${u.code}','${u.name.replace(/'/g,"\\'")}','${tip}')"
+                    title="${tip}">
+            <div>
+              <div style="font-size:12px;font-weight:600;color:var(--navy);">${u.code}</div>
+              <div style="font-size:11px;color:#566;">${u.name}</div>
+              ${u.build_up ? '<div style="font-family:var(--font-mono);font-size:10px;color:var(--steel);">'+u.build_up+' '+u.thickness_mm+'mm</div>' : ''}
+            </div>
+            <div style="text-align:right;flex-shrink:0;">
+              ${u.u_value != null ? '<div style="font-family:var(--font-mono);font-size:13px;'+uColor+'">'+u.u_value+'</div><div style="font-size:9px;color:var(--steel);">W/m²K</div>' : ''}
+            </div>
+          </div>`;
+        }).join('')
+      : `<div style="font-size:12px;color:var(--steel);padding:10px 0;">No glass units in library.
+           <a href="/settings/glass" target="_blank" style="color:var(--copper);">Add in Settings →</a></div>`;
+    el.innerHTML = `
+      <div class="sec-head">Glazing ${pane?'· pane '+pane.id:''}</div>
+      ${pane ? `<div style="margin-bottom:12px;">
+        <div style="font-size:11px;color:#566;margin-bottom:5px;font-weight:500;">Pane infill</div>
+        <div class="split-btns" style="margin-bottom:0;">
+          <button class="split-btn ${pane.infill!=='panel'?'':''}" style="${pane.infill!=='panel'?'background:var(--copper);color:white;border-color:var(--copper);':''}"
+                  onclick="setInfill('glass')">▨ Glass</button>
+          <button class="split-btn" style="${pane.infill==='panel'?'background:var(--copper);color:white;border-color:var(--copper);':''}"
+                  onclick="setInfill('panel')">▬ Solid panel</button>
+        </div>
+        <div style="font-size:10px;color:var(--steel);margin-top:4px;">
+          Doors typically have solid panels below and glass above.
+        </div>
+      </div>` : ''}
+      ${(pane && pane.infill==='panel') ? `<div style="font-size:11px;color:var(--steel);padding:8px 0;">
+        This pane is a <strong>solid panel</strong> — no glazing. Switch to Glass above to assign a glass unit.
+      </div>` : `
+      ${pane ? `<div style="font-size:11px;color:var(--steel);margin-bottom:8px;">
+        Current: <strong style="color:var(--navy);">${pane.glazing||'—'}</strong>
+        ${pane._glassTooltip ? '<span style="font-family:var(--font-mono);font-size:10px;color:var(--steel);margin-left:6px;">'+pane._glassTooltip+'</span>' : ''}
+      </div>` : ''}
+      <div class="p2-glass-list">${glassRows}</div>
+      ${pane ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+        <div><div style="font-size:11px;color:#566;margin-bottom:4px;font-weight:500;">Texture</div>
+          <select class="ni" style="width:100%;" onchange="setTexture(this.value)">
+            ${['Clear','Satin','Stippolyte','Cotswold','Charcoal Sticks'].map(t=>
+              `<option ${((pane.texture||'Clear')===t)?'selected':''}>${t}</option>`).join('')}
+          </select></div>
+        <div><div style="font-size:11px;color:#566;margin-bottom:4px;font-weight:500;">Leaded</div>
+          <select class="ni" style="width:100%;" onchange="setLeaded(this.value)">
+            ${[['none','None'],['square','Square'],['diamond','Diamond']].map(([v,l])=>
+              `<option value="${v}" ${((pane.leaded||'none')===v)?'selected':''}>${l}</option>`).join('')}
+          </select></div>
+      </div>` : ''}
+      ${GLASS_UNITS.length ? `<div class="split-btns" style="margin-top:10px;">
+        <button class="split-btn" onclick="applyGlazing('pane')">Apply to pane</button>
+        <button class="split-btn" onclick="applyGlazing('all')">Apply to all</button>
+      </div>` : ''}
+      <div style="font-size:10px;color:var(--steel);margin-top:8px;line-height:1.5;">
+        Click a unit to select · hover for full spec ·
+        U-value: <span style="color:#166534;font-weight:700;">green ≤0.8</span>
+        <span style="color:#92400E;"> amber ≥1.4</span>
+      </div>`}`;
+  } else if(currentTab==='easydraw'){
+    el.innerHTML = `
+      <div class="sec-head">Easy Draw — glazing bars</div>
+      ${window.QSPhase3.glazingToolbarHTML()}
+      <div style="font-size:12px;color:#566;line-height:1.6;margin-top:10px;">
+        <strong>Draw</strong>: drag vertically → vertical bar, horizontally → horizontal bar.<br>
+        <strong>Erase</strong>: click a bar to remove it.<br>
+        <strong>Auto Grid</strong>: create a Georgian pattern.<br>
+        <strong>Dimensions</strong>: edit pane sizes + equalise.
+      </div>`;
+    setTool('easydraw'); window._glazeTool='draw';
+  } else if(currentTab==='hardware'){
+    el.innerHTML = window.QSPhase3.hardwareHTML();
+  } else if(currentTab==='extras'){
+    el.innerHTML = window.QSPhase3.extrasHTML();
+  }
+}
+
+/* ---------- swatches ---------- */
+function buildSwatches(){
+  const w=document.getElementById('swatches'); if(!w)return;
+  w.innerHTML='';
+  FRAME_COLORS.forEach(c=>{
+    const d=document.createElement('div');
+    d.className='sw'+(model.frame.color===c.hex?' sel':'');
+    d.style.background=c.hex; d.title=c.name;
+    d.onclick=()=>{ model.frame.color=c.hex; model.frame.colorName=c.name;
+      buildSwatches(); dc.render(); scheduleSave(); };
+    w.appendChild(d);
+  });
+}
+
+/* ---------- handlers ---------- */
+function setTool(t){
+  dc.setTool(t);
+  ['select','vsplit','hsplit','merge','easydraw','pan'].forEach(x=>{
+    const b=document.getElementById('tl'+x.charAt(0).toUpperCase()+x.slice(1));
+    if(b)b.classList.toggle('on',x===t);
+  });
+  document.getElementById('hudTool').textContent='TOOL: '+t.toUpperCase();
+}
+function onPaneSelect(id){
+  document.getElementById('selId').textContent=id;
+  renderTab();
+}
+function doSplit(axis){
+  const id=dc.selectedPaneId; if(!id)return;
+  const nid=model.splitPane(id,axis);
+  if(nid){dc.selectedPaneId=nid;onPaneSelect(nid);} 
+  dc.render();updateHud();scheduleSave();fetchPricing();
+}
+
+/* ---- exact-mm member placement popup ---- */
+let _pendingMember=null;
+function openMemberPop(info){
+  _pendingMember=info;
+  const pop=document.getElementById('memberPop');
+  const isV=info.axis==='v';
+  document.getElementById('mpTitle').textContent=isV?'Add Mullion (vertical)':'Add Transom (horizontal)';
+  document.getElementById('mpLabel').textContent=isV?'Distance from left (mm)':'Distance from bottom (mm)';
+  document.getElementById('mpVal').value=Math.round(info.pos);
+  document.getElementById('mpHint').textContent=`Valid: ${info.min}–${info.max} mm · snaps to 5mm`;
+  // position popup near the click, clamped to the canvas
+  const wrap=document.getElementById('canvasWrap').getBoundingClientRect();
+  pop.style.left=Math.min(info.screenX+12, wrap.width-220)+'px';
+  pop.style.top =Math.min(info.screenY-20, wrap.height-150)+'px';
+  pop.style.display='block';
+  const inp=document.getElementById('mpVal'); inp.focus(); inp.select();
+}
+function confirmMember(){
+  if(!_pendingMember)return;
+  const pos=parseFloat(document.getElementById('mpVal').value)||_pendingMember.pos;
+  dc._pushHistory();
+  const nid=dc.commitMember(_pendingMember.paneId,_pendingMember.axis,pos);
+  if(nid){onPaneSelect(nid);}
+  closeMemberPop();
+  updateHud();scheduleSave();fetchPricing();
+  setTool('select');
+}
+function cancelMemberPop(){ dc.cancelMember(); closeMemberPop(); setTool('select'); }
+function closeMemberPop(){ document.getElementById('memberPop').style.display='none'; _pendingMember=null; }
+function equalisePane(){
+  if(!_pendingMember)return;
+  const n=parseInt(document.getElementById('mpDivisions').value)||2;
+  const {paneId,axis}=_pendingMember;
+  dc._pushHistory();
+  const ids=dc.equalisePane(paneId,axis,n);
+  if(ids&&ids.length) onPaneSelect(ids[0]);
+  closeMemberPop();
+  updateHud();scheduleSave();fetchPricing();
+  setTool('select');
+}
+// Enter/Escape in the popup input
+document.addEventListener('DOMContentLoaded',()=>{
+  const inp=document.getElementById('mpVal');
+  if(inp) inp.addEventListener('keydown',(e)=>{
+    if(e.key==='Enter'){e.preventDefault();confirmMember();}
+    else if(e.key==='Escape'){e.preventDefault();cancelMemberPop();}
+  });
+});
+
+/* ---- quick place from Cell tab ---- */
+function quickPlaceMember(){
+  const id=dc.selectedPaneId; if(!id)return;
+  const axis=(window._quickAxis||'v');
+  const pos=+document.getElementById('quickPos').value||500;
+  dc._pushHistory();
+  const nid=dc.commitMember(id,axis,pos);
+  if(nid)onPaneSelect(nid);
+  updateHud();scheduleSave();fetchPricing();
+}
+function setQuickAxis(a){ window._quickAxis=a;
+  document.querySelectorAll('.quick-axis-btn').forEach(b=>b.classList.toggle('on',b.dataset.a===a));
+}
+function setSize(){
+  model.width=+document.getElementById('fW').value||1200;
+  model.height=+document.getElementById('fH').value||1500;
+  dc.fitView();updateHud();scheduleSave();fetchPricing();
+}
+function setMaterial(){ model.frame.material=document.getElementById('fMat').value;
+  scheduleSave();fetchPricing(); }
+function setCill(){ model.frame.cill=document.getElementById('fCill').checked;
+  dc.render();scheduleSave(); }
+function setHorns(){ model.frame.sashHorns=document.getElementById('fHorns').checked;
+  dc.render();scheduleSave(); }
+function setFlush(){ model.frame.flushSash=document.getElementById('fFlush').checked;
+  dc.render();scheduleSave(); }
+function setHandleColor(){ model.frame.handleColor=document.getElementById('fHandle').value;
+  dc.render();scheduleSave(); }
+function setHandleType(){ model.frame.handleType=document.getElementById('fHandleType').value;
+  dc.render();scheduleSave(); }
+function setSashColor(v){ model.frame.sashColor=v||'';
+  const el=document.getElementById('fSashCol');
+  if(el) el.value = model.frame.sashColor || model.frame.color || '#2B2F33';
+  dc.render();scheduleSave(); }
+function setTexture(v){ const p=model.panes.find(x=>x.id===dc.selectedPaneId);
+  if(p){ p.texture=v; dc.render(); scheduleSave(); renderTab(); } }
+function setLeaded(v){ const p=model.panes.find(x=>x.id===dc.selectedPaneId);
+  if(p){ p.leaded=v; dc.render(); scheduleSave(); renderTab(); } }
+function setShape(s){
+  model.shape=s;
+  document.querySelectorAll('.shape-card').forEach(c=>c.classList.remove('on'));
+  document.getElementById('shp-'+s).classList.add('on');
+  document.getElementById('riseRow').style.display=(s==='arched'||s==='gothic')?'block':'none';
+  dc._pushHistory();dc.fitView();scheduleSave();fetchPricing();
+}
+function setArchRise(){ model.archRise=+document.getElementById('archR').value||400;
+  dc.render();scheduleSave(); }
+function setUnitType(){
+  model.unitType=document.getElementById('uType').value;
+  document.getElementById('doorCfg').style.display=model.unitType==='door'?'block':'none';
+  applyUnitTabs();
+  dc.render();scheduleSave();fetchPricing();
+}
+/* Show only the config tabs that make sense for the current unit type.
+   Doors: hide Easy Draw (Georgian bar drawing is window-centric). */
+function applyUnitTabs(){
+  const isDoor = (model.unitType==='door');
+  const doorHidden = ['easydraw'];
+  document.querySelectorAll('.dz-tab').forEach(el=>{
+    const t = el.dataset.tab;
+    el.style.display = (isDoor && doorHidden.includes(t)) ? 'none' : '';
+  });
+  // if the active tab just got hidden, fall back to openers
+  if (isDoor && doorHidden.includes(currentTab)) setTab('openers');
+}
+function setDoorType(t){
+  model.door.dtype=t;
+  document.querySelectorAll('.door-card').forEach(c=>c.classList.remove('on'));
+  document.getElementById('door-'+t).classList.add('on');
+  if(t==='single'){model.door.slL=model.door.slR=model.door.flH=0;model.door.leafCount=1;}
+  else if(t==='double'){model.door.leafCount=2;model.door.slL=model.door.slR=model.door.flH=0;}
+  else if(t==='sl'){model.door.slL=300;model.door.slR=0;}
+  else if(t==='sr'){model.door.slR=300;model.door.slL=0;}
+  else if(t==='fan'){model.door.flH=400;}
+  else if(t==='full'){model.door.slL=250;model.door.slR=250;model.door.flH=350;model.door.leafCount=2;}
+  document.getElementById('dSlL').value=model.door.slL;
+  document.getElementById('dSlR').value=model.door.slR;
+  document.getElementById('dFlH').value=model.door.flH;
+  dc._pushHistory();dc.render();scheduleSave();fetchPricing();
+}
+function setDoorDims(){
+  model.door.slL=+document.getElementById('dSlL').value||0;
+  model.door.slR=+document.getElementById('dSlR').value||0;
+  model.door.flH=+document.getElementById('dFlH').value||0;
+  dc.render();scheduleSave();
+}
+function setOpening(){ const p=model.panes.find(x=>x.id===dc.selectedPaneId);
+  if(p){p.opening=document.getElementById('openSel').value;dc.render();scheduleSave();fetchPricing();} }
+function setGlazing(){ const p=model.panes.find(x=>x.id===dc.selectedPaneId);
+  if(p){p.glazing=document.getElementById('glazSel').value;scheduleSave();fetchPricing();} }
+function selectGlassUnit(id, code, name, tooltip){
+  const p = model.panes.find(x=>x.id===dc.selectedPaneId);
+  if(p){
+    p.glazing       = code;
+    p._glassId      = id;
+    p._glassTooltip = tooltip;
+    scheduleSave(); fetchPricing(); renderTab();
+  }
+}
+function setInfill(kind){
+  const p = model.panes.find(x=>x.id===dc.selectedPaneId);
+  if(p){
+    p.infill = kind;                    // 'glass' | 'panel'
+    dc.render(); scheduleSave(); fetchPricing(); renderTab();
+  }
+}
+function applyGlazing(scope){ const val=document.getElementById('glazSel') ? document.getElementById('glazSel').value : (model.panes.find(x=>x.id===dc.selectedPaneId)||{}).glazing||'';
+  if(scope==='all'){model.panes.forEach(p=>p.glazing=val);}
+  else{const p=model.panes.find(x=>x.id===dc.selectedPaneId);if(p)p.glazing=val;}
+  scheduleSave();fetchPricing(); }
+function setProfileToggle(){
+  model.frame.slimMullionClip=document.getElementById('slimClip').checked;
+  model.frame.staffBead=document.getElementById('staffBead').checked;
+  dc.render();scheduleSave();
+  // keep the "Manage Frame Profiles" modal in sync if it's open on the FRAME tab
+  const p2SlimClip=document.getElementById('p2SlimClip');
+  const p2StaffBead=document.getElementById('p2StaffBead');
+  if(p2SlimClip)  p2SlimClip.checked  = model.frame.slimMullionClip;
+  if(p2StaffBead) p2StaffBead.checked = model.frame.staffBead;
+}
+function setThickness(){ model.frame.thickness=+document.getElementById('frThick').value||58;
+  dc.render();scheduleSave(); }
+function clearBars(){ const p=model.panes.find(x=>x.id===dc.selectedPaneId);
+  if(p){p.glazingBars=[];dc.render();scheduleSave();} }
+
+/* ---------- HUD ---------- */
+function updateHud(){
+  document.getElementById('hudDim').textContent=`${model.width} × ${model.height} MM`;
+  document.getElementById('hudPanes').textContent=`PANES: ${model.panes.length}`;
+  document.getElementById('stPanes').textContent=`Panes: ${model.panes.length}`;
+  document.getElementById('stZoom').textContent=`Zoom: ${Math.round(dc.scale*100)}%`;
+}
+
+/* ---------- templates ---------- */
+function buildTemplateGrid(){
+  const grid=document.getElementById('tplGrid');
+  const {TEMPLATES}=window.QSDraw;
+  const unit = model.unitType || 'window';
+  grid.innerHTML='';
+  Object.entries(TEMPLATES).forEach(([key,t])=>{
+    if ((t.unit||'window') !== unit) return;   // only show templates for this unit type
+    const card=document.createElement('div');
+    card.className='tpl-card';
+    card.onclick=()=>applyTemplate(key);
+    // mini svg preview — panels drawn solid, glass drawn as glass
+    let svg=`<svg viewBox="0 0 100 100"><rect x="4" y="4" width="92" height="92" fill="#eceae2" stroke="#2B2F33" stroke-width="3"/>`;
+    const isDoor = (t.unit==='door');
+    t.panes.forEach(p=>{
+      const isPanel = p.infill==='panel' ||
+        (isDoor && !p.glazing && !p.bars && p.opening!=='Fixed' && p.opening!=='Sliding');
+      const fill = isPanel ? '#8a5a2b' : 'url(#glass)';
+      svg+=`<rect x="${4+p.x*92}" y="${4+p.y*92}" width="${p.w*92}" height="${p.h*92}" fill="${fill}" stroke="#7c8aa0" stroke-width="1.5"/>`;
+    });
+    svg+='</svg>';
+    card.innerHTML=svg+`<div class="nm">${t.name}</div>`;
+    grid.appendChild(card);
+  });
+}
+function openTemplates(){
+  const unit = model.unitType || 'window';
+  document.getElementById('tplModalTitle').textContent =
+    unit === 'door' ? 'Choose a door style' : 'Choose a window style';
+  buildTemplateGrid();   // rebuild filtered to current unit
+  document.getElementById('tplModal').classList.add('show');
+}
+function closeTemplates(){ document.getElementById('tplModal').classList.remove('show'); }
+function applyTemplate(key){
+  const {templateToPanes}=window.QSDraw;
+  model.panes=templateToPanes(key);
+  dc.selectedPaneId=model.panes[0].id;
+  closeTemplates();dc.render();updateHud();onPaneSelect(model.panes[0].id);
+  scheduleSave();fetchPricing();
+}
+
+/* ---------- pricing ---------- */
+async function fetchPricing(){
+  try{
+    const cells=model.panes.map(p=>({w:p.w,h:p.h,opener:p.opening,glazing:p.glazing,glazingBars:p.glazingBars||[]}));
+    const r=await fetch(`${API}/windows/${QS_WINDOW_ID}/price`,{
+      method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+      body:JSON.stringify({width:model.width,height:model.height,
+        material:model.frame.material,cells,
+        design:{hardware:model.hardware||{},extras:model.extras||{},customExtras:model.customExtras||[],panes:cells}})});
+    if(!r.ok)return;
+    const d=await r.json();
+    document.getElementById('pFrame').textContent='£'+(d.frame_glass??d.frame??0);
+    document.getElementById('pHw').textContent='£'+(d.hardware??0);
+    const exEl=document.getElementById('pExtras'); if(exEl) exEl.textContent='£'+(d.extras??0);
+    document.getElementById('pFit').textContent='£'+(d.fitting??0);
+    document.getElementById('pTotal').textContent='£'+(d.total??0);
+  }catch(e){}
+}
+
+/* ---------- save ---------- */
+function scheduleSave(){
+  _dirty=true;
+  setSaveStatus('saving');
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(saveModel,800);
+}
+async function saveModel(){
+  try{
+    const cells=model.panes.map(p=>({
+      id:p.id,x:p.x,y:p.y,w:p.w,h:p.h,
+      opener:p.opening||p.opener||'Fixed',
+      infill:p.infill||'glass',
+      glazing:p.glazing||'Double, Low-E'}));
+    const r=await fetch(`${API}/windows/${QS_WINDOW_ID}/design`,{
+      method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+      body:JSON.stringify({design_json:JSON.stringify(model.toJSON()),
+        width:model.width,height:model.height,
+        material:model.frame.material,frameColor:model.frame.color,
+        frameColorName:model.frame.colorName,
+        profileSystemId:CURRENT_SYSTEM_ID||null,cells})});
+    if(r.ok){ _dirty=false; setSaveStatus('saved'); }
+    else setSaveStatus('error');
+  }catch(e){ setSaveStatus('error'); console.error('[QS] save failed',e); }
+}
+function saveNow(){ clearTimeout(saveTimer); saveModel(); }
+async function saveAndNext(href){ await saveModel(); window.location.href=href; }
+function setSaveStatus(s){
+  const el=document.getElementById('stSave');
+  if(s==='saving'){el.textContent='○ Saving…';el.classList.remove('on');}
+  else if(s==='saved'){el.textContent='● Saved';el.classList.add('on');}
+  else{el.textContent='✕ Save failed';el.classList.remove('on');}
+}
+
+/* ---------- exports ---------- */
+function exportJSON(){
+  const data=JSON.stringify(model.toJSON(),null,2);
+  const blob=new Blob([data],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`QS-window-${QS_WINDOW_ID}.json`;
+  a.click();
+}
+function importJSON(evt){
+  const file=evt.target.files[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const json=JSON.parse(e.target.result);
+      const {WindowModel}=window.QSDraw;
+      model=WindowModel.fromJSON(json);
+      window.model=model;
+      dc.model=model;
+      dc.selectedPaneId=model.panes[0]?.id;
+      document.getElementById('fW').value=model.width;
+      document.getElementById('fH').value=model.height;
+      document.getElementById('fMat').value=model.frame.material;
+      dc.fitView();updateHud();renderTab();buildSwatches&&buildSwatches();
+      scheduleSave();fetchPricing();
+      alert('Design imported successfully.');
+    }catch(err){ alert('Invalid design file: '+err.message); }
+  };
+  reader.readAsText(file);
+  evt.target.value='';
+}
+function exportDxf(){ window.location.href=`${API}/windows/${QS_WINDOW_ID}/dxf`; }
+function exportDwg(){ window.location.href=`${API}/windows/${QS_WINDOW_ID}/dwg`; }
+function view3D(){ window.open(`/projects/${QS_PROJECT_ID}/windows/${QS_WINDOW_ID}/3d`,'_blank'); }
+function toggle3DMenu(){ const m=document.getElementById('menu3d'); m.style.display=m.style.display==='none'?'block':'none'; }
+document.addEventListener('click',(e)=>{ if(!document.getElementById('btn3dWrap')?.contains(e.target)) document.getElementById('menu3d')&&(document.getElementById('menu3d').style.display='none'); });
+async function export3d(fmt){
+  document.getElementById('menu3d').style.display='none';
+  showToast('Generating '+fmt.toUpperCase()+'… (this may take a few seconds)','info');
+  try{
+    const r=await fetch(`${API}/windows/${QS_WINDOW_ID}/3d/${fmt}`);
+    if(!r.ok){
+      let msg='Export failed';
+      try{ const d=await r.json(); msg=d.error||msg; }catch(e){}
+      showToast('✗ '+msg,'error'); return;
+    }
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url;
+    a.download=`QS-W${QS_WINDOW_ID}.${fmt}`; document.body.appendChild(a); a.click();
+    setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1500);
+    showToast('✓ '+fmt.toUpperCase()+' downloaded','ok');
+  }catch(e){ showToast('✗ '+e.message,'error'); }
+}
+function showToast(msg,type){
+  let t=document.getElementById('qsToast');
+  if(!t){t=document.createElement('div');t.id='qsToast';
+    t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 22px;border-radius:20px;font-size:13px;font-family:var(--font-mono);z-index:9999;pointer-events:none;transition:opacity .3s;';
+    document.body.appendChild(t);}
+  const bg={'ok':'#3D6B5C','error':'#C0554A','info':'#3E6FB0'}[type]||'#1B2430';
+  t.style.background=bg; t.style.color='white'; t.textContent=msg; t.style.opacity=1;
+  clearTimeout(t._to); t._to=setTimeout(()=>t.style.opacity=0, 2800);
+}
+
+async function sendToVisualiser(){
+  await saveModel();
+  try{
+    const png = await buildWindowPNG();
+    if(png){
+      await fetch(`${API}/windows/${QS_WINDOW_ID}/render`,{
+        method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+        body:JSON.stringify({image:png})});
+    }
+  }catch(e){ console.warn('render sync failed', e); }
+  window.location.href=`/projects/${QS_PROJECT_ID}/windows/${QS_WINDOW_ID}/visualise`;
+}
+
+// Build a clean transparent-bg PNG of just the window (no grid/dims).
+function rasteriseLiveSVG(){
+  return new Promise((resolve)=>{
+    try{
+      const svg=document.getElementById('dzsvg');
+      const clone=svg.cloneNode(true);
+      // strip grid lines + editor-only overlays (dims, handles, selection)
+      clone.querySelectorAll('line').forEach(l=>{
+        const s=l.getAttribute('stroke')||''; if(s.includes('#e8e4da')) l.remove();
+      });
+      clone.querySelectorAll('[data-editor-only], .dim, .handle, .sel-outline')
+           .forEach(el=>el.remove());
+      // size from the real viewBox so the aspect ratio is preserved
+      const vb=(clone.getAttribute('viewBox')||'0 0 800 1000').split(/\s+/).map(Number);
+      const vw=vb[2]||800, vh=vb[3]||1000;
+      const MAX=1400, scale=Math.min(MAX/vw, MAX/vh);
+      const cw=Math.round(vw*scale), chh=Math.round(vh*scale);
+      clone.setAttribute('width', cw); clone.setAttribute('height', chh);
+      const xml=new XMLSerializer().serializeToString(clone);
+      const img=new Image();
+      img.onload=()=>{
+        const c=document.createElement('canvas');
+        c.width=cw;c.height=chh;
+        c.getContext('2d').drawImage(img,0,0,cw,chh);
+        resolve(c.toDataURL('image/png'));
+      };
+      img.onerror=()=>resolve(null);
+      img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(xml);
+    }catch(e){ resolve(null); }
+  });
+}
+
+function buildWindowPNG(){
+  // ALWAYS rasterise the live editor SVG so the Visualiser shows exactly the
+  // styled render (photoreal glass, sashes, handles) — never the old cartoon.
+  return rasteriseLiveSVG();
+}
+
+function buildWindowPNG_legacy(){
+  if ((model.shape && model.shape !== 'rectangle') || model.unitType === 'door') {
+    return rasteriseLiveSVG();
+  }
+  return new Promise((resolve)=>{
+    const W=model.width, H=model.height, bar=model.frame.thickness;
+    const pad=40, vbW=W+pad*2, vbH=H+pad*2;
+    const col=model.frame.color||'#2B2F33';
+    let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbW} ${vbH}" width="${vbW}" height="${vbH}">`;
+    svg+=`<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">`+
+         `<stop offset="0%" stop-color="#c5dae0"/><stop offset="50%" stop-color="#a9c6cf"/>`+
+         `<stop offset="100%" stop-color="#93b3bd"/></linearGradient></defs>`;
+    const ox=pad, oy=pad;
+    const mb=bar*0.6, half=mb/2, eps=0.001;
+    svg+=`<rect x="${ox}" y="${oy}" width="${W}" height="${H}" fill="#d8d4c8" stroke="${col}" stroke-width="6"/>`;
+    for(const p of model.panes){
+      const iL=(p.x<=eps)?bar:half, iT=(p.y<=eps)?bar:half,
+            iR=(p.x+p.w>=1-eps)?bar:half, iB=(p.y+p.h>=1-eps)?bar:half;
+      const gx=ox+p.x*W+iL, gy=oy+p.y*H+iT, gw=p.w*W-iL-iR, gh=p.h*H-iT-iB;
+      if(gw<=0||gh<=0) continue;
+      if(p.infill==='panel'){
+        svg+=`<rect x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="${col}" stroke="rgba(0,0,0,0.35)" stroke-width="2"/>`;
+        const ins=Math.min(gw,gh)*0.12;
+        if(gw-2*ins>4&&gh-2*ins>4)
+          svg+=`<rect x="${gx+ins}" y="${gy+ins}" width="${gw-2*ins}" height="${gh-2*ins}" fill="rgba(255,255,255,0.06)" stroke="rgba(0,0,0,0.25)" stroke-width="1.5"/>`;
+        continue;
+      }
+      svg+=`<rect x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="url(#g)" stroke="#9fb4bd" stroke-width="3"/>`;
+      for(const b of (p.glazingBars||[])){
+        const t=b.thickness||18;
+        if(b.type==='vertical'){ const bx=gx+gw*b.pos; svg+=`<rect x="${bx-t/2}" y="${gy}" width="${t}" height="${gh}" fill="${col}"/>`; }
+        else { const by=gy+gh*b.pos; svg+=`<rect x="${gx}" y="${by-t/2}" width="${gw}" height="${t}" fill="${col}"/>`; }
+      }
+    }
+    const seen=new Set();
+    for(const p of model.panes){
+      const rx=p.x+p.w;
+      if(rx>0.001&&rx<0.999&&!seen.has('v'+rx.toFixed(3))){seen.add('v'+rx.toFixed(3));
+        svg+=`<rect x="${ox+rx*W-half}" y="${oy+bar}" width="${mb}" height="${H-2*bar}" fill="${col}" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>`;}
+      const ty=p.y+p.h;
+      if(ty>0.001&&ty<0.999&&!seen.has('h'+ty.toFixed(3))){seen.add('h'+ty.toFixed(3));
+        svg+=`<rect x="${ox+bar}" y="${oy+ty*H-half}" width="${W-2*bar}" height="${mb}" fill="${col}" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>`;}
+    }
+    svg+='</svg>';
+    const img=new Image();
+    img.onload=()=>{
+      const scale=Math.min(1000/vbW, 1200/vbH);
+      const c=document.createElement('canvas');
+      c.width=Math.round(vbW*scale); c.height=Math.round(vbH*scale);
+      const ctx=c.getContext('2d');
+      ctx.drawImage(img,0,0,c.width,c.height);
+      resolve(c.toDataURL('image/png'));
+    };
+    img.onerror=()=>resolve(null);
+    img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+  });
+}
+function updateUndoButtons(){
+  const u=document.getElementById('btnUndo'), r=document.getElementById('btnRedo');
+  if(u) u.disabled = !dc.canUndo();
+  if(r) r.disabled = !dc.canRedo();
+}
+
+// keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key === 'z' && !e.shiftKey) { e.preventDefault(); dc.undo(); }
+  else if (mod && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); dc.redo(); }
+  else if (mod && e.key === 's') { e.preventDefault(); saveNow(); }
+  else if (e.key === 'v' || e.key === '1') setTool('select');
+  else if (e.key === 'b' || e.key === '2') setTool('vsplit');
+  else if (e.key === 'h' || e.key === '3') setTool('hsplit');
+  else if (e.key === 'e') setTool('easydraw');
+  else if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (dc.selectedPaneId && model.panes.length > 1) {
+      model.mergePane(dc.selectedPaneId);
+      dc.selectedPaneId = model.panes[0]?.id;
+      dc.onChange(); onPaneSelect(dc.selectedPaneId); dc.render();
+    }
+  }
+});
+
+/* ── Save on navigation away (prevent losing unsaved changes) ── */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && saveTimer) { clearTimeout(saveTimer); saveModel(); }
+});
+window.addEventListener('pagehide', () => {
+  if (saveTimer) { clearTimeout(saveTimer); saveModel(); }
+});
+/* Warn if navigating away with unsaved changes */
+let _dirty = false;
+window.addEventListener('beforeunload', (e) => {
+  if (_dirty) { e.preventDefault(); return (e.returnValue='You have unsaved changes.'); }
+});
+
+window.addEventListener('load', () => {
+  if(dc){ dc.fitView(); updateUndoButtons(); }
+  // probe ODA availability — disable DWG button if not installed
+  fetch(`${API}/oda-status`).then(r=>r.json()).then(d=>{
+    const btn=document.getElementById('btnDwg');
+    if(btn && !d.available){
+      btn.disabled=true; btn.title='DWG unavailable — ODA not installed on server';
+      btn.style.opacity='0.4'; btn.style.cursor='not-allowed';
+    }
+  }).catch(()=>{});
+});
+
+/* ── Profiles + JSON tab helpers (PWQ-3645) ── */
+/* ── CadProfile library injected from DB ── */
+const CAD_PROFILES = {{ cad_profiles | tojson }};
+const PROFILE_SYSTEMS = {{ profile_systems | tojson }};
+let CURRENT_SYSTEM_ID = {{ current_system_id | tojson }};
+
+const ROLE_COLORS = {
+  outer_frame:'#4B6B8A', head:'#4B6B8A', cill:'#3D6B5C', jamb:'#4B6B8A',
+  mullion:'#8B6B3D', transom:'#8B6B3D', sash:'#5C7A6A',
+  glazing_bead:'#6B5A8B', threshold:'#3D6B5C', coupler:'#7A6B4B'
+};
+const ROLE_LABELS = {
+  outer_frame:'Outer Frame', head:'Head', cill:'Cill / Sill', jamb:'Jamb',
+  mullion:'Mullion', transom:'Transom', sash:'Sash',
+  glazing_bead:'Glazing Bead', threshold:'Threshold', coupler:'Coupler'
+};
+let qsProfileFilter = 'all';   // 'all' | 'window' | 'door'
+const QS_DOOR_ONLY_ROLES   = ['threshold','door_leaf','meeting_stile'];
+const QS_WINDOW_ONLY_ROLES = ['cill'];
+
+function qsProfileCategory(role){
+  if(QS_DOOR_ONLY_ROLES.includes(role))   return 'door';
+  if(QS_WINDOW_ONLY_ROLES.includes(role)) return 'window';
+  return 'both';
+}
+function qsProfileBadges(role){
+  const cat = qsProfileCategory(role);
+  const wBadge='<span style="font-size:9px;background:#DBEAFE;color:#1E40AF;border-radius:3px;padding:1px 5px;margin-left:4px;">[Window]</span>';
+  const dBadge='<span style="font-size:9px;background:#FDE7D9;color:#9A3412;border-radius:3px;padding:1px 5px;margin-left:4px;">[Door]</span>';
+  if(cat==='window') return wBadge;
+  if(cat==='door')   return dBadge;
+  return wBadge+dBadge;
+}
+function qsSetProfileFilter(f){ qsProfileFilter=f; qsBuildProfs(); }
+
+// Shared 2D cross-section thumbnail — real DXF contour if traced, else a
+// grey generic-fallback box. Used by both the library cards and the
+// canvas "Show Section Cut" overlay.
+function qsProfileThumbSVG(p, size){
+  size = size || 56;
+  const W=Number(p.bar_width_mm)||60, H=Number(p.depth_mm)||70;
+  if(p.svg_path){
+    return `<svg viewBox="0 0 200 200" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"
+        style="background:#FAFAFA;border:1px solid #E2E8F0;border-radius:4px;flex-shrink:0;">
+      <path d="${p.svg_path}" fill="#E8DCC8" stroke="#5A3E28" stroke-width="1.6"/></svg>
+     <div style="font-size:8px;color:#065F46;text-align:center;white-space:nowrap;">✓ DXF CAD Profile</div>`;
+  }
+  const sw=200,sh=200,sc2=Math.min((sw-40)/W,(sh-40)/H)*.85;
+  const pw=W*sc2,ph=H*sc2,px=(sw-pw)/2,py=(sh-ph)/2;
+  return `<svg viewBox="0 0 200 200" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"
+      style="background:#FAFAFA;border:1px solid #E2E8F0;border-radius:4px;flex-shrink:0;">
+    <rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="#D1D5DB" stroke="#9CA3AF" stroke-width="1.5" rx="2"/></svg>
+   <div style="font-size:8px;color:#9CA3AF;text-align:center;white-space:nowrap;">⚠️ Generic Fallback (No DXF)</div>`;
+}
+
+function qsBuildProfs(){
+  const w=document.getElementById('tabContent'); if(!w) return;
+  const profiles = CAD_PROFILES;
+
+  if(!profiles || !profiles.length){
+    w.innerHTML='<div class="sec-head">Profile Library</div>'
+      +'<div style="font-size:12px;color:var(--steel);padding:12px 0;">'
+      +'No profiles in library. <a href="/settings/profiles" target="_blank" style="color:var(--copper);">Add in Settings →</a></div>';
+    return;
+  }
+
+  // Group by role (role=null goes into "Unassigned")
+  const groups = {};
+  profiles.forEach(p=>{
+    const key = p.role || '__none__';
+    (groups[key]||(groups[key]=[])).push(p);
+  });
+
+  const unitType = (window.model && window.model.unitType) || 'window';
+  const DOOR_ONLY   = ['threshold','door_leaf','meeting_stile'];
+  const WINDOW_ONLY = ['cill'];
+  const hide = unitType === 'door' ? WINDOW_ONLY : DOOR_ONLY;
+
+  // Extra user-selectable filter (All / Window Profiles / Door Profiles)
+  const filterHide = qsProfileFilter==='window' ? DOOR_ONLY
+                    : qsProfileFilter==='door'   ? WINDOW_ONLY
+                    : [];
+  const hideAll = Array.from(new Set([...hide, ...filterHide]));
+
+  const roleOrder = ['head','cill','jamb','outer_frame','mullion','transom','sash','glazing_bead','threshold','coupler','__none__']
+    .filter(k => !hideAll.includes(k));
+  const sorted = roleOrder.filter(k=>groups[k]).concat(Object.keys(groups).filter(k=>!roleOrder.includes(k) && !hideAll.includes(k)));
+
+  let html = '<div class="sec-head">Profile System</div>';
+  // ── Profile System picker — pins a full named DXF-profile set to this window ──
+  if(PROFILE_SYSTEMS && PROFILE_SYSTEMS.length){
+    html += '<div style="font-size:10px;color:var(--steel);margin-bottom:6px;">'
+          + 'Assign a complete profile system — every frame member is built from '
+          + 'that system\'s DXF sections. Empty slots fall back to the library defaults.</div>';
+    html += '<select id="sysPicker" onchange="setWindowSystem(this.value)" '
+          + 'style="width:100%;font-size:12px;padding:6px 8px;border:1px solid var(--line);'
+          + 'border-radius:5px;margin-bottom:14px;background:#fff;">';
+    html += `<option value="">— none (use library role-defaults) —</option>`;
+    const relevantSystems = PROFILE_SYSTEMS.filter(s=>{
+      return unitType === 'door'
+        ? (s.slots.threshold || s.slots.door_leaf)
+        : (s.slots.cill);
+    });
+    (relevantSystems.length ? relevantSystems : PROFILE_SYSTEMS).forEach(s=>{
+      const sel = (CURRENT_SYSTEM_ID===s.id) ? 'selected' : '';
+      html += `<option value="${s.id}" ${sel}>${s.name} (${s.material})</option>`;
+    });
+    html += '</select>';
+  } else {
+    html += '<div style="font-size:10px;color:var(--steel);margin-bottom:14px;">'
+          + 'No profile systems yet. Create one in '
+          + '<a href="/settings/profile-systems" target="_blank" style="color:var(--copper);">'
+          + 'Settings → Profile Systems</a> to pin a full DXF-profile set to this window.</div>';
+  }
+
+  html += '<div class="sec-head">Profile Library</div>';
+  html += '<div style="font-size:10px;color:var(--steel);margin-bottom:10px;">Profiles grouped by 3D role. Set roles in <a href="/settings/profiles" target="_blank" style="color:var(--copper);">Settings → Profiles</a>.</div>';
+
+  // ── Window / Door filter bar ──
+  html += '<div style="display:flex;gap:4px;margin-bottom:12px;">';
+  [['all','All'],['window','Window Profiles'],['door','Door Profiles']].forEach(([key,lbl])=>{
+    const on = qsProfileFilter===key;
+    html += `<button onclick="qsSetProfileFilter('${key}')"
+      style="flex:1;font-size:10px;padding:5px 6px;border-radius:5px;cursor:pointer;
+             border:1px solid ${on?'var(--copper)':'var(--line)'};
+             background:${on?'var(--copper)':'#fff'};color:${on?'#fff':'var(--steel)'};font-weight:${on?'700':'400'};">${lbl}</button>`;
+  });
+  html += '</div>';
+
+  sorted.forEach(role=>{
+    const label = role==='__none__' ? 'Unassigned' : (ROLE_LABELS[role]||role);
+    const col   = role==='__none__' ? '#8A93A6' : (ROLE_COLORS[role]||'#556');
+    html += `<div style="font-size:10px;font-weight:700;color:${col};letter-spacing:.06em;`
+           +`text-transform:uppercase;margin:14px 0 5px;padding-bottom:3px;border-bottom:1px solid var(--line);">`
+           +label+'</div>';
+    groups[role].forEach(p=>{
+      const star = p.is_role_default
+        ? `<span title="Role default" style="color:${col};font-size:12px;">★</span>` : '';
+      const dxf  = p.has_geometry
+        ? '<span style="font-size:9px;background:#D1FAE5;color:#065F46;border-radius:3px;padding:1px 5px;margin-left:4px;">✓ DXF</span>'
+        : '<span style="font-size:9px;background:#F3F4F6;color:#9CA3AF;border-radius:3px;padding:1px 5px;margin-left:4px;">no DXF</span>';
+      const catBadges = qsProfileBadges(p.role);
+      // Per-window active indicator
+      const windowRoles = model.profileRoles || {};
+      const isActive = p.role && windowRoles[p.role] === p.code;
+      const activeBadge = isActive
+        ? '<span style="font-size:9px;background:#DCFCE7;color:#166534;border-radius:3px;padding:1px 5px;margin-left:4px;font-weight:700;">✓ Active in this design</span>'
+        : '';
+      const applyBtn = (!isActive && p.role)
+        ? `<button onclick="event.stopPropagation();setWindowProfile('${p.role}','${p.code}')"
+             style="font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid var(--copper);
+                    background:#fff;color:var(--copper);cursor:pointer;flex-shrink:0;">Apply</button>`
+        : '';
+      html += `<div class="qs-prc" onclick="qsOpenPModal(${JSON.stringify(p).replace(/"/g,'&quot;')})"
+                 style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;${isActive?'background:#F0FDF4;border:2px solid #22C55E;border-radius:6px;':''}">
+        ${qsProfileThumbSVG(p, 40)}
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:11px;font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            ${p.code}${star}${dxf}${catBadges}${activeBadge}
+          </div>
+          <div style="font-size:10px;color:var(--steel);margin-top:1px;">${p.name}</div>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:10px;color:#666;flex-shrink:0;text-align:right;">
+          ${p.bar_width_mm}×${p.depth_mm}<br>mm
+        </div>
+        ${applyBtn}
+      </div>`;
+    });
+  });
+
+  w.innerHTML = html;
+}
+
+function qsOpenPModal(p){
+  if(typeof p==='string') try{p=JSON.parse(p);}catch(e){return;}
+  window._qsModalProfile = p;
+  document.getElementById('qsPMTitle').textContent=(p.code||'?')+' — '+(p.name||'');
+  document.getElementById('qsPMDesc').textContent=
+    (p.category||'')+' · '+p.bar_width_mm+'×'+p.depth_mm+'mm'
+    +(p.role?' · Role: '+(ROLE_LABELS[p.role]||p.role):'');
+
+  // ── SVG: use traced svg_path with hatching if available ──
+  const uid = 'h'+Math.random().toString(36).slice(2,6);
+  const W=Number(p.bar_width_mm)||60, H=Number(p.depth_mm)||70;
+  let svgContent;
+  if(p.svg_path){
+    svgContent=`<defs>
+      <pattern id="${uid}" x="0" y="0" width="6" height="6" patternUnits="userSpaceOnUse">
+        <rect width="6" height="6" fill="#E8DCC8"/>
+        <line x1="0" y1="6" x2="6" y2="0" stroke="#8B7355" stroke-width="0.8"/>
+      </pattern>
+    </defs>
+    <path d="${p.svg_path}" fill="url(#${uid})" stroke="#5A3E28" stroke-width="1.2"/>
+    <text x="100" y="196" text-anchor="middle" font-family="IBM Plex Mono,monospace"
+          font-size="9" fill="#3D6B5C">${W}×${H}mm</text>`;
+  } else {
+    const sw=200,sh=192,col=p.role?ROLE_COLORS[p.role]:'#8A93A6';
+    const sc2=Math.min((sw-40)/W,(sh-40)/H)*.85;
+    const pw=W*sc2,ph=H*sc2,px=(sw-pw)/2,py=(sh-ph)/2;
+    svgContent=`<rect x="${px}" y="${py}" width="${pw}" height="${ph}"
+      fill="${col}" fill-opacity=".6" stroke="${col}" stroke-width="1.5" rx="2"/>
+    <text x="${px+pw/2}" y="${sh-10}" text-anchor="middle"
+      font-family="IBM Plex Mono,monospace" font-size="9" fill="#666">${W}×${H}mm</text>`;
+  }
+  document.getElementById('qsPMSvg').innerHTML=
+    `<svg viewBox="0 0 200 200" width="200" height="200" xmlns="http://www.w3.org/2000/svg"
+         style="background:#FAFAFA;border:1px solid #E2E8F0;border-radius:6px;">${svgContent}</svg>`;
+
+  // ── Info table ──
+  const curRole = (model.profileRoles||{})[p.role];
+  const isActive = p.role && curRole === p.code;
+  const roleTag = p.role
+    ? `<span style="background:${ROLE_COLORS[p.role]||'#8A93A6'}22;color:${ROLE_COLORS[p.role]||'#666'};
+        font-size:10px;font-weight:700;border-radius:3px;padding:2px 6px;">
+        ${ROLE_LABELS[p.role]||p.role}${isActive?' ✓ active this window':''}</span>`
+    : '<span style="color:#aaa;font-size:11px;">no role assigned</span>';
+  document.getElementById('qsPMTbl').innerHTML=
+    `<tr><td style="padding:4px 6px;color:#8A93A6;font-size:11px;width:35%;">Code</td><td style="padding:4px 6px;font-size:11px;">${p.code||'—'}</td></tr>`
+   +`<tr><td style="padding:4px 6px;color:#8A93A6;font-size:11px;">Category</td><td style="padding:4px 6px;font-size:11px;">${p.category||'—'}</td></tr>`
+   +`<tr><td style="padding:4px 6px;color:#8A93A6;font-size:11px;">3D Role</td><td style="padding:4px 6px;">${roleTag}</td></tr>`
+   +`<tr><td style="padding:4px 6px;color:#8A93A6;font-size:11px;">Width</td><td style="padding:4px 6px;font-size:11px;">${p.bar_width_mm} mm</td></tr>`
+   +`<tr><td style="padding:4px 6px;color:#8A93A6;font-size:11px;">Depth</td><td style="padding:4px 6px;font-size:11px;">${p.depth_mm} mm</td></tr>`
+   +`<tr><td style="padding:4px 6px;color:#8A93A6;font-size:11px;">Material</td><td style="padding:4px 6px;font-size:11px;">${p.material||'—'}</td></tr>`
+   +`<tr><td style="padding:4px 6px;color:#8A93A6;font-size:11px;">DXF</td><td style="padding:4px 6px;font-size:11px;">${p.has_geometry?'<span style="color:#065F46;font-weight:600;">✓ Traced</span>':'<span style="color:#aaa;">not traced</span>'}</td></tr>`;
+
+  // ── "Use for this window" button ──
+  const btnEl = document.getElementById('qsPMUseBtn');
+  if(p.role){
+    btnEl.style.display='';
+    btnEl.textContent = isActive ? '✓ Active for this window' : `Use as ${ROLE_LABELS[p.role]||p.role} for this window`;
+    btnEl.style.background = isActive ? '#3D6B5C' : '';
+    btnEl.onclick = () => setWindowProfile(p.role, p.code);
+  } else {
+    btnEl.style.display='none';
+  }
+  document.getElementById('qsPModal').classList.add('on');
+}
+
+function setWindowSystem(id){
+  CURRENT_SYSTEM_ID = id ? parseInt(id,10) : null;
+  const sys = PROFILE_SYSTEMS.find(s=>s.id===CURRENT_SYSTEM_ID);
+  showToast(sys ? `Profile system → ${sys.name}` : 'Profile system cleared — using library defaults','ok');
+  scheduleSave();
+}
+
+function setWindowProfile(role, code){
+  if(!model.profileRoles) model.profileRoles = {};
+  if(model.profileRoles[role] === code){
+    delete model.profileRoles[role];  // toggle off
+    showToast(`Cleared ${ROLE_LABELS[role]||role} override — using library default`, 'info');
+  } else {
+    model.profileRoles[role] = code;
+    showToast(`✓ ${ROLE_LABELS[role]||role} → ${code} (this window)`, 'ok');
+  }
+  scheduleSave();
+  qsClosePModal();
+  if(currentTab==='profiles') qsBuildProfs();
+}
+
+function qsClosePModal(){document.getElementById('qsPModal').classList.remove('on');}
+
+function toggleSectionCut(){
+  const panel = document.getElementById('qsSectionCutPanel');
+  const showing = panel.style.display !== 'none';
+  if(showing){ panel.style.display='none'; return; }
+
+  const windowRoles = (window.model && window.model.profileRoles) || {};
+  const relRoles = ['head','cill','threshold','jamb','mullion','transom','sash','glazing_bead'];
+  const body = document.getElementById('qsSectionCutBody');
+  let html = '';
+  relRoles.forEach(role=>{
+    const code = windowRoles[role];
+    let p = code ? CAD_PROFILES.find(x=>x.role===role && x.code===code) : null;
+    if(!p) p = CAD_PROFILES.find(x=>x.role===role && x.is_role_default);
+    if(!p) return;
+    html += `<div style="text-align:center;width:56px;">
+      ${qsProfileThumbSVG(p, 48)}
+      <div style="font-size:9px;color:var(--steel);margin-top:2px;">${ROLE_LABELS[role]||role}</div>
+    </div>`;
+  });
+  body.innerHTML = html || '<div style="font-size:10px;color:var(--steel);">No profiles assigned yet.</div>';
+  panel.style.display='block';
+}
+
+/* ── SPEC JSON ── */
+function qsBuildSpecJSON(){
+  const u=model;
+  const j={schema:'quoting-studio/v1',material:u.frame.material||'Aluminium',
+    unitType:u.unitType||'window',name:u.label||'Window '+QS_WINDOW_ID,
+    shape:u.shape||'rectangle',archRise_mm:u.archRise||0,
+    frameWidth_mm:u.width,frameHeight_mm:u.height,
+    barWidth_mm:u.frame.thickness||68,frameColor:u.frame.color,
+    door:u.unitType==='door'?u.door:undefined,
+    profileLibrary:CAD_PROFILES.filter(p=>p.role).map(p=>({code:p.code,role:p.role,
+      size:p.bar_width_mm+'×'+p.depth_mm+'mm',isDefault:p.is_role_default||false})),
+    cells:u.panes.map(p=>({id:p.id,opener:p.opening||p.opener||'Fixed',glazing:p.glazing}))
+  };
+  const box=document.getElementById('jsonBox');if(box)box.textContent=JSON.stringify(j,null,2);
+}
+function qsExportSpecJSON(){
+  qsBuildSpecJSON();
+  const box=document.getElementById('jsonBox');if(!box)return;
+  const a=document.createElement('a');
+  a.href='data:application/json,'+encodeURIComponent(box.textContent);
+  a.download='QS-unit.json';a.click();
+}
+
+
+boot();
+
+</script>
+<!-- PWQ-3645 profile cross-section modal (Profiles tab) -->
+<div class="qs-modal" id="qsPModal" onclick="qsClosePModal()">
+  <div class="qs-modal-box" onclick="event.stopPropagation()">
+    <h3 id="qsPMTitle">—</h3>
+    <p id="qsPMDesc">—</p>
+    <div id="qsPMSvg" style="text-align:center;margin:14px 0;"></div>
+    <table style="width:100%;font-size:11px;border-collapse:collapse;" id="qsPMTbl"></table>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button id="qsPMUseBtn" class="btn btn-primary btn-sm" style="flex:1;">Use for this window</button>
+      <button class="btn btn-ghost btn-sm" onclick="qsClosePModal()">Close</button>
+    </div>
+  </div>
+</div>
+{% endblock %}

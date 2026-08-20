@@ -1,0 +1,1044 @@
+{% extends 'base.html' %}
+{% block title %}Visualiser — {{ window.label }} — {{ project.customer_name }}{% endblock %}
+
+{% block head %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<style>
+body { overflow: hidden; }
+.app-main { height: calc(100vh - 52px); overflow: hidden; }
+
+.ed-framebar {
+  display:flex;align-items:center;justify-content:space-between;
+  padding:9px 16px;background:var(--navy);flex-shrink:0;border-bottom:1px solid #0D141C;
+}
+.ed-crumb { font-family:var(--font-mono);font-size:12px;color:#B7C0CE; }
+.ed-crumb a { color:#B7C0CE; }
+
+.vis-body { display:flex;flex:1;overflow:hidden;height:calc(100vh - 52px - 44px - 24px); }
+
+.photo-area { flex:1;position:relative;background:#1A1A1A;overflow:hidden; }
+#houseCanvas { display:block;width:100%;height:100%; }
+
+.photo-hint {
+  position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  background:rgba(27,36,48,.78);color:rgba(255,255,255,.9);
+  font-size:11px;font-family:var(--font-mono);padding:5px 13px;
+  border-radius:20px;pointer-events:none;white-space:nowrap;
+}
+.before-after-strip {
+  position:absolute;bottom:14px;left:14px;display:flex;gap:6px;
+}
+.ba-pill {
+  font-size:11px;font-family:var(--font-mono);padding:5px 11px;border-radius:4px;cursor:pointer;
+  border:none;font-weight:600;
+}
+
+.vis-panel {
+  width:266px;background:#FCFBF8;border-left:1px solid var(--line);
+  display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;
+}
+.panel-scroll { flex:1;overflow-y:auto;padding:14px; }
+.panel-scroll::-webkit-scrollbar { width:3px; }
+.panel-scroll::-webkit-scrollbar-thumb { background:var(--line); }
+
+.sec-head {
+  font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--steel);font-weight:600;margin:0 0 9px;
+}
+.upload-zone {
+  border:1.5px dashed var(--line);border-radius:6px;padding:18px;
+  text-align:center;cursor:pointer;margin-bottom:12px;transition:border-color .15s;
+}
+.upload-zone:hover { border-color:var(--copper);background:rgba(201,123,61,.03); }
+.upload-zone p { font-size:12px;color:var(--steel);margin:4px 0 0; }
+
+.slider-field { margin-bottom:14px; }
+.slider-field label {
+  font-size:11px;color:#566;font-weight:500;
+  display:flex;justify-content:space-between;margin-bottom:5px;
+}
+input[type=range] { width:100%;accent-color:var(--copper); }
+
+.corner-grid { display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:12px; }
+.corner-cell {
+  font-size:10px;font-family:var(--font-mono);background:white;
+  border:1px solid var(--line);padding:5px 7px;border-radius:4px;color:#566;
+}
+
+.src-box {
+  font-size:12px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:4px;background:white;color:#566;margin-bottom:12px;
+  font-family:var(--font-mono);font-size:11px;
+}
+.divider { height:1px;background:var(--line);margin:12px 0; }
+
+.status-bar {
+  height:24px;background:var(--navy);display:flex;align-items:center;
+  padding:0 16px;gap:18px;flex-shrink:0;
+}
+.st-item { font-family:var(--font-mono);font-size:10px;color:#5A6A80; }
+.st-item.on { color:#9AE6C7; }
+
+#houseCanvas.pannable { cursor:grab; }
+#houseCanvas.panning  { cursor:grabbing; }
+#houseCanvas.dragging-corner { cursor:crosshair; }
+#houseCanvas.draw-mode { cursor:crosshair; }
+#houseCanvas.moving-window { cursor:move; }
+
+#btnDraw.active { background:var(--copper);color:#fff;border-color:var(--copper); }
+
+.zoom-controls {
+  position:absolute;bottom:14px;right:14px;display:flex;align-items:center;
+  gap:2px;background:rgba(27,36,48,.85);border-radius:8px;padding:4px;
+  z-index:5;box-shadow:0 2px 10px rgba(0,0,0,.25);
+}
+.zoom-btn {
+  width:26px;height:26px;border:none;border-radius:5px;background:transparent;
+  color:#fff;font-size:15px;font-weight:600;cursor:pointer;display:flex;
+  align-items:center;justify-content:center;line-height:1;
+}
+.zoom-btn:hover { background:rgba(255,255,255,.15); }
+.zoom-pct {
+  font-family:var(--font-mono);font-size:11px;color:#fff;min-width:42px;
+  text-align:center;cursor:pointer;user-select:none;
+}
+.zoom-pct:hover { color:var(--copper); }
+.zoom-sep { width:1px;height:16px;background:rgba(255,255,255,.2);margin:0 3px; }
+
+.pan-hint {
+  position:absolute;top:12px;right:14px;
+  background:rgba(27,36,48,.78);color:rgba(255,255,255,.85);
+  font-size:10px;font-family:var(--font-mono);padding:5px 11px;
+  border-radius:20px;pointer-events:none;white-space:nowrap;opacity:0;
+  transition:opacity .2s;
+}
+.pan-hint.show { opacity:1; }
+
+#magnifier {
+  position:absolute;width:120px;height:120px;border-radius:50%;
+  border:3px solid var(--copper);box-shadow:0 4px 16px rgba(0,0,0,.4);
+  pointer-events:none;display:none;overflow:hidden;z-index:10;
+  background:#111;
+}
+#magnifier canvas { position:absolute;top:0;left:0; }
+#magnifier .mag-cross {
+  position:absolute;top:50%;left:50%;width:16px;height:16px;
+  transform:translate(-50%,-50%);pointer-events:none;
+}
+#magnifier .mag-cross::before, #magnifier .mag-cross::after {
+  content:'';position:absolute;background:var(--copper);
+}
+#magnifier .mag-cross::before { left:50%;top:0;width:1px;height:100%;transform:translateX(-50%); }
+#magnifier .mag-cross::after  { top:50%;left:0;height:1px;width:100%;transform:translateY(-50%); }
+</style>
+{% endblock %}
+
+{% block body %}
+<div style="display:flex;flex-direction:column;width:100%;height:100%;">
+
+  <!-- Frame bar -->
+  <div class="ed-framebar">
+    <div class="ed-crumb">
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.customer_name }}</a>
+      &nbsp;/&nbsp;
+      <a href="{{ url_for('editor.edit', project_id=project.id, window_id=window.id) }}">{{ window.label }}</a>
+      &nbsp;/&nbsp;Visualiser
+    </div>
+    <div class="flex gap-8">
+      <button class="btn btn-ghost btn-sm" id="btnDraw" onclick="toggleDrawMode()"
+              title="Click-drag on the photo to place a new window opening">✏ Draw window</button>
+      <button class="btn btn-ghost btn-sm" onclick="resetCorners()">Reset placement</button>
+      <button class="btn btn-ghost btn-sm" onclick="straightenCorners()"
+              title="Square the placement from the current top-left / bottom-right">⊞ Straighten</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleBeforeAfter()" id="btnBA">Before / After</button>
+      <a href="{{ url_for('editor.edit', project_id=project.id, window_id=window.id) }}"
+         class="btn btn-ghost btn-sm">← Editor</a>
+      <button class="btn btn-primary btn-sm" onclick="saveVisual()">Save PNG</button>
+    </div>
+  </div>
+
+  <!-- Main body -->
+  <div class="vis-body">
+
+    <!-- Canvas -->
+    <div class="photo-area">
+      <canvas id="houseCanvas" class="pannable"></canvas>
+      <div class="photo-hint" id="photoHint">Drag inside the window to move it, or drag a copper handle to resize — scroll to zoom</div>
+      <div class="pan-hint" id="panHint">⎵ Space + drag, or middle-click drag, to pan</div>
+      <div class="before-after-strip">
+        <button class="ba-pill" id="btnBefore"
+          style="background:rgba(255,255,255,.85);color:var(--navy);">Before</button>
+        <button class="ba-pill" id="btnAfter"
+          style="background:var(--navy);color:white;">After ●</button>
+      </div>
+      <div class="zoom-controls">
+        <button class="zoom-btn" onclick="zoomBy(0.83)" title="Zoom out">−</button>
+        <span class="zoom-pct" id="zoomPct" onclick="resetView()" title="Click to reset view">100%</span>
+        <button class="zoom-btn" onclick="zoomBy(1.2)" title="Zoom in">+</button>
+        <span class="zoom-sep"></span>
+        <button class="zoom-btn" style="font-size:11px;" onclick="fitToScreen()" title="Fit to screen">⛶</button>
+      </div>
+      <div id="magnifier"><canvas width="240" height="240"></canvas><div class="mag-cross"></div></div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="vis-panel">
+      <div class="panel-scroll">
+
+        <div class="sec-head">Background photo</div>
+        <div class="upload-zone" onclick="document.getElementById('photoUpload').click()">
+          <div style="font-size:22px;opacity:.4;">📷</div>
+          <p>Click to upload house photo</p>
+          <p style="font-size:10px;color:#AAA;margin-top:3px;">JPG / PNG / WEBP</p>
+        </div>
+        <input type="file" id="photoUpload" accept="image/*" style="display:none"
+               onchange="handlePhotoUpload(event)">
+
+        <div class="sec-head">Design source</div>
+        <div class="src-box" id="srcLabel">Loading window render…</div>
+
+        <div class="divider"></div>
+
+        <div class="sec-head">Adjustments</div>
+        <div class="slider-field">
+          <label>Opacity <span id="opVal">92%</span></label>
+          <input type="range" min="10" max="100" value="92" id="opacitySlider"
+                 oninput="document.getElementById('opVal').textContent=this.value+'%';scheduleVis();">
+        </div>
+        <div class="slider-field">
+          <label>Brightness <span id="brVal">100%</span></label>
+          <input type="range" min="40" max="160" value="100" id="brightnessSlider"
+                 oninput="document.getElementById('brVal').textContent=this.value+'%';scheduleVis();">
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="sec-head">Corner positions (px)</div>
+        <div class="corner-grid">
+          <div class="corner-cell" id="cTL">TL —</div>
+          <div class="corner-cell" id="cTR">TR —</div>
+          <div class="corner-cell" id="cBL">BL —</div>
+          <div class="corner-cell" id="cBR">BR —</div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="sec-head">Swap design</div>
+        <select id="windowSwap" class="form-control"
+                style="font-size:12px;margin-bottom:12px;"
+                onchange="swapWindow(this.value)">
+          {% for w in all_windows %}
+          <option value="{{ w.id }}" {{ 'selected' if w.id == window.id }}>
+            {{ w.label }} — {{ w.width_mm }}×{{ w.height_mm }}mm
+          </option>
+          {% endfor %}
+        </select>
+
+        <div class="divider"></div>
+        <button class="btn btn-secondary" style="width:100%;justify-content:center;"
+                onclick="saveVisual()">⬇ Download PNG</button>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="st-item on"  id="stRender">○ Loading render…</div>
+    <div class="st-item"     id="stPhoto">○ No photo</div>
+    <div class="st-item"     id="stVisSave">○ Not saved</div>
+    <div class="st-item" style="margin-left:auto;">Window #{{ window.id }}</div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ================================================================
+   CONFIG
+   ================================================================ */
+const QS_WINDOW_ID  = {{ window.id }};
+const QS_PROJECT_ID = {{ project.id }};
+const CSRF_TOKEN    = document.querySelector('meta[name="csrf-token"]').content;
+const API           = '/api/v1';
+
+/* ================================================================
+   STATE
+   ================================================================ */
+let houseCanvas, houseCtx;
+let bgImage       = null;   // house photo (Image object)
+let srcTexCanvas  = null;   // window render texture (offscreen Canvas)
+let corners       = null;   // {tl,tr,bl,br} each {x,y} — WORLD space (unaffected by zoom/pan)
+let defaultCorners= null;   // remembered layout for double-click-to-reset
+let dragging      = null;   // which corner key is being dragged
+let lastCorner    = 'br';   // last touched corner — arrow keys nudge it
+let showOverlay   = true;   // before/after
+
+/* -------- zoom / pan state -------- */
+let zoom          = 1;
+let panX          = 0, panY = 0;
+const ZOOM_MIN    = 0.25, ZOOM_MAX = 5;
+let isPanning     = false;
+let panLast       = null;   // {x,y} raw canvas px, last pan pointer position
+let spaceHeld     = false;
+const pointers    = new Map(); // active pointer id -> {x,y} for pinch-zoom
+
+/* -------- draw-window mode -------- */
+let drawMode      = false;  // when true, click-drag places a fresh rectangle
+let drawing       = false;  // currently mid-drag while in draw mode
+let drawStart     = null;   // {x,y} world coords of drag start
+let drawCurrent   = null;   // {x,y} world coords of current drag point
+
+/* -------- move whole window (drag-and-drop placement) -------- */
+let movingWindow    = false;
+let moveStartRaw    = null;      // raw canvas px where the move-drag started
+let moveStartCorners= null;      // snapshot of all 4 corners (world) at drag start
+
+/* ================================================================
+   INIT
+   ================================================================ */
+window.addEventListener('load', () => {
+  houseCanvas = document.getElementById('houseCanvas');
+  houseCtx    = houseCanvas.getContext('2d');
+
+  const wrap = houseCanvas.parentElement;
+  houseCanvas.width  = wrap.clientWidth;
+  houseCanvas.height = wrap.clientHeight;
+
+  resetCorners();
+  drawPaintedHouse(houseCtx, houseCanvas.width, houseCanvas.height);
+
+  houseCanvas.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup',   onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
+  houseCanvas.addEventListener('wheel', onWheel, { passive: false });
+  houseCanvas.addEventListener('dblclick', onDblClick);
+  houseCanvas.addEventListener('contextmenu', e => { if (spaceHeld || isPanning) e.preventDefault(); });
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Escape' && drawMode) { toggleDrawMode(); return; }
+    if (e.code === 'Space' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
+      spaceHeld = true;
+      document.getElementById('panHint').classList.add('show');
+      houseCanvas.classList.add('pannable');
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', e => {
+    if (e.code === 'Space') {
+      spaceHeld = false;
+      document.getElementById('panHint').classList.remove('show');
+    }
+  });
+  window.addEventListener('resize',    onWindowResize);
+
+  loadState();
+});
+
+function onWindowResize() {
+  const wrap = houseCanvas.parentElement;
+  houseCanvas.width  = wrap.clientWidth;
+  houseCanvas.height = wrap.clientHeight;
+  resetView();
+  resetCorners();
+  render();
+}
+
+/* ================================================================
+   VIEW TRANSFORM (zoom / pan) — corners stay in WORLD space always,
+   these helpers convert between raw canvas pixels and world coords.
+   ================================================================ */
+function rawXY(evt) {
+  const rect = houseCanvas.getBoundingClientRect();
+  return {
+    x: (evt.clientX - rect.left) * (houseCanvas.width  / rect.width),
+    y: (evt.clientY - rect.top)  * (houseCanvas.height / rect.height),
+  };
+}
+function toWorld(pt)  { return { x: (pt.x - panX) / zoom, y: (pt.y - panY) / zoom }; }
+function toScreen(pt) { return { x: pt.x * zoom + panX,   y: pt.y * zoom + panY   }; }
+
+function setZoom(newZoom, pivotRaw) {
+  newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, newZoom));
+  const pivot = pivotRaw || { x: houseCanvas.width/2, y: houseCanvas.height/2 };
+  const worldBefore = toWorld(pivot);
+  zoom = newZoom;
+  panX = pivot.x - worldBefore.x * zoom;
+  panY = pivot.y - worldBefore.y * zoom;
+  document.getElementById('zoomPct').textContent = Math.round(zoom * 100) + '%';
+  render();
+}
+function zoomBy(factor) { setZoom(zoom * factor); }
+function resetView() { zoom = 1; panX = 0; panY = 0; document.getElementById('zoomPct').textContent = '100%'; render(); }
+function fitToScreen() { resetView(); }
+
+function onWheel(evt) {
+  evt.preventDefault();
+  const pivot = rawXY(evt);
+  const factor = evt.deltaY < 0 ? 1.1 : 0.9;
+  setZoom(zoom * factor, pivot);
+}
+
+/* ================================================================
+   DRAW-WINDOW MODE — click-drag on the photo to place a brand new
+   rectangular opening instead of nudging the existing handles.
+   ================================================================ */
+function toggleDrawMode() {
+  drawMode = !drawMode;
+  document.getElementById('btnDraw').classList.toggle('active', drawMode);
+  houseCanvas.classList.toggle('draw-mode', drawMode);
+  document.getElementById('photoHint').textContent = drawMode
+    ? 'Click and drag on the photo to draw the window opening'
+    : 'Drag inside the window to move it, or drag a copper handle to resize — scroll to zoom';
+  if (!drawMode) { drawing = false; drawStart = null; drawCurrent = null; render(); }
+}
+
+/* ================================================================
+   LOAD SAVED STATE FROM API
+   ================================================================ */
+async function loadState() {
+  try {
+    const res = await fetch(`${API}/windows/${QS_WINDOW_ID}/visualisation`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+
+    // load render texture
+    const RENDER_URL = {{ (render_url | tojson) if render_url else 'null' }};
+    if (RENDER_URL) await loadRenderTexture(RENDER_URL);
+    else { document.getElementById('srcLabel').textContent='No render — open editor and click → Visualise'; setStatus('stRender','○ No render',false); return; }
+
+    if (d.exists) {
+      // restore saved sliders
+      if (d.opacity !== undefined) {
+        document.getElementById('opacitySlider').value   = Math.round(d.opacity * 100);
+        document.getElementById('opVal').textContent     = Math.round(d.opacity * 100) + '%';
+      }
+      if (d.brightness !== undefined) {
+        document.getElementById('brightnessSlider').value= Math.round(d.brightness * 100);
+        document.getElementById('brVal').textContent     = Math.round(d.brightness * 100) + '%';
+      }
+      // restore saved corners
+      if (d.corners) {
+        corners = {
+          tl: { x: d.corners.tl[0], y: d.corners.tl[1] },
+          tr: { x: d.corners.tr[0], y: d.corners.tr[1] },
+          bl: { x: d.corners.bl[0], y: d.corners.bl[1] },
+          br: { x: d.corners.br[0], y: d.corners.br[1] },
+        };
+      }
+      // restore saved photo
+      if (d.photo_url) {
+        const img = new Image();
+        img.onload = () => { bgImage = img; render(); setStatus('stPhoto', '● Photo loaded', true); };
+        img.onerror = () => render();
+        img.src = d.photo_url;
+        return;
+      }
+    }
+    render();
+  } catch(e) {
+    console.warn('[QS] loadState failed:', e);
+    render();
+  }
+}
+
+function loadRenderTexture(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      srcTexCanvas = document.createElement('canvas');
+      srcTexCanvas.width  = img.width;
+      srcTexCanvas.height = img.height;
+      srcTexCanvas.getContext('2d').drawImage(img, 0, 0);
+      document.getElementById('srcLabel').textContent = '{{ window.label }} — synced ✓';
+      setStatus('stRender', '● Render loaded', true);
+      resolve();
+    };
+    img.onerror = () => {
+      document.getElementById('srcLabel').textContent = 'No render — open editor and click → Visualise';
+      setStatus('stRender', '○ No render', false);
+      resolve();
+    };
+    img.src = url;
+  });
+}
+
+/* ================================================================
+   CORNER MANAGEMENT
+   ================================================================ */
+function straightenCorners(){
+  /* square the quad using current TL and BR — quick perspective reset that
+     keeps position/size, useful after rough dragging */
+  const tl=corners.tl, br=corners.br;
+  corners.tr = { x: br.x, y: tl.y };
+  corners.bl = { x: tl.x, y: br.y };
+  updateCornerLabels(); render(); scheduleVis();
+}
+
+document.addEventListener('keydown', (e)=>{
+  /* arrow-nudge the last touched corner: 1px, Shift = 10px */
+  if(!corners[lastCorner]) return;
+  const step = (e.shiftKey ? 10 : 1) / zoom;
+  let dx=0, dy=0;
+  if(e.key==='ArrowLeft')  dx=-step;
+  else if(e.key==='ArrowRight') dx=step;
+  else if(e.key==='ArrowUp')    dy=-step;
+  else if(e.key==='ArrowDown')  dy=step;
+  else return;
+  if(e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  e.preventDefault();
+  corners[lastCorner].x += dx;
+  corners[lastCorner].y += dy;
+  updateCornerLabels(); render(); scheduleVis();
+});
+
+function resetCorners() {
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+  const mx = cw * 0.30, my = ch * 0.25;
+  const mw = cw * 0.40, mh = ch * 0.45;
+  corners = {
+    tl: { x: mx,      y: my      },
+    tr: { x: mx + mw, y: my      },
+    bl: { x: mx,      y: my + mh },
+    br: { x: mx + mw, y: my + mh },
+  };
+  defaultCorners = JSON.parse(JSON.stringify(corners));
+  render();
+}
+
+function updateCornerLabels() {
+  for (const k of ['tl','tr','bl','br']) {
+    const el = document.getElementById('c' + k.toUpperCase());
+    if (el && corners[k]) {
+      el.textContent = `${k.toUpperCase()} ${Math.round(corners[k].x)}, ${Math.round(corners[k].y)}`;
+    }
+  }
+}
+
+/* ================================================================
+   POINTER HANDLING — corner drag / pan / pinch-zoom (mouse + touch)
+   ================================================================ */
+function hitCorner(raw) {
+  for (const k of ['tl','tr','br','bl']) {
+    const s = toScreen(corners[k]);
+    const dx = s.x - raw.x, dy = s.y - raw.y;
+    if (Math.sqrt(dx*dx + dy*dy) < 16) return k;
+  }
+  return null;
+}
+
+/* point-in-quad test (ray casting) — used to detect a click inside the
+   window overlay so the whole thing can be dragged as one unit */
+function pointInQuad(raw) {
+  if (!corners) return false;
+  const poly = ['tl','tr','br','bl'].map(k => toScreen(corners[k]));
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    const intersect = ((yi > raw.y) !== (yj > raw.y)) &&
+      (raw.x < (xj - xi) * (raw.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function onPointerDown(evt) {
+  const raw = rawXY(evt);
+  pointers.set(evt.pointerId, raw);
+  houseCanvas.setPointerCapture(evt.pointerId);
+
+  // two active pointers → pinch-zoom / two-finger pan, cancel any corner drag
+  if (pointers.size === 2) {
+    dragging = null;
+    movingWindow = false;
+    houseCanvas.classList.remove('dragging-corner', 'moving-window');
+    return;
+  }
+
+  if (drawMode) {
+    drawing     = true;
+    drawStart   = toWorld(raw);
+    drawCurrent = drawStart;
+    render();
+    return;
+  }
+
+  if (evt.button === 1 || spaceHeld) {          // middle-click or space+drag → pan
+    isPanning = true;
+    panLast   = raw;
+    houseCanvas.classList.add('panning');
+    return;
+  }
+
+  const hit = hitCorner(raw);
+  if (hit) {
+    dragging   = hit;
+    lastCorner = hit;
+    houseCanvas.classList.add('dragging-corner');
+    showMagnifier(raw);
+  } else if (corners && pointInQuad(raw)) {       // click inside the overlay → drag whole window
+    movingWindow     = true;
+    moveStartRaw     = raw;
+    moveStartCorners = JSON.parse(JSON.stringify(corners));
+    houseCanvas.classList.add('moving-window');
+  } else if (evt.pointerType !== 'touch' || pointers.size === 1) {
+    isPanning = true;                            // drag empty space → pan
+    panLast   = raw;
+    houseCanvas.classList.add('panning');
+  }
+}
+
+function onPointerMove(evt) {
+  if (!pointers.has(evt.pointerId) && evt.pointerType !== 'mouse') return;
+  const raw = rawXY(evt);
+  if (pointers.has(evt.pointerId)) pointers.set(evt.pointerId, raw);
+
+  // pinch-zoom with two touch points
+  if (pointers.size === 2) {
+    const pts = [...pointers.values()];
+    const dist  = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    const mid   = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    if (onPointerMove._pinchDist) {
+      setZoom(zoom * (dist / onPointerMove._pinchDist), mid);
+    }
+    onPointerMove._pinchDist = dist;
+    return;
+  }
+  onPointerMove._pinchDist = null;
+
+  if (drawing) {
+    drawCurrent = toWorld(raw);
+    render();
+    return;
+  }
+
+  if (dragging) {
+    corners[dragging] = toWorld(raw);
+    updateCornerLabels(); render(); scheduleVis();
+    showMagnifier(raw);
+    return;
+  }
+  if (movingWindow && moveStartRaw && moveStartCorners) {
+    const dx = (raw.x - moveStartRaw.x) / zoom;
+    const dy = (raw.y - moveStartRaw.y) / zoom;
+    for (const k of ['tl','tr','bl','br']) {
+      corners[k] = { x: moveStartCorners[k].x + dx, y: moveStartCorners[k].y + dy };
+    }
+    updateCornerLabels(); render(); scheduleVis();
+    return;
+  }
+  if (isPanning && panLast) {
+    panX += raw.x - panLast.x;
+    panY += raw.y - panLast.y;
+    panLast = raw;
+    render();
+  }
+}
+
+function onPointerUp(evt) {
+  pointers.delete(evt.pointerId);
+  onPointerMove._pinchDist = null;
+
+  if (drawing) {
+    drawing = false;
+    if (drawStart && drawCurrent) {
+      const x0 = Math.min(drawStart.x, drawCurrent.x), x1 = Math.max(drawStart.x, drawCurrent.x);
+      const y0 = Math.min(drawStart.y, drawCurrent.y), y1 = Math.max(drawStart.y, drawCurrent.y);
+      if (x1 - x0 > 8 / zoom && y1 - y0 > 8 / zoom) {   // ignore accidental taps/tiny drags
+        corners = {
+          tl: { x: x0, y: y0 }, tr: { x: x1, y: y0 },
+          bl: { x: x0, y: y1 }, br: { x: x1, y: y1 },
+        };
+        defaultCorners = JSON.parse(JSON.stringify(corners));
+        lastCorner = 'br';
+        updateCornerLabels();
+        scheduleVis();
+      }
+    }
+    drawStart = null; drawCurrent = null;
+    toggleDrawMode();   // auto-exit draw mode after placing one rectangle
+    return;
+  }
+
+  if (pointers.size < 2 && (dragging || movingWindow)) scheduleVis();
+  dragging  = null;
+  isPanning = false;
+  panLast   = null;
+  movingWindow     = false;
+  moveStartRaw     = null;
+  moveStartCorners = null;
+  houseCanvas.classList.remove('panning', 'dragging-corner', 'moving-window');
+  hideMagnifier();
+}
+
+function onDblClick(evt) {
+  const raw = rawXY(evt);
+  const hit = hitCorner(raw);
+  if (hit && defaultCorners) {
+    corners[hit] = { ...defaultCorners[hit] };
+    lastCorner = hit;
+    updateCornerLabels(); render(); scheduleVis();
+  }
+}
+
+/* -------- magnifier loupe for precise corner placement -------- */
+function showMagnifier(raw) {
+  const mag = document.getElementById('magnifier');
+  const mc  = mag.querySelector('canvas');
+  const mctx = mc.getContext('2d');
+  const zoomFactor = 3;
+  const half = mc.width / zoomFactor / 2;
+
+  mctx.imageSmoothingEnabled = false;
+  mctx.clearRect(0, 0, mc.width, mc.height);
+  mctx.drawImage(houseCanvas,
+    raw.x - half, raw.y - half, half * 2, half * 2,
+    0, 0, mc.width, mc.height);
+
+  const wrap = houseCanvas.parentElement.getBoundingClientRect();
+  const rect = houseCanvas.getBoundingClientRect();
+  const sx = raw.x * (rect.width / houseCanvas.width) + (rect.left - wrap.left);
+  const sy = raw.y * (rect.height / houseCanvas.height) + (rect.top - wrap.top);
+  mag.style.left = (sx - mag.offsetWidth / 2) + 'px';
+  mag.style.top  = (sy - mag.offsetHeight - 30) + 'px';
+  mag.style.display = 'block';
+}
+function hideMagnifier() {
+  document.getElementById('magnifier').style.display = 'none';
+}
+
+/* ================================================================
+   RENDER
+   ================================================================ */
+function drawBackground(ctx, cw, ch) {
+  if (bgImage) {
+    const scale = Math.max(cw / bgImage.width, ch / bgImage.height);
+    const dw = bgImage.width * scale, dh = bgImage.height * scale;
+    ctx.drawImage(bgImage, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+  } else {
+    drawPaintedHouse(ctx, cw, ch);
+  }
+}
+
+function render() {
+  if (!houseCanvas || !houseCtx) return;
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+
+  houseCtx.setTransform(1, 0, 0, 1, 0, 0);
+  houseCtx.clearRect(0, 0, cw, ch);
+
+  // background — drawn through the zoom/pan transform (plain vector/image draw,
+  // safe to use ctx transform here since no pixel readback happens on it)
+  houseCtx.setTransform(zoom, 0, 0, zoom, panX, panY);
+  drawBackground(houseCtx, cw, ch);
+  houseCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // window overlay — pixel-level compositing ignores ctx transform, so we
+  // pass it corners already converted to screen space
+  if (showOverlay && srcTexCanvas && corners) {
+    const s = { tl: toScreen(corners.tl), tr: toScreen(corners.tr),
+                bl: toScreen(corners.bl), br: toScreen(corners.br) };
+    _applyHomographyWarp(houseCtx, cw, ch, s);
+  }
+
+  drawHandles();
+  drawDrawPreview();
+  updateCornerLabels();
+}
+
+function drawDrawPreview() {
+  if (!drawing || !drawStart || !drawCurrent) return;
+  const a = toScreen(drawStart), b = toScreen(drawCurrent);
+  const ctx = houseCtx;
+  ctx.save();
+  ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+  ctx.strokeRect(Math.min(a.x,b.x), Math.min(a.y,b.y), Math.abs(b.x-a.x), Math.abs(b.y-a.y));
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(201,123,61,.12)';
+  ctx.fillRect(Math.min(a.x,b.x), Math.min(a.y,b.y), Math.abs(b.x-a.x), Math.abs(b.y-a.y));
+  ctx.restore();
+}
+
+function _applyHomographyWarp(targetCtx, cw, ch, dstCorners) {
+  const sw = srcTexCanvas.width, sh = srcTexCanvas.height;
+
+  // compute homography src (window canvas) → dst (given quad, already in
+  // the target canvas's own pixel space)
+  const s = dstCorners;
+  const src = [[0,0],[sw,0],[0,sh],[sw,sh]];
+  const dst = [
+    [s.tl.x, s.tl.y],
+    [s.tr.x, s.tr.y],
+    [s.bl.x, s.bl.y],
+    [s.br.x, s.br.y],
+  ];
+  const H    = computeH(src, dst);
+  const Hinv = computeH(dst, src);  // inverse: house → window
+
+  // bounding box of the destination quad to limit pixel loop
+  const xs   = dst.map(p => p[0]), ys = dst.map(p => p[1]);
+  const x0   = Math.max(0, Math.floor(Math.min(...xs)));
+  const x1   = Math.min(cw, Math.ceil(Math.max(...xs)));
+  const y0   = Math.max(0, Math.floor(Math.min(...ys)));
+  const y1   = Math.min(ch, Math.ceil(Math.max(...ys)));
+
+  const opacity    = +document.getElementById('opacitySlider').value / 100;
+  const brightness = +document.getElementById('brightnessSlider').value / 100;
+
+  const srcCtx  = srcTexCanvas.getContext('2d');
+  const srcData = srcCtx.getImageData(0, 0, sw, sh).data;
+  const destImg = targetCtx.getImageData(0, 0, cw, ch);
+  const destData= destImg.data;
+
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const p  = applyH(Hinv, x, y);
+      if (p.x < 0 || p.x >= sw - 1 || p.y < 0 || p.y >= sh - 1) continue;
+      /* bilinear sample — smooth edges instead of jagged nearest-pixel */
+      const fx = Math.floor(p.x), fy = Math.floor(p.y);
+      const dx = p.x - fx,        dy = p.y - fy;
+      const i00=(fy*sw+fx)*4, i10=i00+4, i01=i00+sw*4, i11=i01+4;
+      const w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
+      const sr = srcData[i00]*w00+srcData[i10]*w10+srcData[i01]*w01+srcData[i11]*w11;
+      const sg = srcData[i00+1]*w00+srcData[i10+1]*w10+srcData[i01+1]*w01+srcData[i11+1]*w11;
+      const sb2= srcData[i00+2]*w00+srcData[i10+2]*w10+srcData[i01+2]*w01+srcData[i11+2]*w11;
+      const sa = (srcData[i00+3]*w00+srcData[i10+3]*w10+srcData[i01+3]*w01+srcData[i11+3]*w11)/255;
+      if (sa < 0.01) continue;
+      const alpha= sa * opacity;
+      const di   = (y * cw + x) * 4;
+      destData[di]   = Math.min(255, sr  * brightness) * alpha + destData[di]   * (1 - alpha);
+      destData[di+1] = Math.min(255, sg  * brightness) * alpha + destData[di+1] * (1 - alpha);
+      destData[di+2] = Math.min(255, sb2 * brightness) * alpha + destData[di+2] * (1 - alpha);
+      destData[di+3] = 255;
+    }
+  }
+  targetCtx.putImageData(destImg, 0, 0);
+}
+
+/* ================================================================
+   HOMOGRAPHY MATH
+   ================================================================ */
+function computeH(src, dst) {
+  // DLT: build 8×9 matrix, solve for null space
+  const A = [];
+  for (let i = 0; i < 4; i++) {
+    const [sx, sy] = src[i], [dx, dy] = dst[i];
+    A.push([-sx,-sy,-1, 0, 0, 0, dx*sx, dx*sy, dx]);
+    A.push([ 0,  0,  0,-sx,-sy,-1, dy*sx, dy*sy, dy]);
+  }
+  // set h[8]=1 and solve 8×8
+  const M = A.map(row => [...row.slice(0,8), -row[8]]);
+  for (let col = 0; col < 8; col++) {
+    let maxRow = col;
+    for (let r = col+1; r < 8; r++)
+      if (Math.abs(M[r][col]) > Math.abs(M[maxRow][col])) maxRow = r;
+    [M[col], M[maxRow]] = [M[maxRow], M[col]];
+    const pivot = M[col][col];
+    if (Math.abs(pivot) < 1e-10) continue;
+    for (let r = 0; r < 8; r++) {
+      if (r === col) continue;
+      const f = M[r][col] / pivot;
+      for (let j = col; j <= 8; j++) M[r][j] -= f * M[col][j];
+    }
+  }
+  const h = M.map((row, i) => row[8] / row[i]);
+  h.push(1);
+  return h;
+}
+
+function applyH(H, x, y) {
+  const [a,b,c,d,e,f,g,hh,i] = H;
+  const w = g*x + hh*y + i;
+  return { x: (a*x + b*y + c) / w, y: (d*x + e*y + f) / w };
+}
+
+/* ================================================================
+   HANDLE DRAWING
+   ================================================================ */
+function drawHandles() {
+  if (!corners) return;
+  const ctx = houseCtx;
+  const s = { tl: toScreen(corners.tl), tr: toScreen(corners.tr),
+              bl: toScreen(corners.bl), br: toScreen(corners.br) };
+  ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+  ctx.beginPath();
+  ctx.moveTo(s.tl.x, s.tl.y);
+  ctx.lineTo(s.tr.x, s.tr.y);
+  ctx.lineTo(s.br.x, s.br.y);
+  ctx.lineTo(s.bl.x, s.bl.y);
+  ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+  for (const k of ['tl','tr','br','bl']) {
+    const p = s[k];
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 10, 0, Math.PI*2);
+    ctx.fillStyle = k === lastCorner ? '#C97B3D' : 'white'; ctx.fill();
+    ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle = k === lastCorner ? 'white' : '#C97B3D';
+    ctx.font = 'bold 8px Inter, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(k.toUpperCase(), p.x, p.y);
+  }
+}
+
+/* ================================================================
+   PAINTED HOUSE (fallback background)
+   ================================================================ */
+function drawPaintedHouse(ctx, w, h) {
+  const sky = ctx.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, '#C8DDE6'); sky.addColorStop(.55, '#E4DCC6'); sky.addColorStop(1, '#C6B48A');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+  const hl = w*.08, hr = w*.92, ht = h*.30, hb = h;
+  ctx.fillStyle = '#D6CAB2'; ctx.fillRect(hl, ht, hr-hl, hb-ht);
+  ctx.fillStyle = '#56432F';
+  ctx.beginPath();
+  ctx.moveTo(hl-w*.04, ht); ctx.lineTo(w/2, ht-h*.17); ctx.lineTo(hr+w*.04, ht);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#7B9B5E'; ctx.fillRect(0, h*.82, w, h);
+  [[.12,.36,.08,.14],[.28,.36,.08,.14],[.64,.36,.08,.14],[.80,.36,.08,.14]].forEach(([lx,ly,lw,lh]) => {
+    ctx.fillStyle = 'rgba(140,185,200,.45)';
+    ctx.fillRect(hl+(hr-hl)*lx, ht+(hb-ht)*ly, (hr-hl)*lw, (hb-ht)*lh);
+    ctx.strokeStyle = '#8C7457'; ctx.lineWidth = 2;
+    ctx.strokeRect(hl+(hr-hl)*lx, ht+(hb-ht)*ly, (hr-hl)*lw, (hb-ht)*lh);
+  });
+  ctx.fillStyle = '#3A2A1A';
+  ctx.fillRect(w*.43, h*.52, w*.14, h*.30);
+}
+
+/* ================================================================
+   PHOTO UPLOAD
+   ================================================================ */
+async function handlePhotoUpload(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+
+  // 1. show local preview instantly
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => { bgImage = img; render(); setStatus('stPhoto','● Photo loaded',true); };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+
+  // 2. upload to server in background
+  try {
+    const fd = new FormData();
+    fd.append('photo', file);
+    const res = await fetch(`${API}/windows/${QS_WINDOW_ID}/photo`, {
+      method: 'POST',
+      headers: {'X-CSRFToken': CSRF_TOKEN},
+      body: fd,
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    console.log('[QS] Photo uploaded:', d.photo_url);
+  } catch(e) {
+    console.error('[QS] Photo upload failed:', e);
+  }
+}
+
+/* ================================================================
+   AUTO-SAVE VISUALISATION STATE
+   ================================================================ */
+let _visTimer = null;
+function scheduleVis() {
+  setStatus('stVisSave', '○ Saving…', false);
+  clearTimeout(_visTimer);
+  _visTimer = setTimeout(saveVisState, 800);
+  render();
+}
+
+async function saveVisState() {
+  try {
+    const opacity    = +document.getElementById('opacitySlider').value / 100;
+    const brightness = +document.getElementById('brightnessSlider').value / 100;
+    const res = await fetch(`${API}/windows/${QS_WINDOW_ID}/visualisation`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken':CSRF_TOKEN},
+      body: JSON.stringify({
+        corners: {
+          tl: [corners.tl.x, corners.tl.y],
+          tr: [corners.tr.x, corners.tr.y],
+          bl: [corners.bl.x, corners.bl.y],
+          br: [corners.br.x, corners.br.y],
+        },
+        opacity, brightness,
+      }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    setStatus('stVisSave', '● Saved', true);
+  } catch(e) {
+    console.error('[QS] saveVisState failed:', e);
+    setStatus('stVisSave', '✕ Save failed', false);
+  }
+}
+
+/* ================================================================
+   BEFORE / AFTER
+   ================================================================ */
+let _showingBefore = false;
+function toggleBeforeAfter() {
+  _showingBefore = !_showingBefore;
+  showOverlay    = !_showingBefore;
+  document.getElementById('btnBefore').style.background =  _showingBefore ? 'var(--navy)' : 'rgba(255,255,255,.85)';
+  document.getElementById('btnBefore').style.color      =  _showingBefore ? 'white'       : 'var(--navy)';
+  document.getElementById('btnAfter').style.background  = !_showingBefore ? 'var(--navy)' : 'rgba(255,255,255,.85)';
+  document.getElementById('btnAfter').style.color       = !_showingBefore ? 'white'       : 'var(--navy)';
+  render();
+}
+
+/* ================================================================
+   SAVE / DOWNLOAD PNG — clean composite only, no handles/guides/UI.
+   Exported at the source photo's native resolution when available,
+   otherwise upscaled 2x from the on-screen canvas for print quality.
+   ================================================================ */
+function buildExportCanvas() {
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+  let exportScale = 2;
+  if (bgImage) exportScale = Math.max(1, bgImage.width / cw);
+
+  const ex   = document.createElement('canvas');
+  ex.width   = Math.round(cw * exportScale);
+  ex.height  = Math.round(ch * exportScale);
+  const ectx = ex.getContext('2d');
+
+  drawBackground(ectx, ex.width, ex.height);
+
+  if (showOverlay && srcTexCanvas && corners) {
+    const s = {
+      tl: { x: corners.tl.x * exportScale, y: corners.tl.y * exportScale },
+      tr: { x: corners.tr.x * exportScale, y: corners.tr.y * exportScale },
+      bl: { x: corners.bl.x * exportScale, y: corners.bl.y * exportScale },
+      br: { x: corners.br.x * exportScale, y: corners.br.y * exportScale },
+    };
+    _applyHomographyWarp(ectx, ex.width, ex.height, s);
+  }
+  return ex;
+}
+
+function saveVisual() {
+  const ex = buildExportCanvas();
+  const link = document.createElement('a');
+  link.download = `window-${QS_WINDOW_ID}-visualisation.png`;
+  link.href = ex.toDataURL('image/png');
+  link.click();
+}
+
+/* ================================================================
+   HELPERS
+   ================================================================ */
+function swapWindow(windowId) {
+  // Load a different window's render texture without leaving the page
+  const url = `/projects/{{ project.id }}/windows/${windowId}/visualise`;
+  window.location.href = url;
+}
+
+function setStatus(id, text, on) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('on', on);
+}
+</script>
+{% endblock %}

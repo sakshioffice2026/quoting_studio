@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}Error 404 — Quoting Studio{% endblock %}
+{% block body %}
+<div style="display:flex;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:40px;">
+  <div>
+    <div style="font-family:var(--font-display);font-size:72px;color:var(--line);line-height:1;">404</div>
+    <div style="font-family:var(--font-display);font-size:22px;margin:8px 0 12px;">
+      {% if '404' == '400' %}Bad Request
+      {% elif '404' == '403' %}Access Denied
+      {% elif '404' == '404' %}Page Not Found
+      {% else %}Something Went Wrong{% endif %}
+    </div>
+    <p style="color:var(--steel);max-width:360px;margin:0 auto 24px;">
+      {% if '404' == '404' %}That page doesn't exist or you don't have access to it.
+      {% elif '404' == '500' %}An unexpected error occurred. It has been logged and we'll look into it.
+      {% else %}An error occurred processing your request.{% endif %}
+    </p>
+    <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary">← Back to Dashboard</a>
+  </div>
+</div>
+{% endblock %}

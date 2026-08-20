@@ -1,0 +1,125 @@
+{% extends 'base.html' %}
+{% block title %}Profile Library — Settings — Quoting Studio{% endblock %}
+{% block body %}
+<div style="display:flex;min-height:calc(100vh - 52px);">
+  {% include 'settings/_sidebar.html' %}
+  <div style="flex:1;padding:28px 32px;max-width:1100px;">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;">
+      <div>
+        <h1 style="margin:0 0 4px;font-size:20px;">Profile Library</h1>
+        <div class="sub mono">{{ total }} profiles — frame, sash, sill and more</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        {% if total == 0 %}
+        <form method="POST" action="{{ url_for('settings.seed_profiles') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-primary btn-sm">⬇ Seed 16 built-in profiles</button>
+        </form>
+        {% else %}
+        <form method="POST" action="{{ url_for('settings.seed_profiles') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-secondary btn-sm">⬇ Re-seed missing</button>
+        </form>
+        {% endif %}
+        <a href="{{ url_for('settings.create_profile') }}" class="btn btn-primary btn-sm">+ Add Profile</a>
+        <form method="POST" action="{{ url_for('settings.backfill_geometry') }}" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-secondary btn-sm"
+                  title="Load DXF geometry into any profile missing it, so 3D uses the real profile shape">
+            ↻ Fix 3D geometry
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Category filter pills -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
+      <a href="{{ url_for('settings.profiles_library') }}"
+         style="padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;
+                background:{{ '#C97B3D' if not active_cat else '#F6F3EC' }};
+                color:{{ 'white' if not active_cat else '#566' }};border:1px solid var(--line);">All</a>
+      {% for cat in categories %}
+      <a href="{{ url_for('settings.profiles_library', category=cat) }}"
+         style="padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;
+                background:{{ '#C97B3D' if active_cat==cat else '#F6F3EC' }};
+                color:{{ 'white' if active_cat==cat else '#566' }};border:1px solid var(--line);">{{ cat }}</a>
+      {% endfor %}
+    </div>
+
+    {% if profiles %}
+    <!-- Profile table -->
+    <div style="background:white;border:1px solid var(--line);border-radius:8px;overflow:hidden;">
+      <table class="data-table" style="margin:0;">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Name</th>
+            <th>Category</th>
+            <th style="text-align:right;">Width</th>
+            <th style="text-align:right;">Depth</th>
+            <th style="text-align:right;">Rebate W×D</th>
+            <th style="text-align:right;">Glass Rebate</th>
+            <th>Type</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in profiles %}
+          <tr>
+            <td><strong class="mono" style="color:var(--copper);">{{ p.code or '—' }}</strong></td>
+            <td>{{ p.name }}</td>
+            <td>
+              <span style="background:#F6F3EC;border:1px solid var(--line);border-radius:12px;
+                           padding:2px 9px;font-size:11px;font-weight:600;color:var(--navy);">{{ p.category }}</span>
+            </td>
+            <td class="mono" style="text-align:right;">{{ p.bar_width_mm|int }} mm</td>
+            <td class="mono" style="text-align:right;">{{ p.depth_mm|int }} mm</td>
+            <td class="mono" style="text-align:right;">
+              {% if p.rebate_w_mm > 0 %}{{ p.rebate_w_mm|int }} × {{ p.rebate_d_mm|int }}{% else %}—{% endif %}
+            </td>
+            <td class="mono" style="text-align:right;">
+              {% if p.glass_rebate_mm > 0 %}{{ p.glass_rebate_mm|int }}{% else %}0{% endif %}
+            </td>
+            <td>
+              {% if p.is_builtin %}<span style="background:#EFF4F1;color:#2D6B4A;border:1px solid #B2D4C0;
+                border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700;">Built-in</span>
+              {% else %}<span style="background:#F6F3EC;color:#566;border:1px solid var(--line);
+                border-radius:10px;padding:2px 8px;font-size:10px;">Custom</span>{% endif %}
+            </td>
+            <td style="white-space:nowrap;">
+              <a href="{{ url_for('settings.upload_dxf', profile_id=p.id) }}"
+                 class="btn btn-ghost btn-sm" style="font-size:11px;">
+                {% if p.has_geometry %}
+                  <span style="color:#166534;font-weight:700;">✓ DXF</span>
+                {% else %}
+                  Upload DXF
+                {% endif %}
+              </a>
+              <form method="POST" action="{{ url_for('settings.delete_profile_library', profile_id=p.id) }}"
+                    style="display:inline;" onsubmit="return confirm('Delete {{ p.code }}?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-danger btn-sm" style="font-size:11px;">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% else %}
+    <div class="empty-state">
+      <div class="icon">◱</div>
+      <p>No profiles yet.</p>
+      <form method="POST" action="{{ url_for('settings.seed_profiles') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-primary">⬇ Seed 16 built-in profiles from Sections_1</button>
+      </form>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% block title %}CAD Profiles — Settings — Quoting Studio{% endblock %}
+{% block body %}
+<div style="display:flex;min-height:calc(100vh - 52px);">
+  {% include 'settings/_sidebar.html' %}
+  <div style="flex:1;padding:32px;max-width:860px;">
+
+    <div class="page-header">
+      <div>
+        <h1>CAD Profiles</h1>
+        <div class="sub mono">Frame geometry used when generating DXF elevation drawings</div>
+      </div>
+    </div>
+
+    <!-- Info box -->
+    <div style="background:#E8F0E9;border:1px solid #B8D4BB;border-radius:6px;
+                padding:14px 18px;margin-bottom:24px;font-size:13px;line-height:1.6;">
+      <strong style="color:#2E7D52;">How profiles work</strong> — when you click
+      <strong>Export DXF</strong> in the sketch editor, the generator uses the active
+      profile's bar width to draw the frame cross-section.
+      The <strong>PWQ-3645</strong> profile (40mm bar, 4mm wall) matches the standard
+      aluminium window section used as the reference drawing style for this platform.
+      Seed it once and it will be used automatically for all DXF exports.
+    </div>
+
+    <!-- Current profiles table -->
+    {% if profiles %}
+    <div style="background:white;border:1px solid var(--line);border-radius:6px;
+                overflow:hidden;margin-bottom:24px;">
+      <table class="data-table" style="margin:0;">
+        <thead>
+          <tr>
+            <th>Profile name</th>
+            <th>Drawing ref</th>
+            <th>Material</th>
+            <th>Bar width</th>
+            <th>Wall</th>
+            <th>Depth</th>
+            <th>Default</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in profiles %}
+          <tr>
+            <td style="font-weight:600;">{{ p.name }}</td>
+            <td class="mono" style="font-size:11px;">{{ p.drawing_ref or '—' }}</td>
+            <td>{{ p.material }}</td>
+            <td class="mono">{{ p.bar_width_mm }} mm</td>
+            <td class="mono muted">{{ p.wall_thickness_mm }} mm</td>
+            <td class="mono muted">{{ p.depth_mm }} mm</td>
+            <td>
+              {% if p.is_default %}
+                <span class="badge badge-sent">Default</span>
+              {% else %}
+              <form method="POST"
+                    action="{{ url_for('settings.set_default_profile', profile_id=p.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-secondary btn-sm">Set default</button>
+              </form>
+              {% endif %}
+            </td>
+            <td>
+              <form method="POST"
+                    action="{{ url_for('settings.delete_profile', profile_id=p.id) }}"
+                    onsubmit="return confirm('Delete this profile?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-danger btn-sm">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state" style="margin-bottom:24px;">
+      <div class="icon">◱</div>
+      <p>No profiles yet. Seed the PWQ-3645 profile to get started.</p>
+    </div>
+    {% endif %}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+      <!-- Seed PWQ-3645 -->
+      <div style="background:white;border:1px solid var(--line);border-radius:6px;padding:22px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+                    color:var(--steel);font-weight:600;margin-bottom:10px;">
+          PWQ-3645 Reference Profile
+        </div>
+        <div style="font-size:12px;color:var(--steel);margin-bottom:16px;line-height:1.5;">
+          Standard aluminium window section — the drawing style this platform
+          targets for all DXF output.<br><br>
+          <span class="mono" style="font-size:11px;">
+            Bar: 40mm · Wall: 4mm · Depth: 52mm
+          </span>
+        </div>
+        <form method="POST" action="{{ url_for('settings.seed_profile') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary">
+            {{ 'Re-seed PWQ-3645' if profiles else 'Seed PWQ-3645 Profile' }}
+          </button>
+        </form>
+      </div>
+
+      <!-- Add manually -->
+      <div style="background:white;border:1px solid var(--line);border-radius:6px;padding:22px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+                    color:var(--steel);font-weight:600;margin-bottom:10px;">
+          Add custom profile
+        </div>
+        <form method="POST" action="{{ url_for('settings.add_profile') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="form-group">
+            <label class="form-label">Profile name</label>
+            <input class="form-control" type="text" name="name"
+                   placeholder="e.g. Steel Section 45mm" required>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Material</label>
+              <select class="form-control" name="material">
+                <option>Aluminium</option><option>PVCu</option>
+                <option>Timber</option><option>Steel</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Bar width (mm)</label>
+              <input class="form-control" type="number" name="bar_width_mm"
+                     value="40" step="0.5" min="10" max="150" required>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Wall thickness (mm)</label>
+              <input class="form-control" type="number" name="wall_thickness_mm"
+                     value="4" step="0.5" min="1" max="20">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Section depth (mm)</label>
+              <input class="form-control" type="number" name="depth_mm"
+                     value="52" step="1" min="20" max="200">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-secondary">Add profile</button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}

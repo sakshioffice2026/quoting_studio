@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% block title %}{{ project.customer_name }} — Quoting Studio{% endblock %}
+
+{% block body %}
+<div class="page-wrap">
+
+  {# ---- Header ---- #}
+  <div class="page-header">
+    <div>
+      <h1>{{ project.customer_name }}</h1>
+      <div class="sub mono">
+        {{ project.address or 'No address' }} ·
+        <span class="badge badge-{{ project.status }}">{{ project.status_label }}</span>
+      </div>
+    </div>
+    <div class="flex gap-8">
+      <a href="{{ url_for('projects.facade', project_id=project.id) }}" class="btn btn-primary btn-sm">🏠 Facade View</a>
+      <a href="{{ url_for('projects.edit', project_id=project.id) }}" class="btn btn-secondary btn-sm">Edit project</a>
+      <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary btn-sm">← Dashboard</a>
+    </div>
+  </div>
+
+  {# ---- Windows ---- #}
+  <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;">
+    <div style="font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);font-weight:600;">
+      Windows &amp; doors ({{ windows|length }})
+    </div>
+    <a href="{{ url_for('projects.choose_unit', project_id=project.id) }}"
+       class="btn btn-secondary btn-sm">+ Add window or door</a>
+  </div>
+
+  {% if windows %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Label</th>
+        <th>Dimensions</th>
+        <th>Material</th>
+        <th>Frame colour</th>
+        <th>Panes</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for w in windows %}
+      <tr>
+        <td class="mono muted" style="font-size:11px;">{{ loop.index }}</td>
+        <td class="link-cell">
+          <a href="{{ url_for('editor.edit', project_id=project.id, window_id=w.id) }}">
+            {{ w.label or ('Window ' ~ loop.index) }}
+          </a>
+        </td>
+        <td class="mono" style="font-size:12px;">{{ w.width_mm }} × {{ w.height_mm }} mm</td>
+        <td>{{ w.material }}</td>
+        <td>
+          <span style="display:inline-flex;align-items:center;gap:6px;">
+            <span style="width:14px;height:14px;border-radius:50%;background:{{ w.frame_colour_hex }};
+                         border:1px solid var(--line);display:inline-block;"></span>
+            {{ w.frame_colour_name }}
+          </span>
+        </td>
+        <td class="mono" style="font-size:12px;">{{ w.panes.count() }}</td>
+        <td style="text-align:right;">
+          <a href="{{ url_for('editor.edit', project_id=project.id, window_id=w.id) }}"
+             class="btn btn-primary btn-sm">Edit →</a>
+          <form method="POST" style="display:inline-block;margin-left:4px;"
+                action="{{ url_for('projects.delete_window', project_id=project.id, window_id=w.id) }}"
+                onsubmit="return confirm('Delete « {{ w.label }} »? This cannot be undone.')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger btn-sm" style="padding:5px 9px;">✕</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">◱</div>
+    <p>No windows added yet. Use the form above to add the first one.</p>
+  </div>
+  {% endif %}
+
+  {# ---- Danger zone ---- #}
+  <div class="divider" style="margin-top:40px;"></div>
+
+  {# ---- Quotes ---- #}
+  <div style="margin-bottom:32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);font-weight:600;">
+        Quotes ({{ project.quotes.count() }})
+      </div>
+      <form method="POST" action="{{ url_for('quote.generate', project_id=project.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">+ Generate Quote</button>
+      </form>
+    </div>
+
+    {# quotes passed from route, already sorted by created_at desc #}
+    {% if quotes %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Quote #</th>
+          <th>Date</th>
+          <th>Total</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for q in quotes %}
+        <tr>
+          <td class="mono" style="font-size:12px;font-weight:600;">{{ q.quote_number }}</td>
+          <td class="muted" style="font-size:12px;">{{ q.issued_date.strftime('%d %b %Y') }}</td>
+          <td class="mono" style="font-size:13px;font-weight:600;color:var(--copper);">
+            £{{ '%.2f'|format(q.total) if q.total else '—' }}
+          </td>
+          <td>
+            <span class="badge badge-{{ 'sent' if q.is_sent else 'draft' }}">
+              {{ 'Sent' if q.is_sent else 'Draft' }}
+            </span>
+          </td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('quote.view', project_id=project.id, quote_id=q.id) }}"
+               class="btn btn-secondary btn-sm">View →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="font-size:13px;color:var(--steel);padding:16px 0;">
+      No quotes yet. Add your windows then click Generate Quote.
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="divider"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div style="font-size:12px;color:var(--steel);">
+      Created {{ project.created_at.strftime('%d %b %Y') }} by {{ project.creator.full_name }}
+    </div>
+    <form method="POST" action="{{ url_for('projects.delete', project_id=project.id) }}"
+          onsubmit="return confirm('Delete this project and all its windows? This cannot be undone.')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger btn-sm">Delete project</button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}

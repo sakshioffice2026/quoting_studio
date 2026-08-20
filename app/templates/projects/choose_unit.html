@@ -1,0 +1,237 @@
+{% extends 'base.html' %}
+{% block title %}Add unit — {{ project.customer_name }} — Quoting Studio{% endblock %}
+
+{% block head %}
+<script src="{{ url_for('static', filename='js/drawing-engine.js') }}"></script>
+<style>
+.cu-wrap { max-width:1080px;margin:0 auto;padding:24px 20px; }
+.cu-head { margin-bottom:22px; }
+.cu-head h1 { margin:0 0 4px;font-size:22px; }
+.cu-head .sub { font-size:13px;color:var(--steel);font-family:var(--font-mono); }
+
+/* step 1 — unit type */
+.cu-types { display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:14px; }
+.cu-type { border:2px solid var(--line);border-radius:12px;padding:26px 24px;cursor:pointer;
+  text-align:center;transition:.14s;background:white; }
+.cu-type:hover { border-color:var(--copper);box-shadow:0 6px 20px rgba(201,123,61,.12);transform:translateY(-2px); }
+.cu-type.on { border-color:var(--copper);background:#FCF7F1; }
+.cu-type svg { width:96px;height:110px;margin-bottom:12px; }
+.cu-type .t { font-size:16px;font-weight:700;color:var(--navy); }
+.cu-type .d { font-size:12px;color:var(--steel);margin-top:4px; }
+
+/* step 2 — template picker */
+.cu-step2 { margin-top:8px; }
+.cu-cats { display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px; }
+.cu-cat { padding:6px 15px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;
+  border:1px solid var(--line);background:white;color:var(--steel);transition:.12s; }
+.cu-cat:hover { border-color:var(--copper);color:var(--navy); }
+.cu-cat.on { background:var(--copper);color:white;border-color:var(--copper); }
+
+.cu-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px; }
+.cu-card { border:1px solid var(--line);border-radius:10px;padding:14px;cursor:pointer;
+  text-align:center;transition:.14s;background:white; }
+.cu-card:hover { border-color:var(--copper);background:#FCF7F1;transform:translateY(-2px);
+  box-shadow:0 6px 18px rgba(0,0,0,.08); }
+.cu-card svg { width:100%;height:130px;display:block; }
+.cu-card .nm { font-size:13px;font-weight:600;margin-top:10px;color:var(--navy); }
+.cu-card .meta { font-size:10px;color:var(--steel);font-family:var(--font-mono);margin-top:2px; }
+
+.cu-back { font-size:13px;color:var(--copper);cursor:pointer;margin-bottom:14px;display:inline-block; }
+.cu-back:hover { text-decoration:underline; }
+.cu-hidden { display:none; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="cu-wrap">
+  <div class="cu-head">
+    <h1>Add a unit</h1>
+    <div class="sub">{{ project.customer_name }}{% if project.address %} · {{ project.address }}{% endif %}</div>
+  </div>
+
+  <!-- STEP 1: Window or Door -->
+  <div id="cuStep1">
+    <div class="cu-types">
+      <div class="cu-type" id="pickWindow" onclick="chooseUnit('window')">
+        <svg viewBox="0 0 96 110" xmlns="http://www.w3.org/2000/svg">
+          <rect x="6" y="6" width="84" height="98" fill="#eceae2" stroke="#2B2F33" stroke-width="4"/>
+          <rect x="14" y="14" width="30" height="40" fill="url(#gW)" stroke="#7c8aa0" stroke-width="2"/>
+          <rect x="52" y="14" width="30" height="40" fill="url(#gW)" stroke="#7c8aa0" stroke-width="2"/>
+          <rect x="14" y="60" width="30" height="36" fill="url(#gW)" stroke="#7c8aa0" stroke-width="2"/>
+          <rect x="52" y="60" width="30" height="36" fill="url(#gW)" stroke="#7c8aa0" stroke-width="2"/>
+          <defs><linearGradient id="gW" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#c5dae0"/><stop offset="100%" stop-color="#93b3bd"/>
+          </linearGradient></defs>
+        </svg>
+        <div class="t">Window</div>
+        <div class="d">Casement, sash, bay, shaped &amp; more</div>
+      </div>
+      <div class="cu-type" id="pickDoor" onclick="chooseUnit('door')">
+        <svg viewBox="0 0 96 110" xmlns="http://www.w3.org/2000/svg">
+          <rect x="20" y="6" width="56" height="98" fill="#eceae2" stroke="#2B2F33" stroke-width="4"/>
+          <rect x="28" y="16" width="40" height="34" fill="url(#gD)" stroke="#7c8aa0" stroke-width="2"/>
+          <rect x="28" y="56" width="40" height="40" fill="#d8d4c8" stroke="#8a7a5c" stroke-width="2"/>
+          <circle cx="62" cy="76" r="2.6" fill="#2B2F33"/>
+          <defs><linearGradient id="gD" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#c5dae0"/><stop offset="100%" stop-color="#93b3bd"/>
+          </linearGradient></defs>
+        </svg>
+        <div class="t">Door</div>
+        <div class="d">Single, double, French, bifold, patio</div>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:8px;">
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}"
+         style="font-size:12px;color:var(--steel);">← Back to project</a>
+    </div>
+  </div>
+
+  <!-- STEP 2: Template picker -->
+  <div id="cuStep2" class="cu-step2 cu-hidden">
+    <span class="cu-back" onclick="backToStep1()">← Choose unit type</span>
+    <div class="cu-cats" id="cuCats"></div>
+    <div class="cu-grid" id="cuGrid"></div>
+  </div>
+</div>
+
+<!-- Hidden form that actually submits the chosen template -->
+<form method="POST" id="cuForm"
+      action="{{ url_for('projects.add_unit', project_id=project.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="unit_type"    id="fUnitType">
+  <input type="hidden" name="template_key" id="fTemplateKey">
+  <input type="hidden" name="template_name" id="fTemplateName">
+</form>
+
+<script>
+(function(){
+const { templatesByCategory, templateToModel, renderUnitSVG } = window.QSDraw;
+let currentUnit = null, currentCat = null;
+
+function chooseUnit(unit){
+  currentUnit = unit;
+  document.getElementById('pickWindow').classList.toggle('on', unit==='window');
+  document.getElementById('pickDoor').classList.toggle('on', unit==='door');
+  document.getElementById('cuStep1').classList.add('cu-hidden');
+  document.getElementById('cuStep2').classList.remove('cu-hidden');
+  const cats = templatesByCategory(unit);
+  const catNames = Object.keys(cats);
+  currentCat = catNames[0];
+  // category pills
+  const cw = document.getElementById('cuCats');
+  cw.innerHTML = catNames.map(c =>
+    `<div class="cu-cat${c===currentCat?' on':''}" onclick="selectCat('${c}')">${c}</div>`).join('');
+  renderGrid();
+}
+
+function selectCat(cat){
+  currentCat = cat;
+  document.querySelectorAll('.cu-cat').forEach(el=>el.classList.toggle('on', el.textContent===cat));
+  renderGrid();
+}
+
+function backToStep1(){
+  document.getElementById('cuStep2').classList.add('cu-hidden');
+  document.getElementById('cuStep1').classList.remove('cu-hidden');
+}
+
+function renderGrid(){
+  const cats = templatesByCategory(currentUnit);
+  const list = cats[currentCat] || [];
+  const grid = document.getElementById('cuGrid');
+  grid.innerHTML = '';
+  list.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'cu-card';
+    card.onclick = () => pickTemplate(t.key, t.name);
+    card.innerHTML = miniPreview(t) +
+      `<div class="nm">${t.name}</div><div class="meta">${t.panels} pane${t.panels>1?'s':''}</div>`;
+    grid.appendChild(card);
+  });
+}
+
+/* Small SVG preview drawn directly from the template's pane list. */
+function miniPreview(t){
+  const W=160, H=130, pad=8;
+  const iw=W-pad*2, ih=H-pad*2;
+  const col='#2B2F33';
+  const isDoor = t.unit==='door';
+  const shape = t.shape || 'rectangle';
+  let body='';
+
+  // shaped frame outer path
+  let frameEl;
+  if(shape==='arched'){
+    const riseH = ih * 0.28;
+    frameEl=`<path d="M${pad} ${pad+ih} L${pad} ${pad+riseH}
+      A${iw/2} ${riseH} 0 0 1 ${pad+iw} ${pad+riseH} L${pad+iw} ${pad+ih} Z"
+      fill="#eceae2" stroke="${col}" stroke-width="4"/>`;
+  } else if(shape==='gothic'){
+    frameEl=`<path d="M${pad} ${pad+ih} L${pad} ${pad+ih*0.4}
+      Q${pad} ${pad} ${pad+iw/2} ${pad}
+      Q${pad+iw} ${pad} ${pad+iw} ${pad+ih*0.4} L${pad+iw} ${pad+ih} Z"
+      fill="#eceae2" stroke="${col}" stroke-width="4"/>`;
+  } else if(shape==='circular'){
+    frameEl=`<ellipse cx="${pad+iw/2}" cy="${pad+ih/2}" rx="${iw/2}" ry="${ih/2}"
+      fill="#eceae2" stroke="${col}" stroke-width="4"/>`;
+  } else {
+    frameEl=`<rect x="${pad}" y="${pad}" width="${iw}" height="${ih}"
+      fill="#eceae2" stroke="${col}" stroke-width="4"/>`;
+  }
+
+  // panes
+  t.panes.forEach(p=>{
+    const px=pad+p.x*iw, py=pad+p.y*ih, pw=p.w*iw, ph=p.h*ih;
+    // panel vs glass: door leaves (no glazing/bars, opening leaf) are solid
+    const isPanel = isDoor && !p.glazing && !p.bars &&
+                    p.opening!=='Fixed' && p.opening!=='Sliding';
+    const fill = isPanel ? '#8a5a2b' : 'url(#gPrev)';
+    body+=`<rect x="${px+2}" y="${py+2}" width="${pw-4}" height="${ph-4}"
+             fill="${fill}" stroke="#7c8aa0" stroke-width="1.5"/>`;
+    if(isPanel){
+      // raised-panel inset
+      const ins=Math.min(pw,ph)*0.14;
+      if(pw-2*ins>3 && ph-2*ins>3)
+        body+=`<rect x="${px+ins}" y="${py+ins}" width="${pw-2*ins}" height="${ph-2*ins}"
+                 fill="rgba(255,255,255,0.07)" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/>`;
+    }
+    // glazing bars
+    (p.bars? barsList(p.bars):[]).forEach(b=>{
+      if(b.type==='vertical'){const bx=px+pw*b.pos;body+=`<line x1="${bx}" y1="${py+2}" x2="${bx}" y2="${py+ph-2}" stroke="${col}" stroke-width="1.4"/>`;}
+      else{const by=py+ph*b.pos;body+=`<line x1="${px+2}" y1="${by}" x2="${px+pw-2}" y2="${by}" stroke="${col}" stroke-width="1.4"/>`;}
+    });
+    // opener diagonal
+    if(p.opening && p.opening!=='Fixed' && !isPanel){
+      body+=`<line x1="${px+3}" y1="${py+ph-3}" x2="${px+pw-3}" y2="${py+3}" stroke="rgba(201,123,61,.5)" stroke-width="1" stroke-dasharray="3 2"/>`;
+    }
+  });
+  // door handle dot
+  if(isDoor){ body+=`<circle cx="${pad+iw*0.9}" cy="${pad+ih*0.5}" r="2.4" fill="${col}"/>`; }
+
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="gPrev" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c5dae0"/><stop offset="100%" stop-color="#93b3bd"/>
+    </linearGradient></defs>
+    ${frameEl}${body}</svg>`;
+}
+
+function barsList(spec){
+  const out=[]; const nv=spec.v||0, nh=spec.h||0;
+  for(let i=1;i<=nv;i++) out.push({type:'vertical',pos:i/(nv+1)});
+  for(let j=1;j<=nh;j++) out.push({type:'horizontal',pos:j/(nh+1)});
+  return out;
+}
+
+function pickTemplate(key, name){
+  document.getElementById('fUnitType').value    = currentUnit;
+  document.getElementById('fTemplateKey').value = key;
+  document.getElementById('fTemplateName').value= name;
+  document.getElementById('cuForm').submit();
+}
+window.chooseUnit   = chooseUnit;
+window.selectCat    = selectCat;
+window.backToStep1  = backToStep1;
+window.pickTemplate = pickTemplate;
+})();
+</script>
+{% endblock %}

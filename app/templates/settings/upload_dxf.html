@@ -1,0 +1,235 @@
+{% extends 'base.html' %}
+{% block title %}Upload DXF — {{ profile.code }} — Quoting Studio{% endblock %}
+{% block body %}
+<div style="display:flex;min-height:calc(100vh - 52px);">
+  {% include 'settings/_sidebar.html' %}
+  <div style="flex:1;padding:28px 32px;max-width:900px;">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:24px;">
+      <div style="width:52px;height:52px;border-radius:13px;flex-shrink:0;
+                  background:linear-gradient(135deg,var(--copper),#8B6B3D);
+                  display:flex;align-items:center;justify-content:center;color:white;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/></svg>
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--steel);font-family:var(--font-mono);
+                    text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px;">
+          {{ profile.category }} · {{ profile.code }}</div>
+        <h1 style="margin:0 0 4px;font-size:18px;">Upload DXF Profile Geometry</h1>
+        <p style="margin:0;font-size:13px;color:var(--steel);">
+          Upload a DXF file containing a single closed LWPOLYLINE of this profile's cross-section.
+          The geometry will be used to render accurate section drawings.</p>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start;">
+
+      <!-- Left: current + upload -->
+      <div>
+
+        {% if profile.has_geometry %}
+        <!-- Current geometry card -->
+        <div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:12px;
+                    overflow:hidden;margin-bottom:14px;">
+          <div style="padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;
+                      letter-spacing:.07em;color:var(--navy);background:#ECFDF5;
+                      border-bottom:1px solid #BBF7D0;display:flex;align-items:center;gap:6px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#166534" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"/></svg>
+            Current Geometry
+          </div>
+          <div style="padding:16px;display:flex;align-items:center;gap:20px;">
+            <!-- SVG preview rendered from stored path -->
+            <svg viewBox="0 0 200 200" width="140" height="140"
+                 style="background:#FAFAFA;border:1px solid #E2E8F0;border-radius:8px;flex-shrink:0;">
+              {% if profile.svg_path %}
+              <defs>
+                <pattern id="hatch" x="0" y="0" width="6" height="6" patternUnits="userSpaceOnUse">
+                  <rect width="6" height="6" fill="#E8DCC8"/>
+                  <line x1="0" y1="6" x2="6" y2="0" stroke="#8B7355" stroke-width="0.8"/>
+                </pattern>
+              </defs>
+              <path d="{{ profile.svg_path }}" fill="url(#hatch)" stroke="#5A3E28" stroke-width="1.2"/>
+              {% else %}
+              <rect x="20" y="20" width="160" height="160" fill="#E8DCC8" stroke="#8B7355" stroke-width="1.2"/>
+              {% endif %}
+            </svg>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#166534;margin-bottom:4px;">DXF geometry loaded</div>
+              <div style="font-size:12px;color:var(--steel);margin-bottom:2px;">{{ profile.vertex_count or '?' }} vertices</div>
+              <div style="font-family:var(--font-mono);font-size:13px;font-weight:700;
+                          color:var(--copper);margin-bottom:12px;">
+                {{ profile.bar_width_mm|int }}×{{ profile.depth_mm|int }}mm</div>
+              <form method="POST"
+                    action="{{ url_for('settings.clear_geometry', profile_id=profile.id) }}"
+                    onsubmit="return confirm('Remove DXF geometry?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit"
+                        style="font-size:11px;padding:4px 10px;border-radius:6px;
+                               background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;
+                               cursor:pointer;">✕ Remove Geometry</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Upload card -->
+        <div style="background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;
+                      letter-spacing:.07em;color:var(--navy);background:#F8FAFC;
+                      border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Upload New DXF File
+          </div>
+          <div style="padding:20px;">
+            <form method="POST" enctype="multipart/form-data"
+                  action="{{ url_for('settings.upload_dxf', profile_id=profile.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <!-- Drag-drop zone -->
+              <div id="dropzone"
+                   style="border:2px dashed var(--line);border-radius:10px;padding:36px 20px;
+                          text-align:center;position:relative;cursor:pointer;
+                          background:#F8FAFC;transition:all .2s;">
+                <div style="color:var(--copper);margin-bottom:10px;opacity:.7;">
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <div style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:4px;">
+                  Drag & drop DXF file here</div>
+                <div style="font-size:12px;color:var(--steel);margin-bottom:10px;">
+                  or click to browse · .dxf only · max 5MB</div>
+                <input type="file" name="dxf_file" id="dxfFile" accept=".dxf"
+                       style="position:absolute;inset:0;opacity:0;cursor:pointer;" required>
+                <span id="fileLabel"
+                      style="display:inline-block;font-size:12px;font-weight:600;
+                             color:var(--copper);background:#FCF7F1;padding:3px 12px;
+                             border-radius:20px;border:1px solid #E8C9A0;">No file chosen</span>
+              </div>
+              <div style="padding:12px 0 4px;display:flex;align-items:center;gap:12px;">
+                <button type="submit"
+                        style="display:inline-flex;align-items:center;gap:7px;padding:9px 20px;
+                               border-radius:8px;border:none;cursor:pointer;
+                               background:var(--copper);color:white;font-size:13px;font-weight:700;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="20 6 9 17 4 12"/></svg>
+                  Parse & Save Geometry
+                </button>
+                <a href="{{ url_for('settings.profiles_library') }}"
+                   style="font-size:13px;color:var(--steel);">← Back to library</a>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: requirements + profile details -->
+      <div>
+        <!-- Requirements -->
+        <div style="background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:12px;">
+          <div style="padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;
+                      letter-spacing:.07em;color:var(--navy);background:#F8FAFC;
+                      border-bottom:1px solid var(--line);">Requirements</div>
+          <div style="padding:14px 16px;">
+            {% for item, ok in [
+              ('Single LWPOLYLINE entity', True),
+              ('Closed profile outline', True),
+              ('Coordinates in mm (1:1 scale)', True),
+              ('AutoCAD DXF 2010+ format', True),
+              ('Multiple polylines not supported', False),
+              ('Splines / arcs not supported', False),
+            ] %}
+            <div style="font-size:12px;padding-left:18px;position:relative;margin-bottom:5px;">
+              <span style="position:absolute;left:0;color:{{ '#166534' if ok else '#991B1B' }};">
+                {{ '✓' if ok else '✕' }}</span>
+              {{ item }}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- How it works -->
+        <div style="background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:12px;">
+          <div style="padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;
+                      letter-spacing:.07em;color:var(--navy);background:#F8FAFC;
+                      border-bottom:1px solid var(--line);">How It Works</div>
+          <div style="padding:14px 16px;">
+            {% for n, step in [
+              (1, 'Upload DXF containing profile cross-section'),
+              (2, 'System extracts LWPOLYLINE vertices'),
+              (3, 'Converts to SVG path normalised to 200×200px'),
+              (4, 'Stored — used in all section drawings and DXF export'),
+            ] %}
+            <div style="display:flex;align-items:flex-start;gap:8px;font-size:12px;
+                        color:#374151;margin-bottom:8px;">
+              <span style="width:20px;height:20px;border-radius:50%;background:var(--copper);
+                           color:white;display:flex;align-items:center;justify-content:center;
+                           font-size:10px;font-weight:700;flex-shrink:0;">{{ n }}</span>
+              <span>{{ step }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Profile details -->
+        <div style="background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;
+                      letter-spacing:.07em;color:var(--navy);background:#F8FAFC;
+                      border-bottom:1px solid var(--line);">Profile Details</div>
+          <div style="padding:14px 16px;">
+            {% for label, val in [
+              ('Code', profile.code or '—'),
+              ('Name', profile.name),
+              ('Category', profile.category),
+              ('Width', (profile.bar_width_mm|int)|string + ' mm'),
+              ('Depth', (profile.depth_mm|int)|string + ' mm'),
+            ] %}
+            <div style="display:flex;justify-content:space-between;padding:5px 0;
+                        border-bottom:1px solid #F1F5F9;font-size:12px;">
+              <span style="color:var(--steel);">{{ label }}</span>
+              <strong>{{ val }}</strong>
+            </div>
+            {% endfor %}
+            <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;">
+              <span style="color:var(--steel);">DXF Geometry</span>
+              {% if profile.has_geometry %}
+              <strong style="color:#166534;">Loaded</strong>
+              {% else %}
+              <strong style="color:var(--steel);">None</strong>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const dz   = document.getElementById('dropzone');
+const fi   = document.getElementById('dxfFile');
+const flbl = document.getElementById('fileLabel');
+fi.addEventListener('change', function() {
+  flbl.textContent = this.files.length > 0 ? this.files[0].name : 'No file chosen';
+});
+['dragover','dragenter'].forEach(ev => {
+  dz.addEventListener(ev, e => { e.preventDefault(); dz.style.borderColor = 'var(--copper)'; });
+});
+['dragleave','drop'].forEach(ev => {
+  dz.addEventListener(ev, e => { e.preventDefault(); dz.style.borderColor = ''; });
+});
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  if (e.dataTransfer.files.length > 0) {
+    fi.files = e.dataTransfer.files;
+    flbl.textContent = e.dataTransfer.files[0].name;
+  }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+{% block title %}Glass Library — Settings — Quoting Studio{% endblock %}
+{% block body %}
+<div style="display:flex;min-height:calc(100vh - 52px);">
+  {% include 'settings/_sidebar.html' %}
+  <div style="flex:1;padding:28px 32px;max-width:1000px;">
+
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;">
+      <div>
+        <h1 style="margin:0 0 4px;font-size:20px;">Glass Unit Library</h1>
+        <div class="sub mono">{{ total }} units — double, triple, acoustic, solar control and more</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        {% if total == 0 %}
+        <form method="POST" action="{{ url_for('settings.seed_glass') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-primary btn-sm">⬇ Seed 12 built-in units</button>
+        </form>
+        {% else %}
+        <form method="POST" action="{{ url_for('settings.seed_glass') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-secondary btn-sm">⬇ Re-seed missing</button>
+        </form>
+        {% endif %}
+        <a href="{{ url_for('settings.create_glass') }}" class="btn btn-primary btn-sm">+ Add Unit</a>
+      </div>
+    </div>
+
+    {% if units %}
+    <div style="background:white;border:1px solid var(--line);border-radius:8px;overflow:hidden;">
+      <table class="data-table" style="margin:0;">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Name</th>
+            <th style="text-align:right;">Build-up</th>
+            <th style="text-align:right;">Thickness</th>
+            <th style="text-align:right;">U-value</th>
+            <th style="text-align:right;">g-value</th>
+            <th style="text-align:right;">£/m²</th>
+            <th>Description</th>
+            <th>Type</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in units %}
+          <tr>
+            <td><strong class="mono" style="color:var(--copper);">{{ u.code }}</strong></td>
+            <td style="font-weight:600;">{{ u.name }}</td>
+            <td class="mono" style="text-align:right;">
+              {% if u.build_up %}
+              <span style="background:#F6F3EC;border:1px solid var(--line);border-radius:4px;
+                           padding:2px 7px;font-size:11px;">{{ u.build_up }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="mono" style="text-align:right;">{{ u.thickness_mm|int }} mm</td>
+            <td style="text-align:right;">
+              {% if u.u_value is not none %}
+              <span style="font-family:var(--font-mono);font-size:12px;font-weight:700;
+                           color:{{ '#166534' if u.u_value <= 0.8 else '#92400E' if u.u_value >= 1.4 else '#1B2430' }};">
+                {{ u.u_value }}</span>
+              <span style="font-size:10px;color:var(--steel);"> W/m²K</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="mono" style="text-align:right;color:var(--steel);">
+              {{ u.g_value if u.g_value is not none else '—' }}
+            </td>
+            <td class="mono" style="text-align:right;font-weight:600;color:var(--navy);">
+              {{ '£%.2f'|format(u.price_per_m2) if u.price_per_m2 is not none else '—' }}
+            </td>
+            <td style="font-size:12px;color:var(--steel);max-width:220px;">
+              {{ u.description or '—' }}
+            </td>
+            <td>
+              {% if u.is_builtin %}
+              <span class="badge badge-sent">Built-in</span>
+              {% else %}
+              <span class="badge badge-draft">Custom</span>
+              {% endif %}
+            </td>
+            <td>
+              <form method="POST" action="{{ url_for('settings.delete_glass', unit_id=u.id) }}"
+                    style="display:inline;" onsubmit="return confirm('Delete {{ u.code }}?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-danger btn-sm" style="font-size:11px;">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- U-value legend -->
+    <div style="display:flex;gap:16px;margin-top:14px;font-size:11px;color:var(--steel);">
+      <span>U-value guide:</span>
+      <span style="color:#166534;font-weight:600;">≤ 0.8</span><span>Passive</span>
+      <span style="color:#1B2430;font-weight:600;">0.8–1.3</span><span>Good</span>
+      <span style="color:#92400E;font-weight:600;">≥ 1.4</span><span>Standard</span>
+    </div>
+
+    {% else %}
+    <div class="empty-state">
+      <div class="icon">◻</div>
+      <p>No glass units yet.</p>
+      <form method="POST" action="{{ url_for('settings.seed_glass') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-primary">⬇ Seed 12 built-in glass units</button>
+      </form>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

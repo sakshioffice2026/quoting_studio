@@ -1,0 +1,220 @@
+{% extends 'base.html' %}
+{% block title %}{{ quote.quote_number }} — Quoting Studio{% endblock %}
+
+{% block body %}
+<div class="page-wrap">
+
+  <!-- Header -->
+  <div class="page-header">
+    <div>
+      <div class="sub mono" style="margin-bottom:4px;">
+        <a href="{{ url_for('projects.detail', project_id=project.id) }}" style="color:var(--steel);">
+          {{ project.customer_name }}
+        </a> / Quote
+      </div>
+      <h1 style="font-family:var(--font-mono);font-size:20px;font-weight:600;letter-spacing:.02em;">
+        {{ quote.quote_number }}
+        {% if quote.revision and quote.revision > 1 %}
+          <span style="font-size:12px;font-weight:400;color:var(--copper);margin-left:8px;">Rev {{ quote.revision }}</span>
+        {% endif %}
+      </h1>
+      <div class="sub" style="margin-top:4px;">
+        Issued {{ quote.issued_date.strftime('%d %B %Y') }} ·
+        <span class="badge badge-{{ 'sent' if quote.is_sent else 'draft' }}">
+          {{ 'Sent' if quote.is_sent else 'Draft' }}
+        </span>
+        &nbsp;·&nbsp;
+        <span class="badge badge-{{ project.status }}">{{ project.status_label }}</span>
+      </div>
+    </div>
+    <div class="flex gap-8">
+      {% if not quote.is_sent %}
+      <form method="POST" action="{{ url_for('quote.mark_sent', project_id=project.id, quote_id=quote.id) }}"
+            style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-secondary">Mark as Sent</button>
+      </form>
+      {% endif %}
+      {% if project.status != 'won' %}
+      <form method="POST" action="{{ url_for('quote.mark_won', project_id=project.id, quote_id=quote.id) }}"
+            style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-secondary">Mark Won 🎉</button>
+      </form>
+      {% endif %}
+      <a href="{{ url_for('quote.print_view', project_id=project.id, quote_id=quote.id) }}"
+         target="_blank" class="btn btn-primary">🖨 Print / Save as PDF</a>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 280px;gap:24px;align-items:start;">
+
+    <!-- Left: quote document preview -->
+    <div>
+      <!-- Customer block -->
+      <div style="background:white;border:1px solid var(--line);border-radius:6px;
+                  border-left:3px solid var(--copper);padding:16px 20px;margin-bottom:20px;">
+        <div class="sec-head" style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+             color:var(--steel);font-weight:600;margin-bottom:6px;">Prepared for</div>
+        <div style="font-size:16px;font-weight:700;">{{ project.customer_name }}</div>
+        {% if project.address %}
+        <div style="font-size:13px;color:var(--steel);margin-top:3px;">{{ project.address }}</div>
+        {% endif %}
+      </div>
+
+      <!-- Window lines table -->
+      <div style="background:white;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-bottom:20px;">
+        <div style="background:var(--navy);padding:10px 16px;">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+                color:#B7C0CE;font-weight:600;">Specification</span>
+        </div>
+        <table class="data-table" style="margin:0;">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Dimensions</th>
+              <th>Material</th>
+              <th>Panes</th>
+              <th style="text-align:right;">Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for line in window_lines %}
+            <tr>
+              <td style="font-weight:600;">{{ line.window.label }}</td>
+              <td class="mono" style="font-size:12px;">
+                {{ line.window.width_mm }} × {{ line.window.height_mm }} mm
+              </td>
+              <td>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">
+                  <span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;
+                               background:{{ line.window.frame_colour_hex }};
+                               border:1px solid var(--line);display:inline-block;"></span>
+                  {{ line.window.material_spec }}
+                </span>
+              </td>
+              <td style="font-size:12px;color:var(--steel);">
+                {% if line.render_url %}
+                <img src="{{ line.render_url }}" alt="{{ line.window.label }}"
+                     style="width:60px;height:48px;object-fit:contain;
+                            border:1px solid var(--line);border-radius:3px;
+                            background:#FCFBF8;margin-bottom:5px;display:block;"
+                     onerror="this.style.display='none'">
+                {% endif %}
+                {% for p in line.panes %}
+                  <div>{{ p.opener_type }} · {{ p.glazing_type }}</div>
+                {% endfor %}
+                {% if line.hardware %}
+                  <div style="margin-top:5px;font-size:11px;color:var(--sage);">
+                    {% for h in line.hardware %}<div>⚙ {{ h }}</div>{% endfor %}
+                  </div>
+                {% endif %}
+                {% if line.extras %}
+                  <div style="margin-top:3px;font-size:11px;color:var(--copper);">
+                    {% for e in line.extras %}<div>+ {{ e }}</div>{% endfor %}
+                  </div>
+                {% endif %}
+              </td>
+              <td style="text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:600;">
+                £{{ '%.2f'|format(line.price.total) }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Totals -->
+      <div style="background:white;border:1px solid var(--line);border-radius:6px;
+                  padding:16px 20px;max-width:320px;margin-left:auto;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;
+                    color:var(--steel);padding:5px 0;border-bottom:1px solid var(--line);">
+          <span>Subtotal</span>
+          <span class="mono">£{{ '%.2f'|format(quote.subtotal) }}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;
+                    color:var(--steel);padding:5px 0;border-bottom:1px solid var(--line);">
+          <span>VAT ({{ (quote.vat_rate * 100)|int }}%)</span>
+          <span class="mono">£{{ '%.2f'|format(vat_amt) }}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:10px 0 0;
+                    border-top:2px solid var(--navy);margin-top:4px;">
+          <span style="font-family:var(--font-display);font-size:18px;">Total</span>
+          <span style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--copper);">
+            £{{ '%.2f'|format(quote.total) }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: actions sidebar -->
+    <div style="display:flex;flex-direction:column;gap:14px;">
+
+      <!-- Quick info -->
+      <div style="background:white;border:1px solid var(--line);border-radius:6px;padding:16px;">
+        <div class="sec-head" style="font-size:10px;text-transform:uppercase;
+             letter-spacing:.07em;color:var(--steel);font-weight:600;margin-bottom:10px;">
+          Quote details
+        </div>
+        {% macro info_row(label, value) %}
+        <div style="display:flex;justify-content:space-between;font-size:12px;
+                    padding:5px 0;border-bottom:1px solid var(--line);">
+          <span style="color:var(--steel);">{{ label }}</span>
+          <span style="font-weight:500;">{{ value }}</span>
+        </div>
+        {% endmacro %}
+        {{ info_row('Quote #',    quote.quote_number) }}
+        {% if quote.revision and quote.revision > 1 %}
+        {{ info_row('Revision',    quote.revision) }}
+        {% endif %}
+        {% if quote.parent and quote.parent.quote_number %}
+        {{ info_row('Supersedes', quote.parent.quote_number) }}
+        {% endif %}
+        {{ info_row('Issued',     quote.issued_date.strftime('%d %b %Y')) }}
+        {{ info_row('Windows',    window_lines|length) }}
+        {{ info_row('Company',    current_user.tenant.name) }}
+        {% if quote.sent_at %}
+        {{ info_row('Sent',       quote.sent_at.strftime('%d %b %Y')) }}
+        {% endif %}
+      </div>
+
+      <!-- PDF / Print -->
+      <div style="background:white;border:1px solid var(--line);border-radius:6px;padding:16px;">
+        <div class="sec-head" style="font-size:10px;text-transform:uppercase;
+             letter-spacing:.07em;color:var(--steel);font-weight:600;margin-bottom:10px;">Export</div>
+        <a href="{{ url_for('quote.print_view', project_id=project.id, quote_id=quote.id) }}"
+           target="_blank"
+           class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:8px;">
+          🖨 Print / Save as PDF
+        </a>
+        <a href="{{ url_for('quote.download_pdf', project_id=project.id, quote_id=quote.id) }}"
+           class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;">
+          ⬇ WeasyPrint PDF
+        </a>
+        <div style="font-size:10px;color:var(--steel);margin-top:6px;text-align:center;line-height:1.4;">
+          Print / Save as PDF opens a print-ready page.<br>Use browser Print → Save as PDF.
+        </div>
+      </div>
+
+      <!-- Danger zone -->
+      <div style="background:white;border:1px solid var(--line);border-radius:6px;padding:16px;">
+        <div class="sec-head" style="font-size:10px;text-transform:uppercase;
+             letter-spacing:.07em;color:var(--steel);font-weight:600;margin-bottom:10px;">Actions</div>
+        <a href="{{ url_for('projects.detail', project_id=project.id) }}"
+           class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;margin-bottom:8px;">
+          ← Back to project
+        </a>
+        <form method="POST"
+              action="{{ url_for('quote.delete', project_id=project.id, quote_id=quote.id) }}"
+              onsubmit="return confirm('Delete this quote? This cannot be undone.')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-danger btn-sm"
+                  style="width:100%;justify-content:center;">Delete quote</button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+{% endblock %}

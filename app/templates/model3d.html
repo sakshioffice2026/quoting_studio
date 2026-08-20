@@ -1,0 +1,525 @@
+{% extends 'base.html' %}
+{% block title %}3D Model — {{ window.label }} — Quoting Studio{% endblock %}
+
+{% block head %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<style>
+/* ── reset ──────────────────────────────────────────────────────────── */
+html, body { overflow: hidden; height: 100%; margin: 0; }
+.app-main   { height: calc(100vh - 52px); overflow: hidden;
+              display: flex; flex-direction: column; }
+
+/* ── top bar ─────────────────────────────────────────────────────────── */
+.m3d-bar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:9px 16px; background:var(--navy); flex-shrink:0;
+  border-bottom:1px solid #0D141C;
+}
+.m3d-crumb { font-family:var(--font-mono); font-size:12px; color:#B7C0CE; }
+.m3d-crumb a { color:#B7C0CE; text-decoration:none; }
+
+/* ── body row ────────────────────────────────────────────────────────── */
+.m3d-body {
+  display: flex;
+  flex: 1 1 0%;       /* grow but allow shrink below content size */
+  min-height: 0;      /* critical: lets flex child shrink in column flex */
+  overflow: hidden;
+}
+
+/* ── canvas area ─────────────────────────────────────────────────────── */
+.viewer-area {
+  flex: 1 1 0%;
+  min-width: 0;
+  position: relative;
+  background: #20262e;
+  overflow: hidden;
+}
+#m3dCanvas { display:block; width:100%; height:100%; }
+
+/* loading overlay */
+.m3d-loading {
+  position:absolute; inset:0; display:flex; align-items:center;
+  justify-content:center; flex-direction:column; gap:14px;
+  color:#9AA4B8; font-family:var(--font-mono); font-size:13px;
+  background:#20262e; z-index:10;
+}
+.spinner {
+  width:38px; height:38px; border:3px solid rgba(255,255,255,.12);
+  border-top-color:var(--copper); border-radius:50%;
+  animation:spin .9s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* view buttons */
+.view-cube {
+  position:absolute; top:12px; left:12px; z-index:5;
+  display:flex; flex-wrap:wrap; gap:4px; max-width:200px;
+}
+.vc-btn {
+  font-family:var(--font-mono); font-size:10px; font-weight:600;
+  letter-spacing:.04em; padding:5px 8px; border:none; border-radius:4px;
+  cursor:pointer; background:rgba(27,36,48,.85); color:#B7C0CE;
+  white-space:nowrap;
+}
+.vc-btn:hover { background:var(--copper); color:#fff; }
+.vc-btn.on    { background:var(--copper); color:#fff; }
+
+/* dims badge */
+.dims-badge {
+  position:absolute; bottom:12px; left:12px; z-index:5;
+  font-family:var(--font-mono); font-size:11px; color:#9AE6C7;
+  background:rgba(27,36,48,.85); padding:6px 12px; border-radius:4px;
+}
+
+/* ── right panel ─────────────────────────────────────────────────────── */
+.m3d-panel {
+  width: 260px;
+  flex-shrink: 0;
+  background: #FCFBF8;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;       /* allow panel to shrink */
+  overflow: hidden;
+}
+.panel-scroll {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+/* panel elements */
+.sec-head {
+  font-size:10px; text-transform:uppercase; letter-spacing:.07em;
+  color:var(--steel); font-weight:600; margin:14px 0 8px;
+}
+.sec-head:first-child { margin-top:0; }
+.tog-row {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:8px;
+}
+.tog-row label { font-size:12px; color:#333; cursor:pointer; }
+.tog-row input[type=checkbox] { accent-color:var(--copper); width:15px; height:15px; cursor:pointer; }
+.m3d-select {
+  width:100%; border:1px solid var(--line); border-radius:4px;
+  padding:7px 9px; font-size:12px; background:#fff; margin-bottom:8px;
+}
+input[type=range] { width:100%; accent-color:var(--copper); }
+.dl-btn {
+  display:block; width:100%; text-align:center; margin-bottom:7px;
+  padding:8px; border:1px solid var(--line); border-radius:5px;
+  background:#fff; font-size:12px; font-weight:600; color:var(--navy);
+  cursor:pointer; text-decoration:none; box-sizing:border-box;
+}
+.dl-btn:hover { border-color:var(--copper); color:var(--copper); }
+.divider { height:1px; background:var(--line); margin:12px 0; }
+.hint { font-size:10px; color:#999; line-height:1.5; margin-bottom:8px; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+
+  <!-- top bar -->
+  <div class="m3d-bar">
+    <div class="m3d-crumb">
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.customer_name }}</a>
+      &nbsp;/&nbsp;
+      <a href="{{ url_for('editor.edit', project_id=project.id, window_id=window.id) }}">{{ window.label }}</a>
+      &nbsp;/&nbsp;3D Model
+    </div>
+    <div style="display:flex;gap:7px;align-items:center;">
+      <button class="btn btn-ghost btn-sm" onclick="fitCamera()">Fit view</button>
+      <button class="btn btn-ghost btn-sm" onclick="screenshot()">📷 Screenshot</button>
+      <a href="{{ url_for('editor.edit', project_id=project.id, window_id=window.id) }}"
+         class="btn btn-ghost btn-sm">← Editor</a>
+    </div>
+  </div>
+
+  <!-- body -->
+  <div class="m3d-body">
+
+    <!-- canvas -->
+    <div class="viewer-area" id="viewerArea">
+      <canvas id="m3dCanvas"></canvas>
+
+      <div class="view-cube">
+        <button class="vc-btn on" id="vIso"    onclick="setView('iso')">ISO</button>
+        <button class="vc-btn"                  onclick="setView('front')">FRONT</button>
+        <button class="vc-btn"                  onclick="setView('back')">BACK</button>
+        <button class="vc-btn"                  onclick="setView('top')">TOP</button>
+        <button class="vc-btn"                  onclick="setView('left')">LEFT</button>
+        <button class="vc-btn"                  onclick="setView('right')">RIGHT</button>
+        <button class="vc-btn"                  onclick="setView('bottom')">BOTTOM</button>
+        <button class="vc-btn" id="vProj"       onclick="toggleProjection()">ORTHO</button>
+      </div>
+
+      <div class="dims-badge" id="dimsBadge">— × — × — mm</div>
+      <div class="m3d-loading" id="loader">
+        <div class="spinner"></div>
+        <div>Generating 3D model…</div>
+      </div>
+    </div>
+
+    <!-- right panel -->
+    <div class="m3d-panel">
+      <div class="panel-scroll">
+
+        <div class="sec-head">Frame construction</div>
+        <input type="hidden" id="methodSel" value="auto">
+        <div class="hint">Each frame member is built from its assigned DXF profile
+          cross-section, extruded to length and assembled into the complete unit.
+          Assign profiles per role in
+          <a href="/settings/profiles" style="color:var(--copper);">Settings → Profiles</a>.</div>
+
+        <div class="divider"></div>
+        <div class="sec-head">Display</div>
+        <div class="tog-row">
+          <label for="tWire">Wireframe</label>
+          <input type="checkbox" id="tWire" onchange="setWireframe(this.checked)">
+        </div>
+        <div class="tog-row">
+          <label for="tEdges">Feature edges</label>
+          <input type="checkbox" id="tEdges" checked onchange="setEdges(this.checked)">
+        </div>
+        <div class="tog-row">
+          <label for="tGrid">Grid</label>
+          <input type="checkbox" id="tGrid" checked
+            onchange="grid.visible=this.checked;axes.visible=this.checked;">
+        </div>
+        <div class="tog-row">
+          <label for="tGlass">Glass</label>
+          <input type="checkbox" id="tGlass" checked onchange="setGlass(this.checked)">
+        </div>
+
+        <div class="divider"></div>
+        <div class="sec-head">Section cut</div>
+        <div class="tog-row">
+          <label for="tSec">Enable section</label>
+          <input type="checkbox" id="tSec" onchange="setSection(this.checked)">
+        </div>
+        <select class="m3d-select" id="secAxis" onchange="updateSection()">
+          <option value="x">X — vertical cut (jamb section)</option>
+          <option value="y">Y — horizontal cut (head/cill section)</option>
+          <option value="z">Z — depth cut (elevation slice)</option>
+        </select>
+        <input type="range" id="secPos" min="0" max="1000" value="500"
+               oninput="updateSection()">
+        <div class="tog-row" style="margin-top:4px;">
+          <label for="tFlip">Flip side</label>
+          <input type="checkbox" id="tFlip" onchange="updateSection()">
+        </div>
+        <div class="hint">Cut through the model to inspect the profile cross-section —
+          the engineering-drawing view.</div>
+
+        <div class="divider"></div>
+        <div class="sec-head">Export</div>
+        <a class="dl-btn" href="#" onclick="return dl3d('glb')">
+          ⬇ GLB (web / Blender)</a>
+        <a class="dl-btn" href="#" onclick="return dl3d('stl')">
+          ⬇ STL (3D print / mesh CAD)</a>
+        <a class="dl-btn" href="#" onclick="return dl3d('step')">
+          ⬇ STEP (SolidWorks / Fusion)</a>
+        <a class="dl-btn" href="#"
+           onclick="window.location.href=`${API}/windows/${QS_WINDOW_ID}/engineering.dxf`;return false;">
+          📐 Engineering drawing (DXF)</a>
+        <div class="hint">Engineering DXF: elevation + plan strip + vertical section,
+          fully dimensioned. STEP requires the cadquery kernel on the server.</div>
+
+      </div><!-- /panel-scroll -->
+    </div><!-- /m3d-panel -->
+
+  </div><!-- /m3d-body -->
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const QS_WINDOW_ID = {{ window.id }};
+const API = '/api/v1';
+
+/* ── scene setup ─────────────────────────────────────────────────────── */
+const area     = document.getElementById('viewerArea');
+const canvas   = document.getElementById('m3dCanvas');
+const loaderEl = document.getElementById('loader');
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, preserveDrawingBuffer:true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.localClippingEnabled = true;
+renderer.outputEncoding = (typeof THREE.sRGBEncoding !== 'undefined') ? THREE.sRGBEncoding : 3001;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1e2530);
+
+let cameraP = new THREE.PerspectiveCamera(45, 1, 1, 200000);
+let cameraO = new THREE.OrthographicCamera(-1,1,1,-1,-100000,100000);
+let camera  = cameraP;
+let usingOrtho = false;
+
+const controls = new THREE.OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+/* lights — hemisphere gives sky/ground fill so the model is lit from ALL
+   directions; the previous top-only key left the lower half near-black. */
+scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+scene.add(new THREE.HemisphereLight(0xcfd8e3, 0x5a6472, 0.65));
+const key = new THREE.DirectionalLight(0xffffff, 0.85);
+key.position.set(0.6, 1, 1.2).normalize();
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xaec8d8, 0.45);
+fill.position.set(-1, 0.2, -0.5).normalize();
+scene.add(fill);
+const under = new THREE.DirectionalLight(0xbcc8d6, 0.5);   /* lights the underside */
+under.position.set(0.2, -1, 0.6).normalize();
+scene.add(under);
+const rim = new THREE.DirectionalLight(0xd0e8ff, 0.25);
+rim.position.set(0, -1, 0.5).normalize();
+scene.add(rim);
+
+/* grid + axes */
+const grid = new THREE.GridHelper(6000, 60, 0x3a4250, 0x2a3040);
+scene.add(grid);
+const axes = new THREE.AxesHelper(500);
+scene.add(axes);
+
+/* state */
+let modelGroup = null;
+let edgeGroup  = null;
+let bboxSize   = new THREE.Vector3(1000,1000,70);
+let bboxCenter = new THREE.Vector3(0,500,0);
+const clipPlane = new THREE.Plane(new THREE.Vector3(-1,0,0), 0);
+
+/* ── frame colour from Jinja (hex → THREE.Color) ─────────────────────── */
+const FRAME_HEX = '{{ window.frame_colour_hex | default("#555a60") }}';
+function frameColor(){
+  const c = new THREE.Color(FRAME_HEX);
+  /* boost very dark colours so they're visible on dark background */
+  const hsl = {};
+  c.getHSL(hsl);
+  if (hsl.l < 0.18) { c.setHSL(hsl.h, hsl.s, 0.28); }
+  return c;
+}
+
+/* ── resize ──────────────────────────────────────────────────────────── */
+function resize(){
+  const w = area.clientWidth || 800;
+  const h = area.clientHeight || 600;
+  renderer.setSize(w, h, false);   // false = don't touch CSS
+  cameraP.aspect = w / h;
+  cameraP.updateProjectionMatrix();
+  const d = Math.max(bboxSize.x, bboxSize.y) * 0.75;
+  cameraO.left   = -d * w/h;  cameraO.right = d * w/h;
+  cameraO.top    =  d;        cameraO.bottom = -d;
+  cameraO.updateProjectionMatrix();
+}
+
+// Use ResizeObserver so resize fires correctly at every zoom level
+new ResizeObserver(resize).observe(area);
+
+/* ── render loop ─────────────────────────────────────────────────────── */
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+/* ── model loading ───────────────────────────────────────────────────── */
+function currentMethod(){ return document.getElementById('methodSel').value; }
+
+function clearModel(){
+  if (modelGroup){ scene.remove(modelGroup); modelGroup = null; }
+  if (edgeGroup) { scene.remove(edgeGroup);  edgeGroup  = null; }
+}
+
+function reload(){
+  loaderEl.style.display = 'flex';
+  clearModel();
+  const url = `${API}/windows/${QS_WINDOW_ID}/3d/glb?method=${currentMethod()}`;
+  new THREE.GLTFLoader().load(url, (gltf)=>{
+    modelGroup = gltf.scene;
+    const fc = frameColor();
+
+    modelGroup.traverse(o=>{
+      if (!o.isMesh) return;
+      /* classify: glass vs frame */
+      const isGlass = /glass/i.test(o.name) ||
+        (o.material && o.material.transparent && o.material.opacity < 0.85);
+      o.userData.isGlass = isGlass;
+
+      if (isGlass){
+        o.material = new THREE.MeshPhysicalMaterial({
+          color: 0x6ab3c8, metalness:0.05, roughness:0.06,
+          transparent:true, opacity:0.38, side:THREE.DoubleSide,
+          clippingPlanes:[] });
+      } else {
+        /* low metalness + slight emissive floor — a dark anthracite frame
+           stays visibly grey instead of collapsing to black on unlit faces */
+        o.material = new THREE.MeshStandardMaterial({
+          color: fc, metalness:0.18, roughness:0.55,
+          emissive: fc.clone().multiplyScalar(0.16),
+          side:THREE.DoubleSide, clippingPlanes:[] });
+      }
+    });
+
+    /* centre + sit on grid */
+    const box = new THREE.Box3().setFromObject(modelGroup);
+    box.getSize(bboxSize);
+    box.getCenter(bboxCenter);
+    modelGroup.position.y -= box.min.y;
+    bboxCenter.y -= box.min.y;
+
+    scene.add(modelGroup);
+    buildEdges();
+
+    document.getElementById('dimsBadge').textContent =
+      `${bboxSize.x.toFixed(0)} × ${bboxSize.y.toFixed(0)} × ${bboxSize.z.toFixed(0)} mm`;
+
+    setEdges(document.getElementById('tEdges').checked);
+    setWireframe(document.getElementById('tWire').checked);
+    setSection(document.getElementById('tSec').checked);
+
+    loaderEl.style.display = 'none';
+    resize();
+    fitCamera();
+  }, undefined, (err)=>{
+    loaderEl.innerHTML =
+      '<div style="color:#F0A0A0;text-align:center;padding:0 20px;">' +
+      '3D generation failed.<br>' +
+      '<small style="font-size:11px;">Try <b>Simple box</b> mode, or check server logs.</small></div>';
+    console.error('[QS3D]', err);
+  });
+}
+
+function buildEdges(){
+  edgeGroup = new THREE.Group();
+  modelGroup.traverse(o=>{
+    if (o.isMesh && !o.userData.isGlass){
+      const eg = new THREE.EdgesGeometry(o.geometry, 25);
+      const ln = new THREE.LineSegments(eg,
+        new THREE.LineBasicMaterial({ color:0x0a0f14, clippingPlanes:[] }));
+      ln.applyMatrix4(o.matrixWorld);
+      edgeGroup.add(ln);
+    }
+  });
+  scene.add(edgeGroup);
+}
+
+/* ── display toggles ─────────────────────────────────────────────────── */
+function setWireframe(on){
+  if (!modelGroup) return;
+  modelGroup.traverse(o=>{ if(o.isMesh) o.material.wireframe = on; });
+}
+function setEdges(on){ if (edgeGroup) edgeGroup.visible = on; }
+function setGlass(on){
+  if (!modelGroup) return;
+  modelGroup.traverse(o=>{ if(o.isMesh && o.userData.isGlass) o.visible = on; });
+}
+
+/* ── section cut ─────────────────────────────────────────────────────── */
+function setSection(on){
+  document.getElementById('tSec').checked = on;
+  if (!modelGroup) return;
+  const planes = on ? [clipPlane] : [];
+  modelGroup.traverse(o=>{ if(o.isMesh) o.material.clippingPlanes = planes; });
+  if (edgeGroup) edgeGroup.traverse(o=>{ if(o.material) o.material.clippingPlanes = planes; });
+  if (on) updateSection();
+}
+function updateSection(){
+  const axis = document.getElementById('secAxis').value;
+  const t    = +document.getElementById('secPos').value / 1000;
+  const flip = document.getElementById('tFlip').checked;
+  let n, lo, hi;
+  if      (axis==='x'){ n=new THREE.Vector3(1,0,0); lo=bboxCenter.x-bboxSize.x/2; hi=bboxCenter.x+bboxSize.x/2; }
+  else if (axis==='y'){ n=new THREE.Vector3(0,1,0); lo=bboxCenter.y-bboxSize.y/2; hi=bboxCenter.y+bboxSize.y/2; }
+  else                { n=new THREE.Vector3(0,0,1); lo=bboxCenter.z-bboxSize.z/2; hi=bboxCenter.z+bboxSize.z/2; }
+  const pos = lo + (hi - lo) * t;
+  if (flip) n.negate();
+  clipPlane.normal.copy(n);
+  clipPlane.constant = flip ? pos : -pos;
+  if (!document.getElementById('tSec').checked) setSection(true);
+}
+
+/* ── cameras & views ─────────────────────────────────────────────────── */
+function camDistance(){
+  return Math.max(bboxSize.x, bboxSize.y, bboxSize.z) * 2.0;
+}
+function setView(v){
+  document.querySelectorAll('.vc-btn').forEach(b=>b.classList.remove('on'));
+  const key = 'v' + v.charAt(0).toUpperCase() + v.slice(1);
+  const btn = document.getElementById(key);
+  if (btn) btn.classList.add('on');
+  const d = camDistance(), c = bboxCenter;
+  const pos = {
+    iso:    [c.x+d*.65, c.y+d*.55, c.z+d*.65],
+    front:  [c.x, c.y, c.z+d],
+    back:   [c.x, c.y, c.z-d],
+    top:    [c.x, c.y+d, c.z+.001],
+    bottom: [c.x, c.y-d, c.z+.001],
+    left:   [c.x-d, c.y, c.z],
+    right:  [c.x+d, c.y, c.z],
+  }[v] || [c.x+d*.65, c.y+d*.55, c.z+d*.65];
+  camera.position.set(...pos);
+  controls.target.copy(c);
+  controls.update();
+  resize();
+}
+function fitCamera(){ setView('iso'); }
+
+function toggleProjection(){
+  usingOrtho = !usingOrtho;
+  const pos = camera.position.clone();
+  const tgt = controls.target.clone();
+  camera = usingOrtho ? cameraO : cameraP;
+  camera.position.copy(pos);
+  controls.object = camera;
+  controls.target.copy(tgt);
+  document.getElementById('vProj').textContent = usingOrtho ? 'PERSP' : 'ORTHO';
+  resize();
+  controls.update();
+}
+
+/* ── utilities ───────────────────────────────────────────────────────── */
+function screenshot(){
+  renderer.render(scene, camera);
+  const a = document.createElement('a');
+  a.download = `QS-${QS_WINDOW_ID}-3d.png`;
+  a.href = renderer.domElement.toDataURL('image/png');
+  a.click();
+}
+async function dl3d(fmt){
+  const url = `${API}/windows/${QS_WINDOW_ID}/3d/${fmt}?method=${currentMethod()}`;
+  const btn = event && event.target;
+  if(btn){ btn.textContent = '⏳ Generating…'; btn.style.opacity='0.6'; }
+  try{
+    const res = await fetch(url);
+    if(!res.ok){
+      const j = await res.json().catch(()=>({}));
+      alert((j.error || 'Export failed') + '\n\nTry switching to "Simple box" mode, or check server logs.');
+      if(btn){ btn.textContent = '⬇ '+fmt.toUpperCase()+' download'; btn.style.opacity=''; }
+      return false;
+    }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `QS-${QS_WINDOW_ID}.${fmt}`;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+    if(btn){ btn.textContent = '✓ Downloaded'; btn.style.opacity=''; }
+    setTimeout(()=>{ if(btn) btn.textContent='⬇ '+fmt.toUpperCase()+' (web / Blender)'.replace('GLB','').replace('glb',''); }, 2000);
+  }catch(e){
+    alert('Download error: ' + e.message);
+    if(btn){ btn.textContent = '⬇ '+fmt; btn.style.opacity=''; }
+  }
+  return false;
+}
+
+/* ── boot ────────────────────────────────────────────────────────────── */
+reload();
+</script>
+{% endblock %}

@@ -1,0 +1,117 @@
+{% extends 'base.html' %}
+{% block title %}Reports — Quoting Studio{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  <aside class="dash-sidebar">
+    <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
+    <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item">Customers</a>
+    <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item active">Reports</a>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('settings.pricing') }}" class="dash-sidebar-item">Products &amp; pricing</a>
+    <a href="{{ url_for('settings.company') }}" class="dash-sidebar-item">Branding</a>
+    <a href="{{ url_for('settings.team') }}"    class="dash-sidebar-item">Team</a>
+    {% endif %}
+  </aside>
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div><h1>Reports</h1><div class="sub mono">Pipeline overview</div></div>
+    </div>
+
+    <!-- Stats grid -->
+    <div class="stat-row" style="flex-wrap:wrap;gap:12px;">
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('total',0) }}</div>
+        <div class="stat-label">Total projects</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('sent',0) }}</div>
+        <div class="stat-label">Quotes sent</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('won',0) }}</div>
+        <div class="stat-label">Won</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('win_rate',0) }}%</div>
+        <div class="stat-label">Win rate</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="font-size:20px;">
+          £{{ '{:,.0f}'.format(stats.get('pipeline',0)) }}
+        </div>
+        <div class="stat-label">Pipeline value</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="font-size:20px;">
+          £{{ '{:,.0f}'.format(stats.get('won_value',0)) }}
+        </div>
+        <div class="stat-label">Won value</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('quote_count',0) }}</div>
+        <div class="stat-label">Quotes generated</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="font-size:20px;">
+          £{{ '{:,.0f}'.format(stats.get('avg_quote',0)) }}
+        </div>
+        <div class="stat-label">Avg quote value</div>
+      </div>
+    </div>
+
+    <!-- Status breakdown -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:24px;">
+      {% for status, label, cls in [
+        ('draft','Draft','badge-draft'),('sent','Sent','badge-sent'),
+        ('won','Won','badge-won'),('lost','Lost','badge-lost')
+      ] %}
+      <div style="background:white;border:1px solid var(--line);border-radius:6px;
+                  padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
+        <span class="badge {{ cls }}">{{ label }}</span>
+        <span style="font-family:var(--font-display);font-size:22px;">
+          {{ stats.get(status, 0) }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Recent quotes -->
+    {% if recent_quotes %}
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+                color:var(--steel);font-weight:600;margin-bottom:12px;">Recent quotes</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Quote #</th><th>Customer</th><th>Date</th>
+          <th>Total</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for q in recent_quotes %}
+        <tr>
+          <td class="mono" style="font-size:12px;">{{ q.quote_number }}</td>
+          <td>{{ q.project.customer_name if q.project else '—' }}</td>
+          <td class="muted mono" style="font-size:11px;">{{ q.issued_date.strftime('%d %b %Y') }}</td>
+          <td class="mono" style="font-weight:600;color:var(--copper);">
+            £{{ '%.2f'|format(q.total) if q.total else '—' }}
+          </td>
+          <td>
+            <span class="badge badge-{{ 'sent' if q.is_sent else 'draft' }}">
+              {{ 'Sent' if q.is_sent else 'Draft' }}
+            </span>
+          </td>
+          <td style="text-align:right;">
+            {% if q.project %}
+            <a href="{{ url_for('quote.view', project_id=q.project_id, quote_id=q.id) }}"
+               class="btn btn-secondary btn-sm">View →</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

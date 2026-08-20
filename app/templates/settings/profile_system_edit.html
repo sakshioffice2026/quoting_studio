@@ -1,0 +1,197 @@
+{% extends 'base.html' %}
+{% block title %}{{ sys.name }} — Profile System — Quoting Studio{% endblock %}
+{% block body %}
+<div style="display:flex;min-height:calc(100vh - 52px);">
+  {% include 'settings/_sidebar.html' %}
+  <div style="flex:1;padding:28px 32px;max-width:1000px;">
+
+    <div style="margin-bottom:20px;">
+      <a href="{{ url_for('settings.profile_systems') }}"
+         style="font-size:12px;color:var(--steel);text-decoration:none;">← Profile Systems</a>
+      <h1 style="margin:6px 0 2px;font-size:20px;">{{ sys.name }}</h1>
+      <div class="sub mono">{{ sys.material }} · Assign one DXF profile cross-section per member slot</div>
+    </div>
+
+    <form method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <!-- ── Meta ── -->
+      <div style="background:white;border:1px solid var(--line);border-radius:8px;
+                  padding:20px;margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;
+                    letter-spacing:.06em;color:var(--steel);margin-bottom:14px;">System details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;margin-bottom:4px;">Name</label>
+            <input class="form-control" name="name" value="{{ sys.name }}" required>
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;margin-bottom:4px;">Material</label>
+            <select class="form-control" name="material">
+              {% for m in ['Aluminium','PVCu','Timber'] %}
+              <option {% if sys.material==m %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <label style="display:block;font-size:11px;font-weight:600;margin-bottom:4px;">Notes</label>
+          <textarea class="form-control" name="notes" rows="2">{{ sys.notes or '' }}</textarea>
+        </div>
+      </div>
+
+      <!-- ── Slot section helper ── -->
+      {# profile_select(slot, label, hint) — renders one slot row #}
+      {% macro profile_select(slot, label, hint) %}
+      {% set cur = sys.get_profile(slot) %}
+      <tr style="border-top:1px solid var(--line);">
+        <td style="padding:10px 12px;width:140px;">
+          <div style="font-size:12px;font-weight:600;color:var(--navy);">{{ label }}</div>
+          <div style="font-size:10px;color:var(--steel);margin-top:2px;">{{ hint }}</div>
+        </td>
+        <td style="padding:10px 8px;">
+          <select name="{{ slot }}"
+                  style="width:100%;font-size:12px;padding:6px 8px;
+                         border:1px solid var(--line);border-radius:4px;background:#fff;">
+            <option value="">— not assigned —</option>
+            {% for p in profiles %}
+            <option value="{{ p.id }}"
+                    {% if cur and cur.id==p.id %}selected{% endif %}>
+              {{ p.code }} · {{ p.name }}
+              ({{ p.bar_width_mm|int }}×{{ p.depth_mm|int }}mm{% if p.has_geometry %} ✓DXF{% endif %})
+            </option>
+            {% endfor %}
+          </select>
+        </td>
+        <td style="padding:10px 8px;text-align:right;white-space:nowrap;">
+          {% if cur %}
+          <span style="font-size:11px;font-weight:600;color:#065F46;">
+            ✓ {{ cur.code }} · {{ cur.bar_width_mm|int }}×{{ cur.depth_mm|int }}mm
+          </span>
+          {% else %}
+          <span style="font-size:11px;color:#aaa;">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endmacro %}
+
+      <!-- ── Outer frame ── -->
+      <div style="background:white;border:1px solid var(--line);border-radius:8px;
+                  padding:20px;margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;
+                    letter-spacing:.06em;color:var(--steel);margin-bottom:4px;">Outer frame</div>
+        <div style="font-size:11px;color:var(--steel);margin-bottom:12px;">
+          Applies to both windows and doors. Members extruded to exact fabrication length.
+        </div>
+        <table style="width:100%;border-collapse:collapse;">
+          {{ profile_select('head', 'Head', 'Top — extrudes along X') }}
+          {{ profile_select('cill', 'Cill', 'Bottom — window only, extrudes along X') }}
+          {{ profile_select('jamb', 'Jamb', 'Left + right — extrudes along Y') }}
+        </table>
+      </div>
+
+      <!-- ── Door-specific ── -->
+      <div style="background:white;border:1px solid var(--line);border-radius:8px;
+                  padding:20px;margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;
+                    letter-spacing:.06em;color:var(--steel);margin-bottom:4px;">Door-specific</div>
+        <div style="font-size:11px;color:var(--steel);margin-bottom:12px;">
+          Used only when unit type = Door. Threshold replaces cill. Meeting stile placed at centre interlock.
+        </div>
+        <table style="width:100%;border-collapse:collapse;">
+          {{ profile_select('threshold',     'Threshold',     'Bottom of door — replaces cill') }}
+          {{ profile_select('door_leaf',     'Door leaf',     'Door panel / sash profile') }}
+          {{ profile_select('meeting_stile', 'Meeting stile', 'Interlocking centre vertical') }}
+        </table>
+      </div>
+
+      <!-- ── Internal dividers ── -->
+      <div style="background:white;border:1px solid var(--line);border-radius:8px;
+                  padding:20px;margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;
+                    letter-spacing:.06em;color:var(--steel);margin-bottom:12px;">Internal dividers</div>
+        <table style="width:100%;border-collapse:collapse;">
+          {{ profile_select('mullion', 'Mullion', 'Vertical divider — butt joints into head + cill') }}
+          {{ profile_select('transom', 'Transom', 'Horizontal divider — butt joints into jambs') }}
+        </table>
+      </div>
+
+      <!-- ── Sash ── -->
+      <div style="background:white;border:1px solid var(--line);border-radius:8px;
+                  padding:20px;margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;
+                    letter-spacing:.06em;color:var(--steel);margin-bottom:4px;">Sash (opening leaf)</div>
+        <div style="font-size:11px;color:var(--steel);margin-bottom:12px;">
+          Separate profiles for top rail, bottom rail and stiles — allows asymmetric sections
+          (e.g. weather-bar at bottom).
+        </div>
+        <table style="width:100%;border-collapse:collapse;">
+          {{ profile_select('sash_top',    'Sash top rail',    'Top member of the opening sash') }}
+          {{ profile_select('sash_bottom', 'Sash bottom rail', 'Bottom member — may have weather bar') }}
+          {{ profile_select('sash_side',   'Sash stile',       'Left + right stiles of the sash') }}
+        </table>
+      </div>
+
+      <!-- ── Glazing ── -->
+      <div style="background:white;border:1px solid var(--line);border-radius:8px;
+                  padding:20px;margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;
+                    letter-spacing:.06em;color:var(--steel);margin-bottom:12px;">Glazing</div>
+        <table style="width:100%;border-collapse:collapse;">
+          {{ profile_select('glazing_bead', 'Glazing bead', 'IGU retaining bead clipped inside rebate') }}
+        </table>
+      </div>
+
+      <!-- ── Geometry rules ── -->
+      <div style="background:white;border:1px solid var(--line);border-radius:8px;
+                  padding:20px;margin-bottom:24px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;
+                    letter-spacing:.06em;color:var(--steel);margin-bottom:14px;">Geometry rules</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;margin-bottom:4px;">
+              Frame corner joint
+            </label>
+            <select class="form-control" name="frame_corner_joint">
+              <option value="mitre_45" {% if sys.frame_corner_joint=='mitre_45' %}selected{% endif %}>45° Mitre</option>
+              <option value="butt"     {% if sys.frame_corner_joint=='butt' %}selected{% endif %}>Butt</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;margin-bottom:4px;">
+              Sash corner joint
+            </label>
+            <select class="form-control" name="sash_corner_joint">
+              <option value="mitre_45" {% if sys.sash_corner_joint=='mitre_45' %}selected{% endif %}>45° Mitre</option>
+              <option value="butt"     {% if sys.sash_corner_joint=='butt' %}selected{% endif %}>Butt</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;margin-bottom:4px;">
+              Internal joint
+            </label>
+            <select class="form-control" name="internal_joint">
+              <option value="butt"     {% if sys.internal_joint=='butt' %}selected{% endif %}>Butt</option>
+              <option value="mitre_45" {% if sys.internal_joint=='mitre_45' %}selected{% endif %}>45° Mitre</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;margin-bottom:4px;">
+              Sash clearance (mm)
+            </label>
+            <input class="form-control mono" name="sash_clearance_mm"
+                   type="number" step="0.5" min="0" max="10"
+                   value="{{ sys.sash_clearance_mm }}">
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary">Save system</button>
+        <a href="{{ url_for('settings.profile_systems') }}" class="btn btn-ghost">Cancel</a>
+      </div>
+    </form>
+
+  </div>
+</div>
+{% endblock %}

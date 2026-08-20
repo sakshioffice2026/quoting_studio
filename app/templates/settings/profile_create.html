@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% block title %}Add Profile — Settings — Quoting Studio{% endblock %}
+{% block body %}
+<div style="display:flex;min-height:calc(100vh - 52px);">
+  {% include 'settings/_sidebar.html' %}
+  <div style="flex:1;padding:32px;max-width:600px;">
+
+    <div style="margin-bottom:24px;">
+      <a href="{{ url_for('settings.profiles_library') }}"
+         style="font-size:12px;color:var(--steel);text-decoration:none;">← Profile Library</a>
+      <h1 style="margin:8px 0 4px;font-size:20px;">Add Profile</h1>
+      <div class="sub mono">Custom frame section for your library</div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }}" style="margin-bottom:16px;">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div style="background:white;border:1px solid var(--line);border-radius:8px;padding:28px;">
+      <form method="POST" action="{{ url_for('settings.create_profile') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="form-group">
+            <label class="form-label" for="code">Code <span class="copper">*</span></label>
+            <input class="form-control" type="text" id="code" name="code"
+                   value="{{ request.form.get('code','') }}"
+                   placeholder="e.g. HF-90" required maxlength="30">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="category">Category <span class="copper">*</span></label>
+            <select class="form-control" id="category" name="category">
+              {% for cat in categories %}
+              <option value="{{ cat }}" {{ 'selected' if request.form.get('category')==cat }}>{{ cat }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="name">Name <span class="copper">*</span></label>
+          <input class="form-control" type="text" id="name" name="name"
+                 value="{{ request.form.get('name','') }}"
+                 placeholder="e.g. Head Frame 90×35" required maxlength="120">
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="form-group">
+            <label class="form-label" for="bar_width_mm">Width (mm) <span class="copper">*</span></label>
+            <input class="form-control" type="number" id="bar_width_mm" name="bar_width_mm"
+                   value="{{ request.form.get('bar_width_mm','60') }}" step="1" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="depth_mm">Depth (mm) <span class="copper">*</span></label>
+            <input class="form-control" type="number" id="depth_mm" name="depth_mm"
+                   value="{{ request.form.get('depth_mm','90') }}" step="1" required>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+          <div class="form-group">
+            <label class="form-label" for="rebate_w_mm">Rebate W (mm)</label>
+            <input class="form-control" type="number" id="rebate_w_mm" name="rebate_w_mm"
+                   value="{{ request.form.get('rebate_w_mm','0') }}" step="0.5">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="rebate_d_mm">Rebate D (mm)</label>
+            <input class="form-control" type="number" id="rebate_d_mm" name="rebate_d_mm"
+                   value="{{ request.form.get('rebate_d_mm','0') }}" step="0.5">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="glass_rebate_mm">Glass Rebate (mm)</label>
+            <input class="form-control" type="number" id="glass_rebate_mm" name="glass_rebate_mm"
+                   value="{{ request.form.get('glass_rebate_mm','0') }}" step="0.5">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="form-group">
+            <label class="form-label" for="material">Material</label>
+            <select class="form-control" id="material" name="material">
+              {% for m in ['Aluminium','PVCu','Timber','Steel'] %}
+              <option value="{{ m }}" {{ 'selected' if request.form.get('material','')==m }}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="drawing_ref">Drawing Ref</label>
+            <input class="form-control" type="text" id="drawing_ref" name="drawing_ref"
+                   value="{{ request.form.get('drawing_ref','') }}"
+                   placeholder="e.g. Sections_1" maxlength="80">
+          </div>
+        </div>
+
+        <div class="divider"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <a href="{{ url_for('settings.profiles_library') }}" class="btn btn-secondary">Cancel</a>
+          <button type="submit" class="btn btn-primary">Save profile</button>
+        </div>
+
+      </form>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

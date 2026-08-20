@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% block title %}Add Glass Unit — Settings — Quoting Studio{% endblock %}
+{% block body %}
+<div style="display:flex;min-height:calc(100vh - 52px);">
+  {% include 'settings/_sidebar.html' %}
+  <div style="flex:1;padding:32px;max-width:600px;">
+
+    <div style="margin-bottom:24px;">
+      <a href="{{ url_for('settings.glass_library') }}"
+         style="font-size:12px;color:var(--steel);text-decoration:none;">← Glass Units</a>
+      <h1 style="margin:8px 0 4px;font-size:20px;">Add Glass Unit</h1>
+      <div class="sub mono">Custom glazing spec for your library</div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }}" style="margin-bottom:16px;">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div style="background:white;border:1px solid var(--line);border-radius:8px;padding:28px;">
+      <form method="POST" action="{{ url_for('settings.create_glass') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="form-group">
+            <label class="form-label" for="code">Code <span class="copper">*</span></label>
+            <input class="form-control" type="text" id="code" name="code"
+                   value="{{ request.form.get('code','') }}"
+                   placeholder="e.g. DG-28" required maxlength="30">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="thickness_mm">Thickness (mm) <span class="copper">*</span></label>
+            <input class="form-control" type="number" id="thickness_mm" name="thickness_mm"
+                   value="{{ request.form.get('thickness_mm','24') }}"
+                   step="0.5" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="name">Name <span class="copper">*</span></label>
+          <input class="form-control" type="text" id="name" name="name"
+                 value="{{ request.form.get('name','') }}"
+                 placeholder="e.g. Double Glazed 4/16/4 Low-E" required maxlength="120">
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+          <div class="form-group">
+            <label class="form-label" for="build_up">Build-up</label>
+            <input class="form-control" type="text" id="build_up" name="build_up"
+                   value="{{ request.form.get('build_up','') }}"
+                   placeholder="4/16/4" maxlength="60">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="u_value">U-value (W/m²K)</label>
+            <input class="form-control" type="number" id="u_value" name="u_value"
+                   value="{{ request.form.get('u_value','') }}"
+                   step="0.01" placeholder="1.2">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="g_value">g-value</label>
+            <input class="form-control" type="number" id="g_value" name="g_value"
+                   value="{{ request.form.get('g_value','') }}"
+                   step="0.01" placeholder="0.60">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="price_per_m2">Supply price (£/m²)</label>
+          <input class="form-control" type="number" id="price_per_m2" name="price_per_m2"
+                 value="{{ request.form.get('price_per_m2','') }}"
+                 step="0.01" placeholder="e.g. 68.00">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="description">Description</label>
+          <input class="form-control" type="text" id="description" name="description"
+                 value="{{ request.form.get('description','') }}"
+                 placeholder="e.g. Low-E coating on pane 2. Meets Part L." maxlength="300">
+        </div>
+
+        <div class="divider"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <a href="{{ url_for('settings.glass_library') }}" class="btn btn-secondary">Cancel</a>
+          <button type="submit" class="btn btn-primary">Save glass unit</button>
+        </div>
+
+      </form>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

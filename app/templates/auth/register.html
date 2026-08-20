@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create account — Quoting Studio</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
+</head>
+<body>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="flash-stack">
+      {% for cat, msg in messages %}
+        <div class="flash flash-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+<div class="auth-shell">
+  <div class="auth-card" style="max-width:460px;">
+    <div class="auth-logo">Quoting Studio</div>
+    <div class="auth-sub">Start your free account</div>
+
+    <h2>Create your workspace</h2>
+    <p style="font-size:13px;color:var(--steel);margin-bottom:22px;">
+      Your company gets its own isolated workspace. You can invite team members later.
+    </p>
+
+    <form method="POST" action="{{ url_for('auth.register') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="form-group">
+        <label class="form-label" for="company_name">Company name</label>
+        <input class="form-control" type="text" id="company_name" name="company_name"
+               value="{{ company_name or '' }}"
+               placeholder="Harwood Windows Ltd" autofocus required>
+        <div class="form-hint">This becomes your workspace name.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="full_name">Your full name</label>
+        <input class="form-control" type="text" id="full_name" name="full_name"
+               value="{{ full_name or '' }}"
+               placeholder="James Harwood" required>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="email">Work email</label>
+        <input class="form-control" type="email" id="email" name="email"
+               value="{{ email or '' }}"
+               autocomplete="email" required>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input class="form-control" type="password" id="password" name="password"
+               autocomplete="new-password" required minlength="8">
+        <div class="form-hint">At least 8 characters.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="confirm_password">Confirm password</label>
+        <input class="form-control" type="password" id="confirm_password" name="confirm_password"
+               autocomplete="new-password" required>
+      </div>
+
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+        Create workspace →
+      </button>
+    </form>
+
+    <div class="auth-footer">
+      Already have an account?
+      <a href="{{ url_for('auth.login') }}">Sign in</a>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

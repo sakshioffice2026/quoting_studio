@@ -1,0 +1,30 @@
+<aside style="width:200px;background:#FAF8F3;border-right:1px solid var(--line);
+              padding:24px 0;flex-shrink:0;">
+  <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);
+              font-weight:600;padding:0 20px;margin-bottom:10px;">Settings</div>
+  {% macro slink(ep, label) %}
+  <a href="{{ url_for(ep) }}"
+     style="display:block;padding:10px 20px;font-size:13px;font-weight:500;
+            border-left:2px solid {{ 'var(--copper)' if request.endpoint == ep else 'transparent' }};
+            background:{{ 'white' if request.endpoint == ep else 'transparent' }};
+            color:{{ 'var(--navy)' if request.endpoint == ep else '#566' }};
+            text-decoration:none;transition:background .12s;"
+     onmouseover="this.style.background='#F0ECE4'"
+     onmouseout="this.style.background='{{ 'white' if request.endpoint == ep else 'transparent' }}'">
+    {{ label }}
+  </a>
+  {% endmacro %}
+  {{ slink('settings.company', 'Company') }}
+  {{ slink('settings.pricing', 'Pricing') }}
+  {{ slink('settings.team',    'Team') }}
+  {{ slink('settings.cad',            'CAD profiles') }}
+  {{ slink('settings.profiles_library','Profile Library') }}
+  {{ slink('settings.profile_systems', 'Profile Systems') }}
+  {{ slink('settings.glass_library', 'Glass Units') }}
+  {{ slink('settings.profile', 'My profile') }}
+  <div style="height:1px;background:var(--line);margin:12px 20px;"></div>
+  <a href="{{ url_for('dashboard.index') }}"
+     style="display:block;padding:10px 20px;font-size:13px;color:var(--steel);text-decoration:none;">
+    ← Dashboard
+  </a>
+</aside>

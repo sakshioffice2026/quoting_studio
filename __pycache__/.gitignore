@@ -1,0 +1,28 @@
+# Virtual Environments
+venv/
+env/
+ENV/
+
+# Secrets & Local Config
+.env
+
+# Python Cache & Bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Editor / IDE Configs
+.vs/
+.vscode/
+
+# Logs & Temporary Workspaces
+logs/
+uploads/
+1/
+{app
+
+# Data & Documents (Uncomment if you want to ignore)
+# import_data/
+# *.docx
+# *.sql
