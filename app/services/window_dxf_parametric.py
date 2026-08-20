@@ -456,7 +456,7 @@ def _titleblock(msp, window, profile, bbox, bar, section_y, side_bottom_y):
     msp.add_text(
         f'Date: {date_str}',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': tb_h*0.12}
-    ).set_placement((bx1 - bw*0.15, tb_y0 + tb_h*0.3), align=2)
+    ).set_placement((bx1 - bw*0.15, tb_y0 + tb_h*0.3), align=TextEntityAlignment.BOTTOM_RIGHT)
 
 
 # ═══════════════════════════════════════════════════════════════

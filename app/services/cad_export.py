@@ -35,6 +35,18 @@ import json
 import logging
 from datetime import date
 
+
+def _align(code):
+    """Map legacy DXF group-72 horizontal justification codes (0=Left,
+    1=Center, 2=Right) to the ezdxf.enums.TextEntityAlignment members
+    required by Text.set_placement() in ezdxf >= 1.1."""
+    from ezdxf.enums import TextEntityAlignment
+    return {
+        0: TextEntityAlignment.LEFT,
+        1: TextEntityAlignment.CENTER,
+        2: TextEntityAlignment.RIGHT,
+    }[code]
+
 logger = logging.getLogger(__name__)
 
 # Default profile values (mm)
@@ -192,7 +204,7 @@ def _build(window, panes, prof, tenant_id, **params) -> bytes:
     _schedule(msp, W, H, panes_data, prof)
     
     # ---- DIMENSIONS (with auto extent calculation) ----
-    bbox = _calculate_extents(W, H, sect_x, prof['depth'], cill_nose if has_cill else 0)
+    bbox = _calculate_extents(W, H, sect_x, prof['depth'], cill_nose if has_cill else 0, prof['bar'])
     _dimensions(msp, W, H, panes_data, section_y, sect_x, prof['depth'], bbox)
     
     # ---- TITLE BLOCK (modelspace) ----
@@ -422,12 +434,12 @@ def _cill(msp, W, horn_length=40.0, nose_depth=30.0):
     msp.add_text(
         'CILL',
         dxfattribs={'layer': 'WINDOW_CILL', 'height': 30}
-    ).set_placement((label_x, label_y), align=1)
+    ).set_placement((label_x, label_y), align=_align(1))
     
     msp.add_text(
         f'{horn_length:.0f}mm horn × {nose_depth:.0f}mm depth',
         dxfattribs={'layer': 'WINDOW_CILL', 'height': 18}
-    ).set_placement((label_x, label_y - nose_depth*0.2), align=1)
+    ).set_placement((label_x, label_y - nose_depth*0.2), align=_align(1))
 
 
 # ================================================================
@@ -479,12 +491,12 @@ def _horizontal_section(msp, W, prof, section_y):
     msp.add_text(
         'HORIZONTAL SECTION A-A',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.5}
-    ).set_placement((W/2, section_bot - bar*1.4), align=1)
+    ).set_placement((W/2, section_bot - bar*1.4), align=_align(1))
     
     msp.add_text(
         f'PROFILE: {prof["ref"]} | {bar:.0f}mm FRAME | {wall:.0f}mm WALL | {depth:.0f}mm DEPTH',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.34}
-    ).set_placement((W/2, section_bot - bar*2.2), align=1)
+    ).set_placement((W/2, section_bot - bar*2.2), align=_align(1))
 
 
 def _profile_box_h(msp, x, y_bot, w, depth, wall, y_top, mirror=False):
@@ -588,12 +600,12 @@ def _vertical_section(msp, H, prof, sect_x, has_cill=False):
     msp.add_text(
         'VERTICAL SECTION B-B',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.55}
-    ).set_placement((label_x, section_bottom - bar*1.4), align=1)
+    ).set_placement((label_x, section_bottom - bar*1.4), align=_align(1))
     
     msp.add_text(
         f'PROFILE: {prof["ref"]} | {bar:.0f}mm FRAME | {wall:.0f}mm WALL | {depth:.0f}mm DEPTH',
         dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.34}
-    ).set_placement((label_x, section_bottom - bar*2.2), align=1)
+    ).set_placement((label_x, section_bottom - bar*2.2), align=_align(1))
     
     return section_bottom
 
@@ -704,7 +716,7 @@ def _schedule(msp, W, H, panes_data, prof):
         msp.add_text(
             hdr,
             dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': th}
-        ).set_placement((cx + col_w[i]*0.5, ty - rh*0.45), align=1)
+        ).set_placement((cx + col_w[i]*0.5, ty - rh*0.45), align=_align(1))
         
         cx += col_w[i]
     
@@ -727,7 +739,7 @@ def _schedule(msp, W, H, panes_data, prof):
             msp.add_text(
                 val,
                 dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': th*0.9}
-            ).set_placement((cx + col_w[i]*0.5, ry + rh*0.35), align=1)
+            ).set_placement((cx + col_w[i]*0.5, ry + rh*0.35), align=_align(1))
             cx += col_w[i]
 
 
@@ -735,9 +747,8 @@ def _schedule(msp, W, H, panes_data, prof):
 #  DIMENSIONS & BOUNDING BOX
 # ================================================================
 
-def _calculate_extents(W, H, sect_x, depth, cill_nose):
+def _calculate_extents(W, H, sect_x, depth, cill_nose, bar=40.0):
     """Auto-calculate geometry bounding box."""
-    bar = 40.0
     
     x_min = -bar * 4
     x_max = sect_x + depth * 3 + bar * 5
@@ -769,7 +780,7 @@ def _dimensions(msp, W, H, panes_data, section_y, sect_x, depth, bbox):
     msp.add_text(
         f'{W:.0f}',
         dxfattribs={'layer': layer_dim, 'height': 30}
-    ).set_placement((W/2, H + 140), align=1)
+    ).set_placement((W/2, H + 140), align=_align(1))
     
     # Overall height — right of section
     msp.add_line(
@@ -788,7 +799,7 @@ def _dimensions(msp, W, H, panes_data, section_y, sect_x, depth, bbox):
     msp.add_text(
         f'{H:.0f}',
         dxfattribs={'layer': layer_dim, 'height': 30}
-    ).set_placement((sect_x + depth*3.8, H/2), align=1)
+    ).set_placement((sect_x + depth*3.8, H/2), align=_align(1))
 
 
 def _sheet_border(msp, bbox, bar):
@@ -822,9 +833,20 @@ def _sheet_border(msp, bbox, bar):
 #  TITLE BLOCK (MODELSPACE)
 # ================================================================
 
-def _titleblock_ms(msp, W, H, bar, section_y, prof, window, tenant_id, 
+def _fit_text_height(text, avail_w, max_h, char_w_ratio=0.6):
+    """Return a text height that keeps `text` within `avail_w`, capped
+    at `max_h`. Prevents long strings from spilling past a cell divider."""
+    if not text:
+        return max_h
+    est_w_per_h = max(len(text), 1) * char_w_ratio
+    return min(max_h, avail_w / est_w_per_h)
+
+
+def _titleblock_ms(msp, W, H, bar, section_y, prof, window, tenant_id,
                    side_bottom_y=None, bbox=None):
-    """Draw title block with drawing info."""
+    """Draw title block with drawing info — three bordered cells
+    (company | size/material | drawing no. & date), each text
+    contained and aligned within its own cell to avoid overlap."""
     
     if bbox is None:
         bbox = {'x_min': -bar*4, 'x_max': W+bar*15, 
@@ -838,14 +860,26 @@ def _titleblock_ms(msp, W, H, bar, section_y, prof, window, tenant_id,
     bx1 = bbox['x_max'] + bar * 2
     bw = bx1 - bx0
     
+    # Cell boundaries: company | size/material | drawing no./date
+    cell1_x1 = bx0 + bw * 0.28
+    cell2_x1 = bx0 + bw * 0.68
+    margin   = bw * 0.015
+    
     # Border
     msp.add_lwpolyline(
         [(bx0, tb_y0), (bx1, tb_y0), (bx1, tb_y1), (bx0, tb_y1)],
         close=True,
         dxfattribs={'layer': 'BORDER_LAYOUT', 'lineweight': 40}
     )
+    # Vertical dividers between cells
+    for vx in (cell1_x1, cell2_x1):
+        msp.add_line(
+            (vx, tb_y0), (vx, tb_y1),
+            dxfattribs={'layer': 'BORDER_LAYOUT', 'lineweight': 25}
+        )
     
-    # Company name (left block)
+    # Company name (left cell) — left-aligned, capped height so long
+    # names never cross into the divider
     company = 'QUOTING STUDIO'
     try:
         if hasattr(window, 'project') and window.project:
@@ -853,37 +887,51 @@ def _titleblock_ms(msp, W, H, bar, section_y, prof, window, tenant_id,
     except Exception:
         pass
     
+    company_avail_w = cell1_x1 - bx0 - margin * 2
+    company_h = _fit_text_height(company, company_avail_w, tb_h * 0.18)
+    
     msp.add_text(
         company,
-        dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': tb_h*0.2}
-    ).set_placement((bx0 + bw*0.1, tb_y0 + tb_h*0.6), align=1)
+        dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': company_h}
+    ).set_placement((bx0 + margin, tb_y0 + tb_h * 0.5), align=_align(0))
     
-    # Drawing info (middle block)
+    # Drawing info (middle cell) — left-aligned, own row, no vertical
+    # collision with company text (different cell, divider between them)
     w_mm = int(window.width_mm)
     h_mm = int(window.height_mm)
     mat = getattr(window, 'material', 'Aluminium')
     colour = getattr(window, 'frame_colour_name', '')
     
-    info_text = f'{w_mm}×{h_mm}mm | {mat}' + (f' {colour}' if colour else '')
+    info_text = f'{w_mm}\u00d7{h_mm}mm | {mat}' + (f' {colour}' if colour else '')
+    
+    info_avail_w = cell2_x1 - cell1_x1 - margin * 2
+    info_h = _fit_text_height(info_text, info_avail_w, tb_h * 0.14)
     
     msp.add_text(
         info_text,
-        dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': tb_h*0.15}
-    ).set_placement((bx0 + bw*0.35, tb_y0 + tb_h*0.5), align=0)
+        dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': info_h}
+    ).set_placement((cell1_x1 + margin, tb_y0 + tb_h * 0.5), align=_align(0))
     
-    # Drawing number and date (right block)
+    # Drawing number and date (right cell) — right-aligned, stacked
+    # with a full-height gap between the two rows to prevent overlap
     drw_no = f'QS-{getattr(window, "id", "?")}'
     date_str = date.today().strftime('%d/%m/%Y')
+    right_avail_w = bx1 - cell2_x1 - margin * 2
+    
+    drw_no_text = f'Drw: {drw_no}'
+    date_text = f'Date: {date_str}'
+    drw_h = _fit_text_height(drw_no_text, right_avail_w, tb_h * 0.12)
+    date_h = _fit_text_height(date_text, right_avail_w, tb_h * 0.12)
     
     msp.add_text(
-        f'Drw: {drw_no}',
-        dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': tb_h*0.12}
-    ).set_placement((bx1 - bw*0.15, tb_y0 + tb_h*0.6), align=2)
+        drw_no_text,
+        dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': drw_h}
+    ).set_placement((bx1 - margin, tb_y0 + tb_h * 0.65), align=_align(2))
     
     msp.add_text(
-        f'Date: {date_str}',
-        dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': tb_h*0.12}
-    ).set_placement((bx1 - bw*0.15, tb_y0 + tb_h*0.3), align=2)
+        date_text,
+        dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': date_h}
+    ).set_placement((bx1 - margin, tb_y0 + tb_h * 0.25), align=_align(2))
 
 
 # ================================================================

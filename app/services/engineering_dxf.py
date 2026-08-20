@@ -300,8 +300,11 @@ def _profile_pts(prof):
             return [[(float(x) - mx, float(y) - my) for x, y in lp]
                     for lp in prof['loops']]
     b, d = prof['bar'], prof['depth']
-    rw = min(prof['rebate_w'], b - 4)
-    rd = min(prof['rebate_d'], d - 4)
+    min_wall = max(prof.get('wall', 4.0), 1.0)  # never eat into the wall thickness
+    rw = min(prof['rebate_w'], b - min_wall)
+    rd = min(prof['rebate_d'], d - min_wall)
+    rw = max(rw, 0.0)
+    rd = max(rd, 0.0)
     return [[(0, 0), (b, 0), (b, d - rd), (b - rw, d - rd),
              (b - rw, d), (0, d)]]
 
