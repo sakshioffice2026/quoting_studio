@@ -41,8 +41,10 @@ def _find_freecad() -> str | None:
         found = shutil.which(name)
         if found:
             return found
-    # 4. glob any FreeCAD * install dir on Windows
-    for base in (r"C:\Program Files", r"C:\Program Files (x86)"):
+    # 4. glob any FreeCAD * install dir on common Windows drives
+    for base in (r"C:\Program Files", r"C:\Program Files (x86)",
+                 r"D:\Program Files", r"D:\Program Files (x86)",
+                 r"C:\\", r"D:\\"):
         for exe in glob.glob(os.path.join(base, "FreeCAD*", "bin", "freecadcmd.exe")):
             if os.path.exists(exe):
                 return exe
@@ -86,9 +88,26 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
 
     asm_data = _serialise(window, asm)
 
-    # Use a fast local drive for temp files; fall back to system temp.
-    tmp_dir = next((d for d in ('E:\\', 'D:\\', 'C:\\') if os.path.isdir(d)),
-                   tempfile.gettempdir())
+    # Use a fast local drive for temp files, but never the bare drive root —
+    # writes to X:\ root can be silently blocked/truncated by Windows
+    # Controlled Folder Access or drive permissions with no Python exception,
+    # producing a header-only file. Use a dedicated subfolder instead.
+    tmp_dir = None
+    for d in ('E:\\', 'D:\\', 'C:\\'):
+        if os.path.isdir(d):
+            candidate = os.path.join(d, 'qs_freecad_tmp')
+            try:
+                os.makedirs(candidate, exist_ok=True)
+                testfile = os.path.join(candidate, '.wtest')
+                with open(testfile, 'wb') as tf:
+                    tf.write(b'x')
+                os.remove(testfile)
+                tmp_dir = candidate
+                break
+            except Exception:
+                continue
+    if tmp_dir is None:
+        tmp_dir = tempfile.gettempdir()
     wid     = getattr(window, 'id', 0)
 
     json_path   = os.path.join(tmp_dir, f'qs_asm_{wid}.json')
@@ -109,14 +128,14 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
         r = subprocess.run([freecad, script_path],
                            capture_output=True, text=True,
                            timeout=180, env=env)
-        logger.debug('FreeCAD stdout: %s', (r.stdout or '')[-500:])
+        logger.debug('FreeCAD stdout: %s', (r.stdout or '')[-4000:])
         if r.stderr:
             logger.warning('FreeCAD stderr: %s', r.stderr[-300:])
 
         if 'FREECAD_DONE' not in (r.stdout or ''):
             raise RuntimeError(
                 f'FreeCAD script did not complete. '
-                f'stdout: {(r.stdout or "")[-300:]}')
+                f'stdout: {(r.stdout or "")[-2000:]}')
 
         if fmt == 'step':
             data = _read(step_path)
@@ -128,7 +147,7 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
                     and 'CLOSED_SHELL' not in txt):
                 raise RuntimeError(
                     'FreeCAD produced a STEP with no solid geometry '
-                    f'({len(data)} bytes). Check member build logs above.')
+                    f'({len(data)} bytes). stdout tail:\n{(r.stdout or "")[-2000:]}')
             return data
         stl_data = _read(stl_path)
         if fmt == 'stl':
@@ -370,9 +389,20 @@ all_solids = frame_solids + glass_solids
 if not all_solids:
     print("ERROR: no solids built", flush=True)
 else:
-    compound = Part.makeCompound(all_solids)
+    total_vol = sum(s.Volume for s in all_solids)
+    print(f"DIAG: {{len(all_solids)}} solids, total volume={{total_vol:.1f}}mm3",
+          flush=True)
     if {need_step}:
-        Part.export([compound], r"{spath}")
+        # FreeCAD 1.1.3: Part.export() on raw, un-added TopoShape objects
+        # silently writes a header-only STEP with no geometry. Shapes MUST
+        # be assigned to real Part::Feature document objects first.
+        step_objs = []
+        for i, s in enumerate(all_solids):
+            feat = doc.addObject("Part::Feature", f"Member{{i}}")
+            feat.Shape = s
+            step_objs.append(feat)
+        doc.recompute()
+        Part.export(step_objs, r"{spath}")
         try:
             _sz = os.path.getsize(r"{spath}")
             print(f"STEP exported ({{_sz}} bytes)", flush=True)

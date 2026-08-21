@@ -138,11 +138,16 @@ def get_price(window_id):
 
 
 # ------------------------------------------------------------------ #
-#  GET  /api/v1/windows/<id>/dxf   — advanced fabrication DXF
+#  GET  /api/v1/windows/<id>/dxf   — 2D drawing (now served via FreeCAD
+#  TechDraw: STEP -> Import.insert() -> DrawViewPart/DrawViewSection ->
+#  SVG). ezdxf generator retired for this route; ?fmt=pdf for PDF.
 # ------------------------------------------------------------------ #
 @api_v1_bp.route('/windows/<int:window_id>/dxf', methods=['GET'])
 @login_required
 def export_dxf(window_id):
+    fmt = request.args.get('fmt', 'svg').lower()
+    if fmt not in ('svg', 'pdf'):
+        fmt = 'svg'
     try:
         window = _own_window(window_id)
         panes  = window.panes.all()
@@ -152,16 +157,59 @@ def export_dxf(window_id):
             sync_legacy_panes(window, Pane, db)
             db.session.commit()
             panes = window.panes.all()
-        dxf    = generate_engineering_dxf(window, panes, tenant_id=current_user.tenant_id)
-        if not dxf:
-            return jsonify({'error': 'DXF generation failed — ezdxf may not be installed'}), 500
-        current_app.logger.info('DXF export: window=%d bytes=%d', window_id, len(dxf))
-        fname = f'QS-{window_id}-{window.label.replace(" ","_")[:30]}.dxf'
-        return Response(dxf, mimetype='application/dxf',
+
+        from ..services.techdraw_export import generate_techdraw
+        data = generate_techdraw(window, panes, tenant_id=current_user.tenant_id, fmt=fmt)
+        if not data:
+            return jsonify({'error': 'Drawing generation failed'}), 500
+
+        mimes = {'svg': 'image/svg+xml', 'pdf': 'application/pdf'}
+        current_app.logger.info('Drawing export: window=%d fmt=%s bytes=%d',
+                                 window_id, fmt, len(data))
+        fname = f'QS-{window_id}-{window.label.replace(" ","_")[:30]}.{fmt}'
+        return Response(data, mimetype=mimes[fmt],
                         headers={'Content-Disposition': f'attachment; filename={fname}'})
     except Exception as exc:
         current_app.logger.exception('export_dxf error window=%d: %s', window_id, exc)
-        return jsonify({'error': 'DXF export failed'}), 500
+        return jsonify({'error': 'Drawing export failed'}), 500
+
+
+# ------------------------------------------------------------------ #
+#  GET  /api/v1/windows/<id>/drawing/<fmt>   — FreeCAD TechDraw 2D drawing
+#  (replaces DXF export: STEP -> Import.insert() -> TechDraw.DrawViewPart
+#   -> SVG/PDF). fmt: svg | pdf
+# ------------------------------------------------------------------ #
+@api_v1_bp.route('/windows/<int:window_id>/drawing/<fmt>', methods=['GET'])
+@login_required
+def export_techdraw(window_id, fmt):
+    fmt = fmt.lower()
+    if fmt not in ('svg', 'pdf'):
+        return jsonify({'error': 'Format must be svg or pdf'}), 400
+    try:
+        window = _own_window(window_id)
+        panes  = window.panes.all()
+        try:
+            assert_legacy_panes_match(window, panes)
+        except ValueError:
+            sync_legacy_panes(window, Pane, db)
+            db.session.commit()
+            panes = window.panes.all()
+
+        from ..services.techdraw_export import generate_techdraw
+        data = generate_techdraw(window, panes, tenant_id=current_user.tenant_id, fmt=fmt)
+        if not data:
+            return jsonify({'error': 'TechDraw generation failed'}), 500
+
+        mimes = {'svg': 'image/svg+xml', 'pdf': 'application/pdf'}
+        fname = f'QS-{window_id}-{window.label.replace(" ","_")[:30]}.{fmt}'
+        current_app.logger.info('TechDraw export: window=%d fmt=%s bytes=%d',
+                                 window_id, fmt, len(data))
+        return Response(data, mimetype=mimes[fmt],
+                        headers={'Content-Disposition': f'attachment; filename={fname}'})
+    except Exception as exc:
+        current_app.logger.exception('export_techdraw error window=%d fmt=%s: %s',
+                                      window_id, fmt, exc)
+        return jsonify({'error': 'TechDraw drawing export failed'}), 500
 
 
 # ------------------------------------------------------------------ #
@@ -210,8 +258,12 @@ def export_dwg(window_id):
 @api_v1_bp.route('/windows/<int:window_id>/engineering.dxf', methods=['GET'])
 @login_required
 def export_engineering_dxf(window_id):
-    """Engineering drawing sheet (elevation + plan strip + vertical section
-    + dimensions) as DXF — PWQ-3645 reference-sheet conventions."""
+    """Engineering drawing sheet (elevation + section + dimensions), now
+    generated via FreeCAD TechDraw off the real STEP solid instead of the
+    ezdxf sketch. ?fmt=pdf for PDF, default svg."""
+    fmt = request.args.get('fmt', 'svg').lower()
+    if fmt not in ('svg', 'pdf'):
+        fmt = 'svg'
     try:
         window = _own_window(window_id)
         panes  = window.panes.all()
@@ -221,16 +273,19 @@ def export_engineering_dxf(window_id):
             sync_legacy_panes(window, Pane, db)
             db.session.commit()
             panes = window.panes.all()
-        data = generate_engineering_dxf(window, panes,
-                                        tenant_id=current_user.tenant_id)
-        fname = f'QS-{window_id}-{(window.label or "unit").replace(" ","_")[:30]}-ENG.dxf'
-        current_app.logger.info('Engineering DXF: window=%d bytes=%d',
-                                window_id, len(data))
-        return Response(data, mimetype='application/dxf',
+
+        from ..services.techdraw_export import generate_techdraw
+        data = generate_techdraw(window, panes,
+                                 tenant_id=current_user.tenant_id, fmt=fmt)
+        mimes = {'svg': 'image/svg+xml', 'pdf': 'application/pdf'}
+        fname = f'QS-{window_id}-{(window.label or "unit").replace(" ","_")[:30]}-ENG.{fmt}'
+        current_app.logger.info('Engineering drawing: window=%d fmt=%s bytes=%d',
+                                window_id, fmt, len(data))
+        return Response(data, mimetype=mimes[fmt],
                         headers={'Content-Disposition':
                                  f'attachment; filename={fname}'})
     except Exception as exc:
-        current_app.logger.exception('engineering dxf error window=%d: %s',
+        current_app.logger.exception('engineering drawing error window=%d: %s',
                                      window_id, exc)
         return jsonify({'error': 'Engineering drawing generation failed'}), 500
 
