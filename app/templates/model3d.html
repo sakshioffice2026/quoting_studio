@@ -227,8 +227,12 @@ input[type=range] { width:100%; accent-color:var(--copper); }
         <a class="dl-btn" href="#"
            onclick="window.location.href=`${API}/windows/${QS_WINDOW_ID}/engineering.dxf`;return false;">
           📐 Engineering drawing (DXF)</a>
+        <a class="dl-btn" href="#"
+           onclick="window.location.href=`${API}/windows/${QS_WINDOW_ID}/orthographic.dxf`;return false;">
+          📐 Orthographic views (DXF)</a>
         <div class="hint">Engineering DXF: elevation + plan strip + vertical section,
-          fully dimensioned. STEP requires the cadquery kernel on the server.</div>
+          fully dimensioned. Orthographic DXF: true front/top/side projections
+          with hidden lines. STEP requires the cadquery kernel on the server.</div>
 
       </div><!-- /panel-scroll -->
     </div><!-- /m3d-panel -->

@@ -7,6 +7,7 @@ from ..extensions import db
 from ..models import Window, Pane
 from ..services.pricing import calculate_price
 from ..services.engineering_dxf import generate_engineering_dxf
+from ..services.orthographic_dxf import generate_orthographic_dxf
 from ..services.canonical_geometry import (
     assert_legacy_panes_match,
     sync_legacy_panes,
@@ -258,12 +259,8 @@ def export_dwg(window_id):
 @api_v1_bp.route('/windows/<int:window_id>/engineering.dxf', methods=['GET'])
 @login_required
 def export_engineering_dxf(window_id):
-    """Engineering drawing sheet (elevation + section + dimensions), now
-    generated via FreeCAD TechDraw off the real STEP solid instead of the
-    ezdxf sketch. ?fmt=pdf for PDF, default svg."""
-    fmt = request.args.get('fmt', 'svg').lower()
-    if fmt not in ('svg', 'pdf'):
-        fmt = 'svg'
+    """Engineering drawing sheet (elevation + section + dimensions),
+    generated via the ezdxf sketch generator. Returns a real .dxf file."""
     try:
         window = _own_window(window_id)
         panes  = window.panes.all()
@@ -274,20 +271,52 @@ def export_engineering_dxf(window_id):
             db.session.commit()
             panes = window.panes.all()
 
-        from ..services.techdraw_export import generate_techdraw
-        data = generate_techdraw(window, panes,
-                                 tenant_id=current_user.tenant_id, fmt=fmt)
-        mimes = {'svg': 'image/svg+xml', 'pdf': 'application/pdf'}
-        fname = f'QS-{window_id}-{(window.label or "unit").replace(" ","_")[:30]}-ENG.{fmt}'
-        current_app.logger.info('Engineering drawing: window=%d fmt=%s bytes=%d',
-                                window_id, fmt, len(data))
-        return Response(data, mimetype=mimes[fmt],
+        data = generate_engineering_dxf(window, panes, tenant_id=current_user.tenant_id)
+        if not data:
+            return jsonify({'error': 'Engineering drawing generation failed'}), 500
+
+        fname = f'QS-{window_id}-{(window.label or "unit").replace(" ","_")[:30]}-ENG.dxf'
+        current_app.logger.info('Engineering drawing: window=%d bytes=%d',
+                                window_id, len(data))
+        return Response(data, mimetype='application/dxf',
                         headers={'Content-Disposition':
                                  f'attachment; filename={fname}'})
     except Exception as exc:
         current_app.logger.exception('engineering drawing error window=%d: %s',
                                      window_id, exc)
         return jsonify({'error': 'Engineering drawing generation failed'}), 500
+
+
+# ------------------------------------------------------------------ #
+#  GET  /api/v1/windows/<id>/orthographic.dxf — front/top/side views
+# ------------------------------------------------------------------ #
+@api_v1_bp.route('/windows/<int:window_id>/orthographic.dxf', methods=['GET'])
+@login_required
+def export_orthographic_dxf(window_id):
+    try:
+        window = _own_window(window_id)
+        panes  = window.panes.all()
+        try:
+            assert_legacy_panes_match(window, panes)
+        except ValueError:
+            sync_legacy_panes(window, Pane, db)
+            db.session.commit()
+            panes = window.panes.all()
+
+        data = generate_orthographic_dxf(window, panes, tenant_id=current_user.tenant_id)
+        if not data:
+            return jsonify({'error': 'Orthographic drawing generation failed'}), 500
+
+        fname = f'QS-{window_id}-{(window.label or "unit").replace(" ","_")[:30]}-ORTHO.dxf'
+        current_app.logger.info('Orthographic drawing: window=%d bytes=%d',
+                                window_id, len(data))
+        return Response(data, mimetype='application/dxf',
+                        headers={'Content-Disposition':
+                                 f'attachment; filename={fname}'})
+    except Exception as exc:
+        current_app.logger.exception('orthographic drawing error window=%d: %s',
+                                     window_id, exc)
+        return jsonify({'error': 'Orthographic drawing generation failed'}), 500
 
 
 # ------------------------------------------------------------------ #

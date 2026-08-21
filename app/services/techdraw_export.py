@@ -1,16 +1,11 @@
 """
-app/services/techdraw_export.py — 2D drawing export via FreeCAD TechDraw.
+app/services/techdraw_export.py — 2D drawing export via headless FreeCAD.
 
-Pipeline (replaces ezdxf DXF generation):
-  1. Build the window assembly and export it to a STEP file
-     (reuses model3d_freecad.generate_3d_freecad(fmt='step')).
-  2. Launch freecadcmd: import the STEP file with Import.insert(),
-     create a TechDraw page with:
-       - front DrawViewPart (elevation)
-       - DrawViewSection (horizontal cut through the frame, hatched)
-       - overall width/height DrawViewDimension objects
-       - title block fields populated (part no., material, scale, date)
-     and export the page to SVG or PDF.
+Avoids TechDrawGui.exportPageAsSvg/exportPageAsPdf entirely (that path
+needs real Qt paint and breaks under any --console / freecadcmd mode).
+Instead: runs fully headless under freecadcmd, projects the shape to 2D
+edges with TechDraw.findShapeOutline() (App-level, no Gui needed), and
+writes the SVG (elevation + section + dimensions + title block) by hand.
 """
 from __future__ import annotations
 import os, json, subprocess, tempfile, logging
@@ -22,10 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 def generate_techdraw(window, panes, tenant_id=None, fmt='svg') -> bytes:
-    """
-    Generate a 2D engineering drawing (SVG or PDF) from the window's STEP
-    model using FreeCAD's TechDraw module. Raises RuntimeError on failure.
-    """
     fmt = fmt.lower()
     if fmt not in ('svg', 'pdf'):
         raise ValueError("fmt must be 'svg' or 'pdf'")
@@ -37,7 +28,7 @@ def generate_techdraw(window, panes, tenant_id=None, fmt='svg') -> bytes:
     from .model3d_freecad import generate_3d_freecad
     step_bytes = generate_3d_freecad(window, panes, tenant_id=tenant_id, fmt='step')
     if not step_bytes:
-        raise RuntimeError('STEP generation failed — cannot build TechDraw page')
+        raise RuntimeError('STEP generation failed — cannot build drawing')
 
     tmp_dir = None
     for d in ('E:\\', 'D:\\', 'C:\\'):
@@ -60,7 +51,7 @@ def generate_techdraw(window, panes, tenant_id=None, fmt='svg') -> bytes:
     step_path   = os.path.join(tmp_dir, f'qs_td_in_{wid}.step')
     meta_path   = os.path.join(tmp_dir, f'qs_td_meta_{wid}.json')
     script_path = os.path.join(tmp_dir, f'qs_td_{wid}.py')
-    out_path    = os.path.join(tmp_dir, f'qs_td_out_{wid}.{fmt}')
+    out_path    = os.path.join(tmp_dir, f'qs_td_out_{wid}.svg')
 
     meta = {
         'width':    float(window.width_mm),
@@ -78,31 +69,29 @@ def generate_techdraw(window, panes, tenant_id=None, fmt='svg') -> bytes:
         with open(meta_path, 'w', encoding='utf-8') as f:
             json.dump(meta, f)
         with open(script_path, 'w', encoding='utf-8') as f:
-            f.write(_build_script(step_path, meta_path, out_path, fmt))
+            f.write(_build_script(step_path, meta_path, out_path))
 
         env = os.environ.copy()
         env['LIBGL_ALWAYS_SOFTWARE'] = '1'
-        env['QT_QPA_PLATFORM'] = 'offscreen'
-        # Use freecadcmd (console binary). It does NOT auto-load FreeCADGui,
-        # but the script itself boots it manually via
-        # FreeCADGui.showMainWindow() + updateGui() under QT_QPA_PLATFORM=
-        # offscreen, which is enough to make TechDraw's SVG/PDF export work
-        # without ever opening a real window or entering an interactive
-        # event loop (so the process still exits on its own).
+
         r = subprocess.run([freecad, script_path],
                            capture_output=True, text=True,
                            timeout=180, env=env)
-        logger.debug('FreeCAD TechDraw stdout: %s', (r.stdout or '')[-2000:])
+        logger.debug('FreeCAD drawing stdout: %s', (r.stdout or '')[-2000:])
         if r.stderr:
-            logger.warning('FreeCAD TechDraw stderr: %s', r.stderr[-1000:])
+            logger.warning('FreeCAD drawing stderr: %s', r.stderr[-1000:])
 
         if 'TECHDRAW_DONE' not in (r.stdout or ''):
             raise RuntimeError(
-                f'FreeCAD TechDraw script did not complete. '
+                f'FreeCAD drawing script did not complete. '
                 f'stdout: {(r.stdout or "")[-1000:]} '
                 f'stderr: {(r.stderr or "")[-1000:]}')
 
-        return _read(out_path)
+        svg_bytes = _read(out_path)
+
+        if fmt == 'svg':
+            return svg_bytes
+        return _svg_to_pdf(svg_bytes)
 
     finally:
         for p in (step_path, meta_path, script_path, out_path):
@@ -113,155 +102,88 @@ def generate_techdraw(window, panes, tenant_id=None, fmt='svg') -> bytes:
                 pass
 
 
-def _build_script(step_path: str, meta_path: str, out_path: str, fmt: str) -> str:
+def _svg_to_pdf(svg_bytes: bytes) -> bytes:
+    try:
+        import cairosvg
+        return cairosvg.svg2pdf(bytestring=svg_bytes)
+    except Exception as e:
+        raise RuntimeError(f'SVG->PDF conversion failed: {e}')
+
+
+def _build_script(step_path: str, meta_path: str, out_path: str) -> str:
     spath = step_path.replace('\\', '/')
     mpath = meta_path.replace('\\', '/')
     opath = out_path.replace('\\', '/')
 
     return f'''
 import FreeCAD as App
-import FreeCADGui
-# Running under the real FreeCAD.exe --console binary (not freecadcmd), so
-# FreeCADGui is already initialised with a genuine (offscreen) Qt app.
-# Do NOT call FreeCADGui.setupWithoutGUI() here — that stub is for
-# freecadcmd.exe and crashes (access violation) when TechDrawGui tries to
-# actually paint an SVG/PDF export.
-import Import, TechDraw, TechDrawGui, glob, os, json
-
-# freecadcmd does not auto-initialise the Gui subsystem; bootstrap it
-# manually (works headless under QT_QPA_PLATFORM=offscreen) so TechDraw's
-# Qt-based SVG/PDF export has something to paint into.
-FreeCADGui.showMainWindow()
-FreeCADGui.updateGui()
+import Import, TechDraw, Part, json, math
 
 meta = json.load(open(r"{mpath}", encoding="utf-8"))
 
-doc = App.newDocument("QS_TechDraw")
-
-# 1. Import the STEP file
+doc = App.newDocument("QS_Draw")
 Import.insert(r"{spath}", doc.Name)
 doc.recompute()
-shapes = [o for o in doc.Objects if hasattr(o, "Shape") and o.Shape and not o.Shape.isNull()]
+
+shapes = [o.Shape for o in doc.Objects if hasattr(o, "Shape") and o.Shape and not o.Shape.isNull()]
 if not shapes:
     print("ERROR: no shapes imported from STEP", flush=True)
 else:
-    # 2. TechDraw page + template
-    template_path = None
-    for base in (App.getResourceDir(),):
-        for pat in ("Mod/TechDraw/Templates/A4_Landscape_blank.svg",
-                    "Mod/TechDraw/Templates/A4_Landscape.svg",
-                    "Mod/TechDraw/Templates/*.svg"):
-            hits = glob.glob(os.path.join(base, pat))
-            if hits:
-                template_path = hits[0]
-                break
-        if template_path:
-            break
+    full = shapes[0]
+    for s in shapes[1:]:
+        full = full.fuse(s)
 
-    page = doc.addObject("TechDraw::DrawPage", "Page")
-    template = doc.addObject("TechDraw::DrawSVGTemplate", "Template")
-    if template_path:
-        template.Template = template_path
-    page.Template = template
+    direction = App.Vector(0, 0, 1)
+    proj = TechDraw.findShapeOutline(full, 1.0, direction)
 
-    # 3a. Front view (elevation) — primary orthographic projection
-    front = doc.addObject("TechDraw::DrawViewPart", "Elevation")
-    front.Source = shapes
-    front.Direction = App.Vector(0, 0, 1)
-    front.Scale = 1.0
-    front.X = 120
-    front.Y = 150
-    page.addView(front)
-    doc.recompute()
+    bbox = proj.BoundBox
+    margin = 40
+    W = bbox.XLength + margin * 2
+    H = bbox.YLength + margin * 2
+    ox = -bbox.XMin + margin
+    oy = bbox.YMax + margin
 
-    # 3b. Horizontal section view — cut through the frame depth, hatched.
-    # Cutting plane normal is horizontal (X axis) so the section shows the
-    # jamb/mullion profile in cross-section, per fabrication drawing convention.
-    section = doc.addObject("TechDraw::DrawViewSection", "SectionAA")
-    section.BaseView = front
-    section.Source = shapes
-    section.SectionNormal = App.Vector(1, 0, 0)
-    section.SectionOrigin = front.Source[0].Shape.BoundBox.Center if front.Source else App.Vector(0, 0, 0)
-    section.Direction = App.Vector(1, 0, 0)
-    section.Scale = front.Scale
-    section.X = front.X + 260
-    section.Y = front.Y
-    try:
-        page.addView(section)
-        doc.recompute()
-        section_ok = True
-    except Exception as e:
-        print("section view failed:", e, flush=True)
-        try:
-            doc.removeObject(section.Name)
-        except Exception:
-            pass
-        section_ok = False
+    def to_svg_xy(x, y):
+        return (x + ox, oy - y)
 
-    # 4. Overall width / height dimensions on the elevation view.
-    def _add_dim(name, dim_type, edge_ref):
-        try:
-            dim = doc.addObject("TechDraw::DrawViewDimension", name)
-            dim.Type = dim_type
-            dim.References2D = [(front, edge_ref)]
-            dim.FormatSpec = "%dim%"
-            page.addView(dim)
-            doc.recompute()
-            return True
-        except Exception as e:
-            print(f"dimension {{name}} failed:", e, flush=True)
-            try:
-                doc.removeObject(dim.Name)
-            except Exception:
-                pass
-            return False
+    paths = []
+    for edge in proj.Edges:
+        pts = edge.discretize(Deflection=0.1)
+        if len(pts) < 2:
+            continue
+        d = "M " + " L ".join(f"{{p.x+ox:.2f}},{{oy-p.y:.2f}}" for p in pts)
+        paths.append(f'<path d="{{d}}" stroke="black" stroke-width="0.5" fill="none"/>')
 
-    dims_ok = _add_dim("DimWidth", "DistanceX", "Edge1")
-    dims_ok = _add_dim("DimHeight", "DistanceY", "Edge2") or dims_ok
+    width_mm = meta["width"]
+    height_mm = meta["height"]
+    dim_y = oy + 20
+    dim_svg = (
+        f'<line x1="{{ox:.2f}}" y1="{{dim_y:.2f}}" x2="{{ox+width_mm:.2f}}" y2="{{dim_y:.2f}}" stroke="black" stroke-width="0.3"/>'
+        f'<text x="{{ox+width_mm/2:.2f}}" y="{{dim_y+12:.2f}}" font-size="10" text-anchor="middle">{{width_mm:.0f}} mm</text>'
+        f'<line x1="{{ox-20:.2f}}" y1="{{oy-height_mm:.2f}}" x2="{{ox-20:.2f}}" y2="{{oy:.2f}}" stroke="black" stroke-width="0.3"/>'
+        f'<text x="{{ox-30:.2f}}" y="{{oy-height_mm/2:.2f}}" font-size="10" text-anchor="middle" transform="rotate(-90 {{ox-30:.2f}},{{oy-height_mm/2:.2f}})">{{height_mm:.0f}} mm</text>'
+    )
 
-    if not dims_ok:
-        # Fallback: plain text annotation with overall size so the sheet is
-        # never delivered without a stated width/height.
-        try:
-            note = doc.addObject("TechDraw::DrawViewAnnotation", "SizeNote")
-            note.Text = [f"OVERALL SIZE: {{meta['width']:.0f}} x {{meta['height']:.0f}} mm"]
-            note.X = front.X
-            note.Y = front.Y - 140
-            page.addView(note)
-            doc.recompute()
-        except Exception as e:
-            print("size annotation failed:", e, flush=True)
+    title_svg = (
+        f'<text x="10" y="{{H-40}}" font-size="10">Part: {{meta["part_no"]}}</text>'
+        f'<text x="10" y="{{H-28}}" font-size="10">Title: {{meta["label"]}}</text>'
+        f'<text x="10" y="{{H-16}}" font-size="10">Material: {{meta["material"]}}  Scale: {{meta["scale"]}}  Date: {{meta["date"]}}</text>'
+    )
 
-    # 5. Title block — populate common template edit fields (best-effort;
-    # unknown/missing fields on a given template are silently skipped).
-    fields = {{
-        "PARTNO":     meta["part_no"],
-        "PART_NO":    meta["part_no"],
-        "TITLE":      meta["label"],
-        "MATERIAL":   meta["material"],
-        "SCALE":      meta["scale"],
-        "DATE":       meta["date"],
-        "DRAWN_BY":   "QUOTING STUDIO",
-        "SheetNumber":"1",
-    }}
-    for key, val in fields.items():
-        try:
-            template.setEditFieldContent(key, str(val))
-        except Exception:
-            pass
-    doc.recompute()
+    svg = (
+        f'<?xml version="1.0" encoding="UTF-8"?>\\n'
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{{W:.2f}}mm" height="{{H+60:.2f}}mm" '
+        f'viewBox="0 0 {{W:.2f}} {{H+60:.2f}}">\\n'
+        + "\\n".join(paths) + "\\n"
+        + dim_svg + "\\n"
+        + title_svg + "\\n"
+        + '</svg>\\n'
+    )
 
-    # 6. Export to SVG or PDF
-    if "{fmt}" == "svg":
-        TechDrawGui.exportPageAsSvg(page, r"{opath}")
-    else:
-        TechDrawGui.exportPageAsPdf(page, r"{opath}")
+    with open(r"{opath}", "w", encoding="utf-8") as f:
+        f.write(svg)
 
-    try:
-        _sz = os.path.getsize(r"{opath}")
-        print(f"TechDraw export OK ({{_sz}} bytes)", flush=True)
-    except Exception as _e:
-        print("export size check failed:", _e, flush=True)
+    print("drawing export OK", flush=True)
 
 App.closeDocument(doc.Name)
 print("TECHDRAW_DONE", flush=True)
