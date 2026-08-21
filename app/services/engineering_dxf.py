@@ -75,6 +75,9 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     sect_x = W + 300
     sched_x = sect_x + bar + SCHED_GAP
 
+    # Hatching drawn first so it sits behind frame/glass/swing-line geometry
+    _add_hatching(msp, cells, W, H, bar)
+
     _elevation(msp, W, H, bar, cells)
     _plan_strip(msp, W, bar, dep, cells, prof, plan_y0)
     _vertical_section(msp, H, bar, dep, prof, sect_x)
@@ -82,7 +85,6 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     _dimensions(msp, W, H, cells, plan_y0, plan_y1, sect_x, dep)
 
     # FIXED: Add missing geometry functions
-    _add_hatching(msp, cells, W, H, bar)
     _add_gasket_seals(msp, W, H, bar)
     _add_hardware_cutouts(msp, W, H, bar)
     _add_frame_centerlines(msp, W, H, bar)
@@ -309,7 +311,7 @@ def _vertical_section(msp, H, bar, dep, prof, sect_x):
 
 
 def _pane_schedule(msp, cells, design, ox, top_y):
-    col_w = [80, 240, 200, 220]
+    col_w = [80, 240, 360, 220]
     row_h = 80
     headers = ['#', 'Opener', 'Glazing', 'Size']
 
@@ -404,7 +406,7 @@ def _add_hatching(msp, cells, W, H, bar):
         
         if gw > 0 and gh > 0:
             hatch = msp.add_hatch()
-            hatch.set_pattern_fill('SOLID')
+            hatch.set_pattern_fill('ANSI31', scale=6)
             hatch.paths.add_polyline_path([
                 (gx, gy),
                 (gx + gw, gy),
@@ -412,7 +414,8 @@ def _add_hatching(msp, cells, W, H, bar):
                 (gx, gy + gh)
             ], is_closed=True)
             hatch.dxf.layer = L_HATCH
-            hatch.dxf.color = 7
+            hatch.dxf.color = 9          # light gray, not white
+            hatch.transparency = 0.75    # 75% transparent
 
 
 def _add_gasket_seals(msp, W, H, bar):
