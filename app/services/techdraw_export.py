@@ -21,29 +21,6 @@ from .model3d_freecad import _find_freecad, _read
 logger = logging.getLogger(__name__)
 
 
-def _find_freecad_gui(freecadcmd_path: str) -> str | None:
-    """
-    TechDraw SVG/PDF export needs real Qt rendering (QSvgGenerator etc.),
-    which freecadcmd.exe's Gui stub (FreeCADGui.setupWithoutGUI()) cannot
-    provide — it crashes with an access violation when the export actually
-    tries to paint. The full GUI binary (FreeCAD.exe), run headless via
-    QT_QPA_PLATFORM=offscreen, is required instead. It normally sits next
-    to freecadcmd.exe in the same bin/ folder.
-    """
-    import glob
-    bin_dir = os.path.dirname(freecadcmd_path)
-    for name in ('FreeCAD.exe', 'freecad.exe', 'FreeCADGui.exe',
-                 'FreeCAD', 'freecad'):
-        candidate = os.path.join(bin_dir, name)
-        if os.path.exists(candidate) and candidate.lower() != freecadcmd_path.lower():
-            return candidate
-    for pat in ('FreeCAD*.exe',):
-        for hit in glob.glob(os.path.join(bin_dir, pat)):
-            if 'cmd' not in os.path.basename(hit).lower():
-                return hit
-    return None
-
-
 def generate_techdraw(window, panes, tenant_id=None, fmt='svg') -> bytes:
     """
     Generate a 2D engineering drawing (SVG or PDF) from the window's STEP
@@ -56,13 +33,6 @@ def generate_techdraw(window, panes, tenant_id=None, fmt='svg') -> bytes:
     freecad = _find_freecad()
     if not freecad:
         raise RuntimeError('FreeCAD not found — tried all known paths')
-
-    freecad_gui = _find_freecad_gui(freecad)
-    if not freecad_gui:
-        raise RuntimeError(
-            'FreeCAD GUI binary (FreeCAD.exe) not found next to freecadcmd — '
-            'required for TechDraw SVG/PDF export. freecadcmd.exe alone '
-            'cannot render TechDraw pages.')
 
     from .model3d_freecad import generate_3d_freecad
     step_bytes = generate_3d_freecad(window, panes, tenant_id=tenant_id, fmt='step')
@@ -113,10 +83,13 @@ def generate_techdraw(window, panes, tenant_id=None, fmt='svg') -> bytes:
         env = os.environ.copy()
         env['LIBGL_ALWAYS_SOFTWARE'] = '1'
         env['QT_QPA_PLATFORM'] = 'offscreen'
-        # Use the full GUI binary (not freecadcmd) with --console so TechDraw's
-        # Qt-based SVG/PDF export has a real (offscreen) Qt application to
-        # paint into, instead of the freecadcmd Gui stub that crashes on export.
-        r = subprocess.run([freecad_gui, '--console', script_path],
+        # Use freecadcmd (console binary). It does NOT auto-load FreeCADGui,
+        # but the script itself boots it manually via
+        # FreeCADGui.showMainWindow() + updateGui() under QT_QPA_PLATFORM=
+        # offscreen, which is enough to make TechDraw's SVG/PDF export work
+        # without ever opening a real window or entering an interactive
+        # event loop (so the process still exits on its own).
+        r = subprocess.run([freecad, script_path],
                            capture_output=True, text=True,
                            timeout=180, env=env)
         logger.debug('FreeCAD TechDraw stdout: %s', (r.stdout or '')[-2000:])
@@ -154,6 +127,12 @@ import FreeCADGui
 # freecadcmd.exe and crashes (access violation) when TechDrawGui tries to
 # actually paint an SVG/PDF export.
 import Import, TechDraw, TechDrawGui, glob, os, json
+
+# freecadcmd does not auto-initialise the Gui subsystem; bootstrap it
+# manually (works headless under QT_QPA_PLATFORM=offscreen) so TechDraw's
+# Qt-based SVG/PDF export has something to paint into.
+FreeCADGui.showMainWindow()
+FreeCADGui.updateGui()
 
 meta = json.load(open(r"{mpath}", encoding="utf-8"))
 
