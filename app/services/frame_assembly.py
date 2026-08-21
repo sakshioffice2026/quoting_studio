@@ -441,6 +441,13 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
     # default 16 per the reference drawing when unset or left at old 2mm.
     clr = getattr(profiles, 'sash_clearance', 2.0)
     overlap = 16.0 if clr <= 2.0 else clr
+    # Sash insets are recorded per-pane so the glass/bead step (4) uses the
+    # exact same inner face — otherwise glass/bead assume the plain mullion
+    # inset (mb/2) while the sash actually sits `overlap` mm further out,
+    # leaving an unfilled ring around every sash (worst at a shared mullion
+    # between two opening panes, where both gaps land in the same spot).
+    sash_insets: dict = {}
+    sash_rects: dict = {}
     si = 0
     for r in rects:
         if not _is_opening(r['opening']):
@@ -464,22 +471,31 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         ir = (bar_j - overlap) if on_r else max(mb / 2 - overlap, 0.0)
         ib = (bar_c - overlap) if on_b else max(tb / 2 - overlap, 0.0)
         it = (bar_h - overlap) if on_t else max(tb / 2 - overlap, 0.0)
+        sash_insets[r['i']] = {'l': il, 'r': ir, 'b': ib, 't': it}
         ax = r['x'] + il
         ay = r['y'] + ib
         aw = r['w'] - il - ir
         ah = r['h'] - ib - it
         if aw <= 2 * sb or ah <= 2 * sb:
             continue
+        sash_rects[r['i']] = (ax, ay, aw, ah)
         _add_rect_frame(A, f'S{si}', ROLE_SASH, ax, ay, aw, ah, sb,
                         p_sash['depth'], p_sash['code'])
 
-    # ── 4. GLASS / PANEL CELLS ──────────────────────────────────────
+    # ── 4. GLASS / PANEL CELLS + GLAZING BEAD ────────────────────────
+    p_bead = profiles.get(ROLE_GLAZING_BEAD)
+    bead_depth = p_bead['depth'] if profiles.has(ROLE_GLAZING_BEAD) else 18.0
+    bi = 0
     for r in rects:
         opening = r['opening']
-        inset = _glass_inset(r, bar_j, bar_h, bar_c, mb, tb, W, H)
-        # if this pane opens and has a sash, glass sits inside the sash
-        if _is_opening(opening) and have_sash:
-            inset = {k: v + sb for k, v in inset.items()}
+        is_sash = _is_opening(opening) and have_sash and r['i'] in sash_insets
+        if is_sash:
+            # glass sits inside the sash's own inner face, not the plain
+            # mullion/frame inset — keeps glass/bead flush with the sash rect.
+            si_ins = sash_insets[r['i']]
+            inset = {k: si_ins[k] + sb for k in ('l', 'r', 'b', 't')}
+        else:
+            inset = _glass_inset(r, bar_j, bar_h, bar_c, mb, tb, W, H)
         gx = r['x'] + inset['l']
         gy = r['y'] + inset['b']
         gw = r['w'] - inset['l'] - inset['r']
@@ -490,6 +506,22 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             id=f"G{r['i']+1}", x=gx, y=gy, w=gw, h=gh,
             infill=r['infill'], opening=opening,
             thickness=(dep * 0.6 if r['infill'] == 'panel' else 24.0)))
+
+        # Bead fills the ring between the glass edge and the surface it
+        # actually rebates into: for a sash pane that's the sash's OWN
+        # inner face (bar width sb) — not the sash's outer engagement with
+        # the frame/mullion, which the sash member itself already fills.
+        # Using the full pane-to-glass inset here would duplicate/overlap
+        # the sash solid over the whole rebate-engagement zone.
+        bi += 1
+        if is_sash and r['i'] in sash_rects:
+            ax, ay, aw, ah = sash_rects[r['i']]
+            _add_bead_ring(A, f'B{bi}', ax, ay, aw, ah, sb, sb, sb, sb,
+                           bead_depth, p_bead['code'])
+        else:
+            _add_bead_ring(A, f'B{bi}', r['x'], r['y'], r['w'], r['h'],
+                           inset['l'], inset['r'], inset['b'], inset['t'],
+                           bead_depth, p_bead['code'])
 
     return A
 
@@ -549,6 +581,39 @@ def _add_rect_frame(A: Assembly, prefix, role, x, y, w, h, bar, depth, code):
         bar_width=bar, depth=depth,
         joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
         miter_start_deg=45, miter_end_deg=45, profile_code=code))
+
+
+def _add_bead_ring(A: Assembly, prefix, x, y, w, h, il, ir, ib, it, depth, code):
+    """
+    Add a glazing-bead ring filling the gap between a pane's aperture (x,y,w,h)
+    and its glass edge. Unlike `_add_rect_frame`, each side can have a
+    different width (il/ir/ib/it) since jamb, mullion and sash rebates differ.
+    Sides thinner than 1mm are skipped as not worth modelling.
+    """
+    if it >= 1.0:
+        A.members.append(Member(
+            id=f'{prefix}_top', role=ROLE_GLAZING_BEAD, orientation=ORI_H,
+            x1=x, y1=y + h - it / 2, x2=x + w, y2=y + h - it / 2,
+            bar_width=it, depth=depth,
+            joint_start=JOINT_BUTT, joint_end=JOINT_BUTT, profile_code=code))
+    if ib >= 1.0:
+        A.members.append(Member(
+            id=f'{prefix}_bot', role=ROLE_GLAZING_BEAD, orientation=ORI_H,
+            x1=x, y1=y + ib / 2, x2=x + w, y2=y + ib / 2,
+            bar_width=ib, depth=depth,
+            joint_start=JOINT_BUTT, joint_end=JOINT_BUTT, profile_code=code))
+    if il >= 1.0:
+        A.members.append(Member(
+            id=f'{prefix}_L', role=ROLE_GLAZING_BEAD, orientation=ORI_V,
+            x1=x + il / 2, y1=y + ib, x2=x + il / 2, y2=y + h - it,
+            bar_width=il, depth=depth,
+            joint_start=JOINT_BUTT, joint_end=JOINT_BUTT, profile_code=code))
+    if ir >= 1.0:
+        A.members.append(Member(
+            id=f'{prefix}_R', role=ROLE_GLAZING_BEAD, orientation=ORI_V,
+            x1=x + w - ir / 2, y1=y + ib, x2=x + w - ir / 2, y2=y + h - it,
+            bar_width=ir, depth=depth,
+            joint_start=JOINT_BUTT, joint_end=JOINT_BUTT, profile_code=code))
 
 
 # ── cut list (bonus — proves the graph is complete) ─────────────────────────────

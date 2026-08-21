@@ -177,7 +177,7 @@ def draw_vertical_section(msp, frame_height, profile, sect_x, has_cill=False):
         dxfattribs={'layer': 'DIMENSIONS', 'height': 25}
     ).set_placement((dim_x + bar*0.4, (by0 + by1)/2), align=TextEntityAlignment.MIDDLE_CENTER)
     
-    return section_bottom
+    return section_bottom, dim_x
 
 
 def _draw_profile_section(msp, x, y, width, height, wall, rebate, mirror=False, label_y=None):
@@ -379,10 +379,14 @@ def _draw_profile_section_horizontal(msp, x, y, width, depth, wall, rebate, mirr
         pass  # Hatching not critical if ezdxf version incompatible
 
 
-def verify_section_alignment(frame_width, frame_height, section_spacing):
+def verify_section_alignment(frame_width, frame_height, section_spacing, frame_thickness=40.0):
     """
     Verify orthographic section alignment parameters.
-    
+
+    Matches the actual placement used by window_dxf_parametric.generate_parametric_window_dxf:
+    Section B-B sits to the LEFT of the elevation, at
+    X = -section_spacing - frame_thickness.
+
     Returns:
         dict with positioning and validation status
     """
@@ -394,12 +398,20 @@ def verify_section_alignment(frame_width, frame_height, section_spacing):
         errors.append(f'frame_height must be positive, got {frame_height}')
     if section_spacing < 0:
         errors.append(f'section_spacing must be non-negative, got {section_spacing}')
-    
+
+    section_x = -section_spacing - frame_thickness
+    # Section must not overlap the elevation (X < 0 .. frame_width)
+    if section_x + frame_thickness * 3.0 > 0:
+        errors.append(
+            f'section_spacing ({section_spacing}mm) too small — '
+            f'Section B-B overlaps the elevation at X=0'
+        )
+
     return {
         'valid': len(errors) == 0,
         'errors': errors,
         'elevation_x_range': (0, frame_width),
         'elevation_y_range': (0, frame_height),
-        'section_x_position': frame_width + section_spacing,
+        'section_x_position': section_x,
         'section_y_aligned_at': 0
     }

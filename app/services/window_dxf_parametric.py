@@ -52,10 +52,12 @@ def generate_parametric_window_dxf(window, panes, tenant_id=None, **params) -> b
     doc.units = 4
     
     # Setup
-    from dxf_layers import setup_layers, setup_dimstyle, setup_text_styles
+    from .dxf_layers import setup_layers, setup_dimstyle, setup_text_styles, validate_layers
     setup_layers(doc)
-    setup_dimstyle(doc)
     setup_text_styles(doc)
+    layer_report = validate_layers(doc)
+    if not layer_report['valid']:
+        logger.warning('Layer setup incomplete: %s', '; '.join(layer_report['issues']))
     
     msp = doc.modelspace()
     
@@ -68,6 +70,9 @@ def generate_parametric_window_dxf(window, panes, tenant_id=None, **params) -> b
     bar = profile['bar']
     wall = profile['wall']
     depth = profile['depth']
+
+    # Dimstyle scaled to the REAL profile bar width (not the 40.0 default)
+    setup_dimstyle(doc, bar_width=bar)
     
     # Parametric overrides
     cill_horn = params.get('cill_horn_length', 40.0)
@@ -87,14 +92,20 @@ def generate_parametric_window_dxf(window, panes, tenant_id=None, **params) -> b
     
     # === VIEW 2: HORIZONTAL SECTION (plan strip) ===
     section_y = -(H * 0.45 + 300)
-    _horizontal_section(msp, W, profile, section_y)
+    from section_views import draw_horizontal_section
+    draw_horizontal_section(msp, W, profile, section_y)
     
     # === VIEW 3: VERTICAL SECTION B-B (side view) ===
     # Task coordinate: Side Section X-Position = (X0 - Section_Spacing - Frame_Profile_Thickness)
     # With X0=0 (frame bottom-left origin), section positions to the left of elevation
-    sect_x = -sect_spacing - frame_thickness
-    from section_views import draw_vertical_section
-    side_bottom_y = draw_vertical_section(
+    from section_views import draw_vertical_section, verify_section_alignment
+    align_check = verify_section_alignment(W, H, sect_spacing, frame_thickness)
+    if not align_check['valid']:
+        logger.warning('Section alignment issue: %s', '; '.join(align_check['errors']))
+        # auto-correct spacing so the section never overlaps the elevation
+        sect_spacing = max(sect_spacing, frame_thickness * 3.0)
+    sect_x = align_check['section_x_position'] if align_check['valid'] else -sect_spacing - frame_thickness
+    side_bottom_y, side_dim_x = draw_vertical_section(
         msp, H, profile, sect_x, has_cill=bool(_get_cill_flag(window))
     )
     
@@ -102,8 +113,8 @@ def generate_parametric_window_dxf(window, panes, tenant_id=None, **params) -> b
     _schedule(msp, W, H, panes_data, profile)
     
     # === DIMENSIONS & AUTO BOUNDING BOX ===
-    bbox = _calculate_extents(W, H, sect_x, depth, cill_nose)
-    _dimensions(msp, W, H, panes_data, section_y, sect_x, depth, bbox)
+    bbox = _calculate_extents(W, H, sect_x, depth, cill_nose, bar)
+    _dimensions(msp, W, H, panes_data, section_y, sect_x, depth, bbox, side_dim_x)
     
     # === TITLE BLOCK ===
     _titleblock(msp, window, profile, bbox, bar, section_y, side_bottom_y)
@@ -207,54 +218,9 @@ def _draw_opener_symbol(msp, x, y, w, h, opening):
 #  HORIZONTAL SECTION (PLAN STRIP)
 # ═══════════════════════════════════════════════════════════════
 
-def _horizontal_section(msp, W, profile, section_y):
-    """Draw horizontal cross-section (plan view) through frame."""
-    bar = profile['bar']
-    depth = profile['depth']
-    wall = profile['wall']
-    
-    section_h = depth + 40
-    section_bot = section_y - section_h
-    
-    # Left and right jamb profile boxes (simplified)
-    _draw_profile_box(msp, 0, section_bot, bar, depth, wall, section_y)
-    _draw_profile_box(msp, W - bar, section_bot, bar, depth, wall, section_y, mirror=True)
-    
-    # Wall lines
-    msp.add_line(
-        (bar, section_y), (W - bar, section_y),
-        dxfattribs={'layer': 'FRAME_GEOMETRY', 'lineweight': 20}
-    )
-    msp.add_line(
-        (bar, section_bot), (W - bar, section_bot),
-        dxfattribs={'layer': 'FRAME_GEOMETRY', 'lineweight': 20}
-    )
-    
-    # Label
-    msp.add_text(
-        'HORIZONTAL SECTION A-A',
-        dxfattribs={'layer': 'FRAME_GEOMETRY', 'height': bar*0.5}
-    ).set_placement((W/2, section_bot - bar*1.5), align=TextEntityAlignment.MIDDLE_CENTER)
-
-
-def _draw_profile_box(msp, x, y_bot, w, depth, wall, y_top, mirror=False):
-    """Draw a simplified hollow profile box."""
-    layer = 'FRAME_GEOMETRY'
-    
-    # Outer
-    msp.add_lwpolyline(
-        [(x, y_bot), (x+w, y_bot), (x+w, y_top), (x, y_top)],
-        close=True,
-        dxfattribs={'layer': layer, 'lineweight': 25}
-    )
-    
-    # Inner void
-    msp.add_lwpolyline(
-        [(x+wall, y_bot+wall), (x+w-wall, y_bot+wall),
-         (x+w-wall, y_top-wall), (x+wall, y_top-wall)],
-        close=True,
-        dxfattribs={'layer': layer, 'lineweight': 15}
-    )
+    # NOTE: plan-strip drawing now delegates to section_views.draw_horizontal_section
+    # (removed the simplified duplicate _horizontal_section / _draw_profile_box that
+    # used to skip hatch fill and the glazing rebate line).
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -327,10 +293,8 @@ def _schedule(msp, W, H, panes_data, profile):
 #  DIMENSIONS & BOUNDING BOX
 # ═══════════════════════════════════════════════════════════════
 
-def _calculate_extents(W, H, sect_x, depth, cill_nose):
-    """Auto-calculate geometry bounding box."""
-    bar = 40.0  # approximate
-    
+def _calculate_extents(W, H, sect_x, depth, cill_nose, bar=40.0):
+    """Auto-calculate geometry bounding box using the real profile bar width."""
     x_min = -bar * 4  # dim space left
     x_max = sect_x + depth * 3 + bar * 5
     y_min = -cill_nose - bar * 5  # cill extends below
@@ -339,7 +303,7 @@ def _calculate_extents(W, H, sect_x, depth, cill_nose):
     return {'x_min': x_min, 'x_max': x_max, 'y_min': y_min, 'y_max': y_max}
 
 
-def _dimensions(msp, W, H, panes_data, section_y, sect_x, depth, bbox):
+def _dimensions(msp, W, H, panes_data, section_y, sect_x, depth, bbox, side_dim_x=None):
     """Draw overall and pane dimensions."""
     layer_dim = 'DIMENSIONS'
     
@@ -361,23 +325,25 @@ def _dimensions(msp, W, H, panes_data, section_y, sect_x, depth, bbox):
         dxfattribs={'layer': layer_dim, 'height': 30}
     ).set_placement((W/2, H + 140), align=TextEntityAlignment.MIDDLE_CENTER)
     
-    # Overall height — right of section
+    # Overall height — right of section (aligned to the section's real right edge,
+    # returned by draw_vertical_section, not a guessed multiplier)
+    dx = side_dim_x if side_dim_x is not None else (sect_x + depth * 3.5)
     msp.add_line(
-        (sect_x + depth*3.5, 0), (sect_x + depth*3.5, H),
+        (dx, 0), (dx, H),
         dxfattribs={'layer': layer_dim, 'lineweight': 15}
     )
     msp.add_line(
-        (sect_x + depth*3.3, 0), (sect_x + depth*3.5, 0),
+        (dx - depth*0.2, 0), (dx, 0),
         dxfattribs={'layer': layer_dim, 'lineweight': 15}
     )
     msp.add_line(
-        (sect_x + depth*3.3, H), (sect_x + depth*3.5, H),
+        (dx - depth*0.2, H), (dx, H),
         dxfattribs={'layer': layer_dim, 'lineweight': 15}
     )
     msp.add_text(
         f'{H:.0f}',
         dxfattribs={'layer': layer_dim, 'height': 30}
-    ).set_placement((sect_x + depth*3.8, H/2), align=TextEntityAlignment.MIDDLE_CENTER)
+    ).set_placement((dx + depth*0.3, H/2), align=TextEntityAlignment.MIDDLE_CENTER)
 
 
 def _sheet_border(msp, bbox, bar):

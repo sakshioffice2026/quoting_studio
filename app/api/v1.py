@@ -1,10 +1,16 @@
 from flask import Blueprint, jsonify, request, abort, current_app, Response
 from flask_login import login_required, current_user
 
+import json
+
 from ..extensions import db
 from ..models import Window, Pane
 from ..services.pricing import calculate_price
-from ..services.cad_export import generate_window_dxf
+from ..services.engineering_dxf import generate_engineering_dxf
+from ..services.canonical_geometry import (
+    assert_legacy_panes_match,
+    sync_legacy_panes,
+)
 
 api_v1_bp = Blueprint('api_v1', __name__)
 
@@ -59,19 +65,15 @@ def save_panes(window_id):
         if not isinstance(cells, list):
             return jsonify({'error': 'cells must be an array'}), 400
 
-        # replace all panes atomically
-        Pane.query.filter_by(window_id=window.id).delete()
-        for cell in cells:
-            db.session.add(Pane(
-                window_id=window.id,
-                cell_key=str(cell.get('id', 'c0')),
-                x_norm=float(cell.get('x', 0)),
-                y_norm=float(cell.get('y', 0)),
-                w_norm=float(cell.get('w', 1)),
-                h_norm=float(cell.get('h', 1)),
-                opener_type=cell.get('opener', 'Fixed light'),
-                glazing_type=cell.get('glazing', 'Double, Low-E'),
-            ))
+        # design_json is authoritative. Keep the legacy Pane table as a
+        # deterministic compatibility projection of the posted design.
+        design = data.get('design_json')
+        if design is None:
+            design = json.dumps({'panes': cells})
+        elif isinstance(design, dict):
+            design = json.dumps(design)
+        window.design_json = design
+        sync_legacy_panes(window, Pane, db)
 
         db.session.commit()
         current_app.logger.info('save_panes: window=%d cells=%d', window_id, len(cells))
@@ -144,7 +146,13 @@ def export_dxf(window_id):
     try:
         window = _own_window(window_id)
         panes  = window.panes.all()
-        dxf    = generate_window_dxf(window, panes, tenant_id=current_user.tenant_id)
+        try:
+            assert_legacy_panes_match(window, panes)
+        except ValueError:
+            sync_legacy_panes(window, Pane, db)
+            db.session.commit()
+            panes = window.panes.all()
+        dxf    = generate_engineering_dxf(window, panes, tenant_id=current_user.tenant_id)
         if not dxf:
             return jsonify({'error': 'DXF generation failed — ezdxf may not be installed'}), 500
         current_app.logger.info('DXF export: window=%d bytes=%d', window_id, len(dxf))
@@ -165,7 +173,13 @@ def export_dwg(window_id):
     try:
         window = _own_window(window_id)
         panes  = window.panes.all()
-        dxf    = generate_window_dxf(window, panes, tenant_id=current_user.tenant_id)
+        try:
+            assert_legacy_panes_match(window, panes)
+        except ValueError:
+            sync_legacy_panes(window, Pane, db)
+            db.session.commit()
+            panes = window.panes.all()
+        dxf    = generate_engineering_dxf(window, panes, tenant_id=current_user.tenant_id)
         if not dxf:
             return jsonify({'error': 'Drawing generation failed'}), 500
 
@@ -201,7 +215,12 @@ def export_engineering_dxf(window_id):
     try:
         window = _own_window(window_id)
         panes  = window.panes.all()
-        from ..services.engineering_dxf import generate_engineering_dxf
+        try:
+            assert_legacy_panes_match(window, panes)
+        except ValueError:
+            sync_legacy_panes(window, Pane, db)
+            db.session.commit()
+            panes = window.panes.all()
         data = generate_engineering_dxf(window, panes,
                                         tenant_id=current_user.tenant_id)
         fname = f'QS-{window_id}-{(window.label or "unit").replace(" ","_")[:30]}-ENG.dxf'
@@ -230,6 +249,12 @@ def export_3d(window_id, fmt):
     try:
         window = _own_window(window_id)
         panes  = window.panes.all()
+        try:
+            assert_legacy_panes_match(window, panes)
+        except ValueError:
+            sync_legacy_panes(window, Pane, db)
+            db.session.commit()
+            panes = window.panes.all()
         from ..services.model3d import generate_3d
         data = generate_3d(window, panes, tenant_id=current_user.tenant_id,
                             fmt=fmt, method=method, z_up=z_up)
@@ -263,9 +288,22 @@ def save_design(window_id):
         window = _own_window(window_id)
         data   = request.get_json(force=True) or {}
 
-        # 1) store the full parametric model
-        if 'design_json' in data:
-            window.design_json = data['design_json']
+        # 1) store the full parametric model. If cells are supplied by the
+        # designer, they are folded into design_json before any compatibility
+        # rows are rebuilt; design_json remains the only source of truth.
+        design = data.get('design_json')
+        if isinstance(design, str):
+            try:
+                design_obj = json.loads(design)
+            except ValueError as exc:
+                return jsonify({'error': f'Invalid design_json: {exc}'}), 400
+        elif isinstance(design, dict):
+            design_obj = dict(design)
+        else:
+            design_obj = {}
+        if 'cells' in data:
+            design_obj['panes'] = data['cells']
+        window.design_json = json.dumps(design_obj)
 
         # 2) update the window's summary fields
         if 'width'  in data: window.width_mm  = int(data['width'])
@@ -280,28 +318,12 @@ def save_design(window_id):
             val = data['profileSystemId']
             window.profile_system_id = int(val) if val else None
 
-        # 3) rebuild the legacy panes table from posted cells
-        cells = data.get('cells')
-        if cells is not None:
-            from ..models import Pane
-            Pane.query.filter_by(window_id=window.id).delete()
-            for idx, c in enumerate(cells):
-                pane = Pane(
-                    window_id   = window.id,
-                    cell_key    = c.get('id', f'p{idx+1}'),
-                    x_norm      = float(c.get('x', 0)),
-                    y_norm      = float(c.get('y', 0)),
-                    w_norm      = float(c.get('w', 1)),
-                    h_norm      = float(c.get('h', 1)),
-                    opener_type = c.get('opener', 'Fixed'),
-                    glazing_type= c.get('glazing', 'Double, Low-E'),
-                    infill      = c.get('infill', 'glass'),
-                )
-                db.session.add(pane)
+        # 3) rebuild the legacy panes table only from design_json
+        sync_legacy_panes(window, Pane, db)
 
         db.session.commit()
         current_app.logger.info('Design saved: window=%d panes=%d',
-                                 window_id, len(cells) if cells else 0)
+                                 window_id, len(design_obj.get('panes') or []))
         return jsonify({'ok': True, 'window_id': window_id})
 
     except Exception as exc:

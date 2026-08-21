@@ -31,6 +31,41 @@ import math
 #  DXF tag stream helpers
 # ----------------------------------------------------------------------
 
+# DXF $INSUNITS codes -> factor to convert to millimetres
+_UNIT_TO_MM = {
+    1: 25.4,     # Inches
+    2: 304.8,    # Feet
+    3: 1609344.0,  # Miles (unlikely, but complete)
+    4: 1.0,      # Millimeters
+    5: 10.0,     # Centimeters
+    6: 1000.0,   # Meters
+    8: 0.0254,   # Microinches
+    9: 0.001,    # Mils
+}
+
+
+def _detect_unit_scale(file_content):
+    """
+    Scan the HEADER section for $INSUNITS and return a scale factor to
+    convert the file's coordinates into millimetres. Returns 1.0 (assume
+    mm) if $INSUNITS is absent/unitless (0) — same as before, but now the
+    non-mm cases are handled instead of silently mis-scaling.
+    """
+    lines = file_content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    for i in range(len(lines) - 3):
+        if lines[i].strip() == '9' and lines[i + 1].strip() == '$INSUNITS':
+            # next pair should be code 70, value
+            code_raw = lines[i + 2].strip()
+            val_raw = lines[i + 3].strip()
+            try:
+                if int(code_raw) == 70:
+                    unit_code = int(float(val_raw))
+                    return _UNIT_TO_MM.get(unit_code, 1.0), unit_code
+            except ValueError:
+                pass
+    return 1.0, 0  # unitless / not found — assume mm, unchanged behaviour
+
+
 def _tags(file_content):
     """Yield (code:int, value:str) pairs from raw DXF text."""
     lines = file_content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
@@ -49,11 +84,30 @@ def _tags(file_content):
         yield code, val.strip()
 
 
+# Layers that hold annotation/dimension geometry, not the actual profile
+# outline. LINE/LWPOLYLINE entities drawn on these layers (leaders,
+# extension lines, hatch boundaries duplicated for annotation, etc.) must
+# not be stitched into the profile shape.
+_EXCLUDED_LAYER_SUBSTRINGS = (
+    'dim', 'dimension', 'text', 'annot', 'note', 'centre', 'center',
+    'hatch', 'hidden', 'leader', 'title', 'border', 'tblock',
+)
+
+
+def _is_excluded_layer(layer_name):
+    if not layer_name:
+        return False
+    n = layer_name.lower()
+    return any(s in n for s in _EXCLUDED_LAYER_SUBSTRINGS)
+
+
 def _entities(file_content):
     """
     Split the tag stream into entities. Returns a list of dicts:
-      {'type': 'LWPOLYLINE', 'tags': [(code, val), ...]}
-    Only geometry we care about is kept.
+      {'type': 'LWPOLYLINE', 'layer': 'PROFILE', 'tags': [(code, val), ...]}
+    Only geometry we care about is kept, and entities on clearly
+    non-geometry layers (dimensions, text, annotation, title blocks) are
+    dropped so they can't be stitched into the actual profile outline.
     """
     WANTED = {'LWPOLYLINE', 'POLYLINE', 'VERTEX', 'SEQEND',
               'LINE', 'ARC', 'CIRCLE', 'SPLINE'}
@@ -61,12 +115,14 @@ def _entities(file_content):
     current = None
     for code, val in _tags(file_content):
         if code == 0:
-            if current:
+            if current and not _is_excluded_layer(current.get('layer')):
                 ents.append(current)
-            current = {'type': val, 'tags': []} if val in WANTED else None
+            current = {'type': val, 'layer': None, 'tags': []} if val in WANTED else None
         elif current is not None:
+            if code == 8:
+                current['layer'] = val
             current['tags'].append((code, val))
-    if current:
+    if current and not _is_excluded_layer(current.get('layer')):
         ents.append(current)
     return ents
 
@@ -140,7 +196,7 @@ def _lwpolyline_loop(tags):
         except ValueError:
             pass
     pts = [(c[0], c[1]) for c in coords if c[1] is not None]
-    return _expand(pts, bulges, closed)
+    return _expand(pts, bulges, closed), closed
 
 
 def _polyline_loop(vertices):
@@ -368,10 +424,11 @@ def _svg_path(pts):
 # ----------------------------------------------------------------------
 
 def process_dxf(file_content: str) -> dict:
+    unit_scale, unit_code = _detect_unit_scale(file_content)
     ents = _entities(file_content)
 
     loops = []          # closed loops (polylines, circles, arcs-as-loops)
-    open_segs = []      # loose LINE / ARC / open SPLINE to be stitched
+    open_segs = []      # loose LINE / ARC / open SPLINE / open LWPOLYLINE, to be stitched
 
     # walk entities; reassemble old-style POLYLINE from its VERTEX children
     poly_vertices = None
@@ -395,9 +452,14 @@ def process_dxf(file_content: str) -> dict:
                 loops.append(lp)
             poly_vertices = None
         elif t == 'LWPOLYLINE':
-            lp = _lwpolyline_loop(e['tags'])
-            if len(lp) >= 3:
+            lp, closed = _lwpolyline_loop(e['tags'])
+            if closed and len(lp) >= 3:
                 loops.append(lp)
+            elif not closed and len(lp) >= 2:
+                # Respect the file's actual open/closed flag instead of
+                # force-closing every polyline — an open chain still needs
+                # stitching against other segments before it's a real loop.
+                open_segs.append(lp)
         elif t == 'CIRCLE':
             lp = _circle_loop(e['tags'])
             if len(lp) >= 3:
@@ -425,6 +487,10 @@ def process_dxf(file_content: str) -> dict:
 
     loops = _keep_main_cluster(loops)
 
+    # Normalise to millimetres if the file declared a non-mm $INSUNITS
+    if unit_scale != 1.0:
+        loops = [[(x * unit_scale, y * unit_scale) for x, y in lp] for lp in loops]
+
     min_x, min_y, max_x, max_y = _bbox_all(loops)
     raw_w, raw_h = max_x - min_x, max_y - min_y
     if raw_w < 0.5 or raw_h < 0.5:
@@ -446,4 +512,6 @@ def process_dxf(file_content: str) -> dict:
         'poly_count':    len(loops),
         # evenodd is correct for single loops AND compound (outer+holes) shapes
         'fill_rule':     'evenodd',
+        'unit_code':     unit_code,     # DXF $INSUNITS as declared in the file
+        'unit_scale':    unit_scale,    # factor applied to convert to mm
     }

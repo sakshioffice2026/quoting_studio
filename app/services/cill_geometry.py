@@ -30,6 +30,18 @@ def draw_cill(msp, frame_width, horn_length=40.0, nose_depth=30.0, cill_height=2
     """
     
     # ─────────────────────────────────────────────────────────────────
+    # VALIDATE before drawing — clamp invalid horn/nose values so we
+    # never emit self-intersecting or negative-width geometry.
+    # ─────────────────────────────────────────────────────────────────
+    check = verify_cill_geometry(frame_width, horn_length, nose_depth)
+    if not check['valid']:
+        import logging
+        logging.getLogger(__name__).warning(
+            'Invalid cill geometry, clamping: %s', '; '.join(check['errors']))
+        horn_length = max(0.0, min(horn_length, frame_width * 0.5))
+        nose_depth = max(0.0, nose_depth)
+
+    # ─────────────────────────────────────────────────────────────────
     # MAIN CILL BODY (rectangular projection below frame)
     # ─────────────────────────────────────────────────────────────────
     

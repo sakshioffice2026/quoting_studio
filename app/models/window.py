@@ -61,7 +61,20 @@ class Window(db.Model):
         return f'{self.material} · {self.frame_colour_name}'
 
     def to_dict(self) -> dict:
-        """Serialise to the same shape the Three.js canvas expects."""
+        """Serialise the authoritative designer model.
+
+        When design_json exists, cells are projected from it rather than from
+        the legacy Pane relation, preventing API consumers from seeing two
+        different geometries for the same window.
+        """
+        cells = [p.to_dict() for p in self.panes.all()]
+        if self.design_json:
+            try:
+                from ..services.canonical_geometry import legacy_panes_from_design
+                cells = legacy_panes_from_design(self)
+            except Exception:
+                # Do not hide a malformed design_json behind stale Pane rows.
+                cells = []
         return {
             'id':             self.id,
             'label':          self.label,
@@ -70,7 +83,8 @@ class Window(db.Model):
             'material':       self.material,
             'frameColor':     self.frame_colour_hex,
             'frameColorName': self.frame_colour_name,
-            'cells':          [p.to_dict() for p in self.panes.all()],
+            'design_json':    self.design_json,
+            'cells':          cells,
         }
 
     def __repr__(self):
