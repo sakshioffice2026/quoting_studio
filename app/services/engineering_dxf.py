@@ -411,8 +411,8 @@ def _add_hatching(msp, cells, W, H, bar):
                 (gx + gw, gy + gh),
                 (gx, gy + gh)
             ], is_closed=True)
-            hatch.dxfattribs['layer'] = L_HATCH
-            hatch.dxfattribs['color'] = 7
+            hatch.dxf.layer = L_HATCH
+            hatch.dxf.color = 7
 
 
 def _add_gasket_seals(msp, W, H, bar):
