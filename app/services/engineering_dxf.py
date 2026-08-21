@@ -81,7 +81,7 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     _elevation(msp, W, H, bar, cells)
     _plan_strip(msp, W, bar, dep, cells, prof, plan_y0)
     _vertical_section(msp, H, bar, dep, prof, sect_x)
-    _pane_schedule(msp, cells, design, sched_x, H)
+    _pane_schedule(msp, cells, design, sched_x, H, W, H)
     _dimensions(msp, W, H, cells, plan_y0, plan_y1, sect_x, dep)
 
     # FIXED: Add missing geometry functions
@@ -206,6 +206,7 @@ def _elevation(msp, W, H, bar, cells):
         close=True, dxfattribs={'layer': L_FRAME})
 
     seen_v = set()
+    seen_h = set()
     for (x, y, w, h, opening) in cells:
         rx = x + w
         if 0.001 < rx < 0.999 and round(rx, 3) not in seen_v:
@@ -216,7 +217,6 @@ def _elevation(msp, W, H, bar, cells):
                  (mx + mb/2, H), (mx - mb/2, H)],
                 close=True, dxfattribs={'layer': L_FRAME})
 
-        seen_h = set()
         gy, gh = y * H, h * H
         ty = y + h
         if 0.001 < ty < 0.999 and round(ty, 3) not in seen_h:
@@ -228,9 +228,10 @@ def _elevation(msp, W, H, bar, cells):
                 close=True, dxfattribs={'layer': L_FRAME})
 
         gi = bar + 4
-        glx = bar + gi if x <= 0.001 else bar + mb/2 + 4
+        gx, gw = x * W, w * W
+        glx = gx + (gi if x <= 0.001 else mb/2 + 4)
         gly = gy + (gi if y <= 0.001 else mb/2 + 4)
-        grx = W - bar - (gi if x + w >= 0.999 else mb/2 + 4)
+        grx = gx + gw - (gi if x + w >= 0.999 else mb/2 + 4)
         gry = gy + gh - (gi if y + h >= 0.999 else mb/2 + 4)
         
         if grx > glx and gry > gly:
@@ -310,7 +311,7 @@ def _vertical_section(msp, H, bar, dep, prof, sect_x):
                      dxfattribs={'layer': L_GLASS})
 
 
-def _pane_schedule(msp, cells, design, ox, top_y):
+def _pane_schedule(msp, cells, design, ox, top_y, W, H):
     col_w = [80, 240, 360, 220]
     row_h = 80
     headers = ['#', 'Opener', 'Glazing', 'Size']
@@ -351,7 +352,7 @@ def _pane_schedule(msp, cells, design, ox, top_y):
             glazing = dp.get('glazing') or dp.get('glazingType') or 'DGU'
         cx = ox
         vals = [str(r_idx + 1), opening or 'Fixed', glazing,
-                f'{w*100:.0f}×{h*100:.0f}']
+                f'{w*W:.0f}×{h*H:.0f}']
         for i, val in enumerate(vals):
             _add_text(msp, val,
                       cx + col_w[i] * 0.5, ry + row_h * 0.35,

@@ -129,29 +129,36 @@ shapes = [o.Shape for o in doc.Objects if hasattr(o, "Shape") and o.Shape and no
 if not shapes:
     print("ERROR: no shapes imported from STEP", flush=True)
 else:
-    full = shapes[0]
-    for s in shapes[1:]:
-        full = full.fuse(s)
+    # Plain edge projection (every edge of every solid), not
+    # TechDraw.findShapeOutline() on a fused solid — findShapeOutline only
+    # returns the outer silhouette and silently drops interior mullion/
+    # sash/glazing-bar edges, producing near-empty drawings.
+    all_edges = []
+    xs, ys = [], []
+    for shp in shapes:
+        for e in shp.Edges:
+            pts = e.discretize(Deflection=0.1)
+            if len(pts) < 2:
+                continue
+            flat = [(p.x, p.y) for p in pts]
+            all_edges.append(flat)
+            xs.extend(p[0] for p in flat)
+            ys.extend(p[1] for p in flat)
 
-    direction = App.Vector(0, 0, 1)
-    proj = TechDraw.findShapeOutline(full, 1.0, direction)
-
-    bbox = proj.BoundBox
     margin = 40
-    W = bbox.XLength + margin * 2
-    H = bbox.YLength + margin * 2
-    ox = -bbox.XMin + margin
-    oy = bbox.YMax + margin
+    x_min, x_max = (min(xs), max(xs)) if xs else (0.0, 0.0)
+    y_min, y_max = (min(ys), max(ys)) if ys else (0.0, 0.0)
+    W = (x_max - x_min) + margin * 2
+    H = (y_max - y_min) + margin * 2
+    ox = -x_min + margin
+    oy = y_max + margin
 
     def to_svg_xy(x, y):
         return (x + ox, oy - y)
 
     paths = []
-    for edge in proj.Edges:
-        pts = edge.discretize(Deflection=0.1)
-        if len(pts) < 2:
-            continue
-        d = "M " + " L ".join(f"{{p.x+ox:.2f}},{{oy-p.y:.2f}}" for p in pts)
+    for flat in all_edges:
+        d = "M " + " L ".join(f"{{px+ox:.2f}},{{oy-py:.2f}}" for px, py in flat)
         paths.append(f'<path d="{{d}}" stroke="black" stroke-width="0.5" fill="none"/>')
 
     width_mm = meta["width"]
@@ -184,7 +191,6 @@ else:
         f.write(svg)
 
     print("drawing export OK", flush=True)
-
-App.closeDocument(doc.Name)
-print("TECHDRAW_DONE", flush=True)
+    App.closeDocument(doc.Name)
+    print("TECHDRAW_DONE", flush=True)
 '''

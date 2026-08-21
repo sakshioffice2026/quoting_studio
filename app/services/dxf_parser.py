@@ -419,6 +419,74 @@ def _svg_path(pts):
     return 'M ' + ' L '.join(f'{x},{y}' for x, y in pts) + ' Z'
 
 
+def _dedupe_consecutive(pts, tol=1e-3):
+    """Drop consecutive points that are effectively the same location
+    (common after bulge/arc interpolation joins two segments)."""
+    if not pts:
+        return pts
+    out = [pts[0]]
+    for p in pts[1:]:
+        if math.hypot(p[0] - out[-1][0], p[1] - out[-1][1]) > tol:
+            out.append(p)
+    return out
+
+
+def _rdp(pts, tol):
+    """Ramer-Douglas-Peucker simplification: drop points that lie within
+    `tol` mm of the straight line between their neighbours (i.e. points
+    that don't meaningfully change the shape — the source of the huge
+    point counts from fine bulge/arc interpolation on nearly-straight
+    or gently-curved sections)."""
+    if len(pts) < 3:
+        return pts
+
+    def perp_dist(p, a, b):
+        ax, ay = a; bx, by = b; px, py = p
+        dx, dy = bx - ax, by - ay
+        seg_len2 = dx * dx + dy * dy
+        if seg_len2 < 1e-12:
+            return math.hypot(px - ax, py - ay)
+        t = ((px - ax) * dx + (py - ay) * dy) / seg_len2
+        t = max(0.0, min(1.0, t))
+        cx, cy = ax + t * dx, ay + t * dy
+        return math.hypot(px - cx, py - cy)
+
+    def simplify(seq):
+        if len(seq) < 3:
+            return seq
+        a, b = seq[0], seq[-1]
+        idx, dmax = -1, 0.0
+        for i in range(1, len(seq) - 1):
+            d = perp_dist(seq[i], a, b)
+            if d > dmax:
+                idx, dmax = i, d
+        if dmax > tol:
+            left = simplify(seq[:idx + 1])
+            right = simplify(seq[idx:])
+            return left[:-1] + right
+        return [a, b]
+
+    return simplify(pts)
+
+
+def _simplify_loop(pts, dedupe_tol=1e-3, rdp_tol=0.1):
+    """Full cleanup for one loop: drop duplicate/near-duplicate points,
+    then RDP-simplify collinear runs. rdp_tol=0.1mm is well under typical
+    aluminium-extrusion fabrication tolerance, so the visible/manufactured
+    shape is unchanged — only redundant points from over-fine bulge/arc
+    interpolation are removed."""
+    pts = _dedupe_consecutive(pts, dedupe_tol)
+    if len(pts) < 4:
+        return pts
+    closed = math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= dedupe_tol * 10
+    if closed:
+        pts = pts[:-1]
+    simplified = _rdp(pts, rdp_tol)
+    if closed:
+        simplified.append(simplified[0])
+    return simplified
+
+
 # ----------------------------------------------------------------------
 #  Public pipeline
 # ----------------------------------------------------------------------
@@ -486,6 +554,16 @@ def process_dxf(file_content: str) -> dict:
         return {'ok': False, 'error': 'No drawable geometry found in DXF file.'}
 
     loops = _keep_main_cluster(loops)
+
+    # Simplify: over-fine bulge/arc interpolation (and duplicate stitch-join
+    # points) can leave hundreds of near-collinear points per loop, which
+    # bloats every downstream DXF/STEP export (and produced ~9k literal
+    # zero-length duplicate-point artifacts in ortho exports). This removes
+    # them without changing the visible/manufactured shape.
+    loops = [_simplify_loop(lp) for lp in loops]
+    loops = [lp for lp in loops if len(lp) >= 3]
+    if not loops:
+        return {'ok': False, 'error': 'No drawable geometry found in DXF file.'}
 
     # Normalise to millimetres if the file declared a non-mm $INSUNITS
     if unit_scale != 1.0:
