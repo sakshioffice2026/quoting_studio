@@ -130,17 +130,50 @@ def load_profile(tenant_id, material: str = "Aluminium", window=None) -> Profile
 
 
 def _design_panes(design: dict) -> list[PaneGeometry]:
+    """Build PaneGeometry list from design_json['panes'|'cells'].
+
+    FIX: previously missing/null x, y, w, h silently defaulted to
+    0.0/0.0/1.0/1.0. That let a pane with a missing 'y' or 'h' collapse
+    to a wrong position/size, so its mullion/transom edge never reached
+    the cill/head, producing visible gaps in the 3D assembly. Now these
+    fields are required and validated instead of silently defaulted.
+    """
     raw = design.get("panes") or design.get("cells") or []
     panes = []
     for index, p in enumerate(raw):
         if not isinstance(p, dict):
             continue
+
+        pid = str(p.get("id", p.get("cellKey", f"p{index + 1}")))
+
+        # Required fields — do NOT silently default these.
+        for key in ("x", "y", "w", "h"):
+            if p.get(key) is None:
+                raise ValueError(
+                    f"pane '{pid}' is missing required field '{key}' "
+                    f"in design_json — cannot build geometry"
+                )
+
+        x = _number(p.get("x"), None)
+        y = _number(p.get("y"), None)
+        w = _number(p.get("w"), None)
+        h = _number(p.get("h"), None)
+
+        if x is None or y is None or w is None or h is None:
+            raise ValueError(
+                f"pane '{pid}' has non-numeric x/y/w/h in design_json"
+            )
+
+        # Sanity check: pane must stay inside the unit square (0..1 space)
+        if x < 0 or y < 0 or (x + w) > 1.0001 or (y + h) > 1.0001:
+            raise ValueError(
+                f"pane '{pid}' geometry out of bounds: "
+                f"x={x}, y={y}, w={w}, h={h}"
+            )
+
         panes.append(PaneGeometry(
-            id=str(p.get("id", p.get("cellKey", f"p{index + 1}"))),
-            x=_number(p.get("x"), 0.0),
-            y=_number(p.get("y"), 0.0),
-            w=_number(p.get("w"), 1.0),
-            h=_number(p.get("h"), 1.0),
+            id=pid,
+            x=x, y=y, w=w, h=h,
             opening=str(p.get("opening", p.get("opener", "Fixed")) or "Fixed"),
             glazing=str(p.get("glazing", p.get("glazingType", "Double, Low-E")) or "Double, Low-E"),
             infill=str(p.get("infill", "glass") or "glass"),
