@@ -26,7 +26,7 @@ class Project(db.Model):
     customer_name = db.Column(db.String(200), nullable=False)
     address       = db.Column(db.String(500), nullable=True)
     notes         = db.Column(db.Text, nullable=True)
-    facade_json   = db.Column(db.Text, nullable=True)   # unit positions on the building elevation
+    facade_json   = db.Column(db.Text, nullable=True)
     status        = db.Column(db.String(20), default=ProjectStatus.DRAFT, nullable=False, index=True)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at    = db.Column(
@@ -34,7 +34,6 @@ class Project(db.Model):
         onupdate=datetime.utcnow, nullable=False
     )
 
-    # relationships
     windows = db.relationship(
         'Window', backref='project', lazy='dynamic',
         cascade='all, delete-orphan',
@@ -45,7 +44,6 @@ class Project(db.Model):
         cascade='all, delete-orphan'
     )
 
-    # ------------------------------------------------------------------ #
     @property
     def window_count(self) -> int:
         return self.windows.count()

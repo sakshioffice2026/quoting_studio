@@ -56,6 +56,7 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     
     W   = float(window.width_mm)
     H   = float(window.height_mm)
+    shape = getattr(window, 'shape', 'rectangular') or 'rectangular'
     prof = _load_profile(tenant_id, getattr(window, 'material', 'Aluminium'))
     bar  = prof['bar']
     dep  = prof['depth']
@@ -78,7 +79,7 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     # Hatching drawn first so it sits behind frame/glass/swing-line geometry
     _add_hatching(msp, cells, W, H, bar)
 
-    _elevation(msp, W, H, bar, cells)
+    _elevation(msp, W, H, bar, cells, shape)
     _plan_strip(msp, W, bar, dep, cells, prof, plan_y0)
     _vertical_section(msp, H, bar, dep, prof, sect_x)
     _pane_schedule(msp, cells, design, sched_x, H, W, H)
@@ -198,12 +199,37 @@ def _title_block(msp, window, prof, ox, oy, sw, th, design):
     _add_text(msp, drw_no, right_x0 + 20, oy + th * 0.3, th * 0.20, L_ANNOT)
 
 
-def _elevation(msp, W, H, bar, cells):
+def _elevation(msp, W, H, bar, cells, shape='rectangular'):
     mb = bar * 0.6
-
-    msp.add_lwpolyline(
-        [(0, 0), (W, 0), (W, H), (0, H)],
-        close=True, dxfattribs={'layer': L_FRAME})
+    
+    if shape == 'arched':
+        # Draw arched top window
+        arch_radius = W / 2
+        arch_height = arch_radius * 0.4
+        
+        # Bottom rectangle
+        msp.add_lwpolyline(
+            [(0, 0), (W, 0), (W, H - arch_height), (0, H - arch_height)],
+            close=True, dxfattribs={'layer': L_FRAME})
+        
+        # Arc for top (center at W/2, height H-arch_height)
+        cx, cy = W / 2, H - arch_height
+        msp.add_arc(
+            center=(cx, cy),
+            radius=arch_radius,
+            start_angle=0,
+            end_angle=180,
+            dxfattribs={'layer': L_FRAME})
+        
+        # Left vertical line for arch
+        msp.add_lwpolyline([(0, H - arch_height), (0, cy)], dxfattribs={'layer': L_FRAME})
+        # Right vertical line for arch
+        msp.add_lwpolyline([(W, H - arch_height), (W, cy)], dxfattribs={'layer': L_FRAME})
+    else:
+        # Standard rectangular window
+        msp.add_lwpolyline(
+            [(0, 0), (W, 0), (W, H), (0, H)],
+            close=True, dxfattribs={'layer': L_FRAME})
 
     seen_v = set()
     seen_h = set()

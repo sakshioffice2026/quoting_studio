@@ -24,6 +24,7 @@ class Window(db.Model):
     label            = db.Column(db.String(200), nullable=False, default='Window')
     width_mm         = db.Column(db.Integer, nullable=False, default=1200)
     height_mm        = db.Column(db.Integer, nullable=False, default=1400)
+    shape            = db.Column(db.String(50), nullable=False, default='rectangular')
     material         = db.Column(db.String(50), nullable=False, default='Aluminium')
     frame_colour_hex = db.Column(db.String(7), nullable=False, default='#2B2F33')
     frame_colour_name= db.Column(db.String(80), nullable=False, default='Anthracite')

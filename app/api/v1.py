@@ -58,6 +58,7 @@ def save_panes(window_id):
         # update window-level fields if provided
         if 'width'          in data: window.width_mm          = int(data['width'])
         if 'height'         in data: window.height_mm         = int(data['height'])
+        if 'shape'          in data: window.shape             = data['shape']
         if 'material'       in data: window.material          = data['material']
         if 'frameColor'     in data: window.frame_colour_hex  = data['frameColor']
         if 'frameColorName' in data: window.frame_colour_name = data['frameColorName']

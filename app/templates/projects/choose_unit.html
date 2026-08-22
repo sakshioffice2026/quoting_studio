@@ -101,6 +101,7 @@
   <input type="hidden" name="unit_type"    id="fUnitType">
   <input type="hidden" name="template_key" id="fTemplateKey">
   <input type="hidden" name="template_name" id="fTemplateName">
+  <input type="hidden" name="shape"        id="fShape" value="rectangular">
 </form>
 
 <script>
@@ -143,7 +144,8 @@ function renderGrid(){
   list.forEach(t => {
     const card = document.createElement('div');
     card.className = 'cu-card';
-    card.onclick = () => pickTemplate(t.key, t.name);
+    const tplShape = t.shape || 'rectangular';
+    card.onclick = () => pickTemplate(t.key, t.name, tplShape);
     card.innerHTML = miniPreview(t) +
       `<div class="nm">${t.name}</div><div class="meta">${t.panels} pane${t.panels>1?'s':''}</div>`;
     grid.appendChild(card);
@@ -222,10 +224,11 @@ function barsList(spec){
   return out;
 }
 
-function pickTemplate(key, name){
+function pickTemplate(key, name, shape){
   document.getElementById('fUnitType').value    = currentUnit;
   document.getElementById('fTemplateKey').value = key;
   document.getElementById('fTemplateName').value= name;
+  document.getElementById('fShape').value       = shape || 'rectangular';
   document.getElementById('cuForm').submit();
 }
 window.chooseUnit   = chooseUnit;

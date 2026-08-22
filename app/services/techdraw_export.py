@@ -166,15 +166,25 @@ else:
     dim_y = oy + 20
     dim_svg = (
         f'<line x1="{{ox:.2f}}" y1="{{dim_y:.2f}}" x2="{{ox+width_mm:.2f}}" y2="{{dim_y:.2f}}" stroke="black" stroke-width="0.3"/>'
-        f'<text x="{{ox+width_mm/2:.2f}}" y="{{dim_y+12:.2f}}" font-size="10" text-anchor="middle">{{width_mm:.0f}} mm</text>'
+        f'<text x="{{ox+width_mm/2:.2f}}" y="{{dim_y+12:.2f}}" font-size="10" text-anchor="middle" dominant-baseline="middle">{{width_mm:.0f}} mm</text>'
         f'<line x1="{{ox-20:.2f}}" y1="{{oy-height_mm:.2f}}" x2="{{ox-20:.2f}}" y2="{{oy:.2f}}" stroke="black" stroke-width="0.3"/>'
-        f'<text x="{{ox-30:.2f}}" y="{{oy-height_mm/2:.2f}}" font-size="10" text-anchor="middle" transform="rotate(-90 {{ox-30:.2f}},{{oy-height_mm/2:.2f}})">{{height_mm:.0f}} mm</text>'
+        f'<text x="{{ox-30:.2f}}" y="{{oy-height_mm/2:.2f}}" font-size="10" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 {{ox-30:.2f}},{{oy-height_mm/2:.2f}})">{{height_mm:.0f}} mm</text>'
     )
 
+    title_y = H - 55
+    title_height = 55
+    mid_x = W / 2
+    
     title_svg = (
-        f'<text x="10" y="{{H-40}}" font-size="10">Part: {{meta["part_no"]}}</text>'
-        f'<text x="10" y="{{H-28}}" font-size="10">Title: {{meta["label"]}}</text>'
-        f'<text x="10" y="{{H-16}}" font-size="10">Material: {{meta["material"]}}  Scale: {{meta["scale"]}}  Date: {{meta["date"]}}</text>'
+        f'<rect x="10" y="{{title_y}}" width="{{W-20}}" height="{{title_height}}" stroke="black" stroke-width="1.5" fill="none"/>'
+        f'<line x1="{{mid_x}}" y1="{{title_y}}" x2="{{mid_x}}" y2="{{H}}" stroke="black" stroke-width="1.5"/>'
+        f'<line x1="10" y1="{{title_y+18}}" x2="{{W-10}}" y2="{{title_y+18}}" stroke="black" stroke-width="1"/>'
+        f'<line x1="10" y1="{{title_y+36}}" x2="{{W-10}}" y2="{{title_y+36}}" stroke="black" stroke-width="1"/>'
+        f'<text x="20" y="{{title_y+9}}" font-size="12" font-weight="bold" dominant-baseline="middle">ARYAMAN TECHNOLOGIES</text>'
+        f'<text x="20" y="{{title_y+27}}" font-size="10" dominant-baseline="middle">Part: {{meta["part_no"]}}</text>'
+        f'<text x="20" y="{{title_y+45}}" font-size="10" dominant-baseline="middle">Title: {{meta["label"]}} | Material: {{meta["material"]}} | Scale: {{meta["scale"]}} | Date: {{meta["date"]}}</text>'
+        f'<text x="{{mid_x+20}}" y="{{title_y+9}}" font-size="11" font-weight="bold" dominant-baseline="middle">DRAWING NUMBER</text>'
+        f'<text x="{{mid_x+20}}" y="{{title_y+27}}" font-size="14" font-weight="bold" dominant-baseline="middle">{{meta["part_no"]}}</text>'
     )
 
     svg = (
