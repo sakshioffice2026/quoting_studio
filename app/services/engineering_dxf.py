@@ -86,7 +86,7 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
 
     # FIXED: Add missing geometry functions
     _add_gasket_seals(msp, W, H, bar)
-    _add_hardware_cutouts(msp, W, H, bar)
+    _add_hardware_cutouts(msp, W, H, bar, cells)
     _add_frame_centerlines(msp, W, H, bar)
     _add_drainage_paths(msp, W, H, bar, prof)
 
@@ -432,7 +432,7 @@ def _add_gasket_seals(msp, W, H, bar):
         )
 
 
-def _add_hardware_cutouts(msp, W, H, bar):
+def _add_hardware_cutouts(msp, W, H, bar, cells):
     positions = [(bar+30, bar+20), (bar+30, H-bar-20), (W-bar-30, bar+20), (W-bar-30, H-bar-20)]
     
     for (hx, hy) in positions:
@@ -450,12 +450,39 @@ def _add_hardware_cutouts(msp, W, H, bar):
         close=True,
         dxfattribs={'layer': L_HW, 'color': 1}
     )
-    
-    handle_x, handle_y = W - bar - 15, H / 2
-    msp.add_circle((handle_x, handle_y), 4, dxfattribs={'layer': L_HW, 'color': 1})
-    msp.add_circle((handle_x, handle_y-60), 4, dxfattribs={'layer': L_HW, 'color': 1})
-    msp.add_line((handle_x, handle_y), (handle_x, handle_y-60),
-                 dxfattribs={'layer': L_HW, 'linetype': 'DASHED', 'color': 1})
+
+    # FIXED: handle was previously drawn once for the whole window at a
+    # hardcoded position (W-bar-15, H/2), regardless of how many panes
+    # exist or whether that pane actually opens. Multi-pane windows lost
+    # their handle whenever the rightmost pane was 'Fixed', and openers
+    # elsewhere in the window got no handle at all.
+    #
+    # Now: one handle per OPENING pane, placed on the pane's own edge
+    # opposite its hinge side (so it doesn't collide with the swing line).
+    for (x, y, w, h, opening) in cells:
+        if not opening or opening == 'Fixed':
+            continue
+
+        px, py = x * W, y * H
+        pw, ph = w * W, h * H
+        cy = py + ph / 2
+        op = opening
+
+        if 'Left' in op or op == 'Casement':
+            handle_x, handle_y = px + pw - bar - 15, cy
+        elif 'Right' in op:
+            handle_x, handle_y = px + bar + 15, cy
+        elif 'Slid' in op:
+            handle_x, handle_y = px + pw - bar - 15, cy
+        elif 'Top' in op:
+            handle_x, handle_y = px + pw / 2, py + bar + 15
+        else:
+            handle_x, handle_y = px + pw - bar - 15, cy
+
+        msp.add_circle((handle_x, handle_y), 4, dxfattribs={'layer': L_HW, 'color': 1})
+        msp.add_circle((handle_x, handle_y - 60), 4, dxfattribs={'layer': L_HW, 'color': 1})
+        msp.add_line((handle_x, handle_y), (handle_x, handle_y - 60),
+                     dxfattribs={'layer': L_HW, 'linetype': 'DASHED', 'color': 1})
 
 
 def _add_frame_centerlines(msp, W, H, bar):

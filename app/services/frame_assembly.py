@@ -260,6 +260,61 @@ def resolve_profiles(tenant_id, material='Aluminium',
 
 
 # ── pane normalisation ──────────────────────────────────────────────────────
+# Snap tolerance (mm): pane edges within this distance of the outer frame
+# boundary (0 or W/H) or of another pane's edge get pulled exactly onto it.
+# Fixes small design_json rounding errors (e.g. y+h = 0.994 instead of 1.0)
+# that used to leave a visible gap because no mullion/transom edge lined up
+# with the cill/head/jamb.
+_SNAP_TOL_MM = 3.0
+
+
+def _snap_edges(rects, W, H, tol=_SNAP_TOL_MM):
+    """Pull each rect's edges onto the outer frame boundary or a nearby
+    edge from another rect, if within `tol` mm. Mutates and returns rects."""
+    # snap to outer boundary
+    for r in rects:
+        if r['x'] <= tol:
+            r['x'] = 0.0
+        if r['y'] <= tol:
+            r['y'] = 0.0
+        if abs((r['x'] + r['w']) - W) <= tol:
+            r['w'] = W - r['x']
+        if abs((r['y'] + r['h']) - H) <= tol:
+            r['h'] = H - r['y']
+
+    # snap near-matching internal edges (mullion/transom lines) together
+    def _snap_axis(get_edges, set_edge):
+        edges = sorted(set(get_edges()))
+        clusters = []
+        for e in edges:
+            if clusters and e - clusters[-1][-1] <= tol:
+                clusters[-1].append(e)
+            else:
+                clusters.append([e])
+        remap = {}
+        for c in clusters:
+            target = sum(c) / len(c)
+            for e in c:
+                remap[e] = target
+        set_edge(remap)
+
+    _snap_axis(
+        lambda: [r['x'] for r in rects] + [r['x'] + r['w'] for r in rects],
+        lambda remap: [r.update(
+            x=remap.get(r['x'], r['x']),
+            w=(remap.get(r['x'] + r['w'], r['x'] + r['w']) - remap.get(r['x'], r['x']))
+        ) for r in rects],
+    )
+    _snap_axis(
+        lambda: [r['y'] for r in rects] + [r['y'] + r['h'] for r in rects],
+        lambda remap: [r.update(
+            y=remap.get(r['y'], r['y']),
+            h=(remap.get(r['y'] + r['h'], r['y'] + r['h']) - remap.get(r['y'], r['y']))
+        ) for r in rects],
+    )
+    return rects
+
+
 def _norm_panes(panes, W, H):
     """
     Return panes as clear-aperture rects in mm, Y-UP, sorted for determinism.
@@ -284,6 +339,7 @@ def _norm_panes(panes, W, H):
             'x': x * W, 'y': y_up * H, 'w': w * W, 'h': h * H,
             'opening': opening, 'infill': infill,
         })
+    out = _snap_edges(out, W, H)
     out.sort(key=lambda r: (round(r['y'], 2), round(r['x'], 2)))
     return out
 
