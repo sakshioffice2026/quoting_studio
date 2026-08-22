@@ -62,6 +62,13 @@ class WindowGeometry:
     members: tuple
     design: dict
     frame_colour_hex: str = "#6a6a6c"
+    shape: str = "rectangle"
+    arch_rise_mm: float = 0.0
+
+    @property
+    def is_curved(self) -> bool:
+        """True for any non-rectangular frame shape (arched, gothic, circular)."""
+        return self.shape in ("arched", "gothic", "circular")
 
     @property
     def bar(self) -> float:
@@ -299,6 +306,24 @@ def build_geometry(window, panes=None, tenant_id=None) -> WindowGeometry:
         if not pane_geoms:
             pane_geoms = [PaneGeometry("p1", 0.0, 0.0, 1.0, 1.0)]
     profile = load_profile(tenant_id, getattr(window, "material", "Aluminium"), window)
+
+    # Frame shape: design_json['shape'] (written by the Designer) is the
+    # source of truth — same as panes. Falls back to the legacy window.shape
+    # DB column, then to 'rectangle'. Values: rectangle|arched|gothic|circular.
+    shape = str(
+        design.get("shape")
+        or getattr(window, "shape", None)
+        or "rectangle"
+    ).lower()
+    if shape == "rectangular":  # normalise the old DB column default
+        shape = "rectangle"
+
+    arch_rise_mm = _number(design.get("archRise"), 0.0)
+    if shape in ("arched", "gothic", "circular") and arch_rise_mm <= 0:
+        # Designer always sends archRise alongside shape; this is only a
+        # safety net for older saved records.
+        arch_rise_mm = float(window.height_mm) * 0.3
+
     return WindowGeometry(
         width_mm=float(window.width_mm),
         height_mm=float(window.height_mm),
@@ -307,6 +332,8 @@ def build_geometry(window, panes=None, tenant_id=None) -> WindowGeometry:
         members=tuple(_members(pane_geoms)),
         design=design,
         frame_colour_hex=getattr(window, "frame_colour_hex", "#6a6a6c"),
+        shape=shape,
+        arch_rise_mm=arch_rise_mm,
     )
 
 

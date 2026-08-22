@@ -394,6 +394,12 @@ def save_design(window_id):
         if 'width'  in data: window.width_mm  = int(data['width'])
         if 'height' in data: window.height_mm = int(data['height'])
         if 'material' in data: window.material = data['material']
+        # Frame shape lives in design_json (source of truth); also mirror it
+        # onto the window.shape column so legacy readers (engineering_dxf.py)
+        # see the same value instead of always defaulting to 'rectangular'.
+        shape_val = design_obj.get('shape')
+        if shape_val:
+            window.shape = str(shape_val)
         if 'frameColor' in data:
             window.frame_colour_hex = data['frameColor']
         if 'frameColorName' in data:

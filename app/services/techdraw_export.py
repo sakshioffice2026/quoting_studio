@@ -25,8 +25,13 @@ def generate_techdraw(window, panes, tenant_id=None, fmt='svg') -> bytes:
     if not freecad:
         raise RuntimeError('FreeCAD not found — tried all known paths')
 
-    from .model3d_freecad import generate_3d_freecad
-    step_bytes = generate_3d_freecad(window, panes, tenant_id=tenant_id, fmt='step')
+    from .model3d import generate_3d
+    # Use the same curve-aware STEP builder as the /3d/step download (the one
+    # that already produces the correct round/arched/gothic solid — see
+    # canonical_geometry.py / model3d.py). The old model3d_freecad.py builder
+    # only knows straight horizontal/vertical members, so it always produced
+    # a rectangular STEP here regardless of the Designer's frame shape.
+    step_bytes = generate_3d(window, panes, tenant_id=tenant_id, fmt='step')
     if not step_bytes:
         raise RuntimeError('STEP generation failed — cannot build drawing')
 

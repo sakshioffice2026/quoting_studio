@@ -26,8 +26,11 @@ def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
     if not freecad:
         raise RuntimeError('FreeCAD not found — tried all known paths')
 
-    from .model3d_freecad import generate_3d_freecad
-    step_bytes = generate_3d_freecad(window, panes, tenant_id=tenant_id, fmt='step')
+    from .model3d import generate_3d
+    # Same fix as techdraw_export.py: use the curve-aware STEP builder so the
+    # orthographic views match the actual frame shape instead of always
+    # being rectangular.
+    step_bytes = generate_3d(window, panes, tenant_id=tenant_id, fmt='step')
     if not step_bytes:
         raise RuntimeError('STEP generation failed — cannot build orthographic views')
 

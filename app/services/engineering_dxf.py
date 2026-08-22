@@ -56,7 +56,6 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     
     W   = float(window.width_mm)
     H   = float(window.height_mm)
-    shape = getattr(window, 'shape', 'rectangular') or 'rectangular'
     prof = _load_profile(tenant_id, getattr(window, 'material', 'Aluminium'))
     bar  = prof['bar']
     dep  = prof['depth']
@@ -65,6 +64,17 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
 
     design = _load_design(window)
     cells  = _cells(panes, design)
+    # design_json['shape'] (written by the Designer) is authoritative — same
+    # source used by canonical_geometry.py for the STEP/3D export — so this
+    # legacy sheet matches. window.shape is only a fallback for old records.
+    shape = str(design.get('shape') or getattr(window, 'shape', 'rectangular') or 'rectangular').lower()
+    if shape == 'rectangular':
+        shape = 'rectangle'
+    arch_rise = design.get('archRise')
+    try:
+        arch_rise = float(arch_rise) if arch_rise is not None else None
+    except (TypeError, ValueError):
+        arch_rise = None
 
     plan_h   = dep + 40
     plan_y0  = -(dep + 120)
@@ -79,7 +89,7 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     # Hatching drawn first so it sits behind frame/glass/swing-line geometry
     _add_hatching(msp, cells, W, H, bar)
 
-    _elevation(msp, W, H, bar, cells, shape)
+    _elevation(msp, W, H, bar, cells, shape, arch_rise)
     _plan_strip(msp, W, bar, dep, cells, prof, plan_y0)
     _vertical_section(msp, H, bar, dep, prof, sect_x)
     _pane_schedule(msp, cells, design, sched_x, H, W, H)
@@ -199,13 +209,16 @@ def _title_block(msp, window, prof, ox, oy, sw, th, design):
     _add_text(msp, drw_no, right_x0 + 20, oy + th * 0.3, th * 0.20, L_ANNOT)
 
 
-def _elevation(msp, W, H, bar, cells, shape='rectangular'):
+def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
     mb = bar * 0.6
     
     if shape == 'arched':
-        # Draw arched top window
+        # Draw arched top window. arch_height (the "spring-to-apex" rise)
+        # comes from the Designer's Arch rise field when available, matching
+        # the 2D designer (drawing-engine.js) and the STEP/3D export
+        # (canonical_geometry.py / model3d.py) exactly instead of guessing.
         arch_radius = W / 2
-        arch_height = arch_radius * 0.4
+        arch_height = arch_rise if arch_rise and arch_rise > 0 else min(W * 0.25, 400)
         
         # Bottom rectangle
         msp.add_lwpolyline(
