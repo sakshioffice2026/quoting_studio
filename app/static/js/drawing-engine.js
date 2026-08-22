@@ -1129,6 +1129,8 @@ class DrawingCanvas {
     if (op.includes('Left'))       { hx = x + w - Math.min(14, w*0.08); hy = y + h/2; }
     else if (op.includes('Right')) { hx = x + Math.min(14, w*0.08);     hy = y + h/2; }
     else if (op.includes('Top')||op.includes('Tilt')) { hx = x + w/2; hy = y + h - Math.min(14, h*0.08); vertical = false; }
+    else if (op === 'Bottom Hung') { hx = x + w/2; hy = y + Math.min(14, h*0.08); vertical = false; }
+    else if (op === 'French' || op === 'Casement') { hx = x + w - Math.min(14, w*0.08); hy = y + h/2; }
     else return;
     const s = Math.max(6, Math.min(w, h) * 0.055);        // handle size scale
     const fill = this._handleFill();
@@ -1927,6 +1929,8 @@ function renderUnitSVG(model, opts = {}) {
       if(op.includes('Left')){ hx=gx+gw-bar*0.5; hy=gy+gh/2; }
       else if(op.includes('Right')){ hx=gx+bar*0.5; hy=gy+gh/2; }
       else if(op.includes('Top')||op.includes('Tilt')){ hx=gx+gw/2; hy=gy+gh-bar*0.5; vert=false; }
+      else if(op==='Bottom Hung'){ hx=gx+gw/2; hy=gy+bar*0.5; vert=false; }
+      else if(op==='French'||op==='Casement'){ hx=gx+gw-bar*0.5; hy=gy+gh/2; }
       else return '';
       const sc=Math.max(bar*0.5, Math.min(gw,gh)*0.05);
       const ht=model.frame.handleType||'lever';

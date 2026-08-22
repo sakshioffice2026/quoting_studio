@@ -200,7 +200,14 @@
   /* ============================================================
      3. FINISH MODAL  (Frame / Sash / Cill tabs + colour grid)
      ============================================================ */
+  let _finishTarget = 'frame';
+  function _finishKey(t) {
+    return t === 'frame' ? 'color'
+         : t === 'sash'  ? 'sashColor'
+         : 'cillColor';
+  }
   function openFinish() {
+    _finishTarget = 'frame';
     modal(
       'Manage Frame Finish',
       `<div class="p2-tabs">
@@ -228,16 +235,23 @@
     });
     _buildColourGrid();
   }
+  // pendingFinish is pre-seeded with the current colour for each part so
+  // Apply works immediately even if the user doesn't click a new swatch.
   let _pendingFinish = null;
   function _finishTab(t) {
+    _finishTarget = t;
     document.querySelectorAll('#p2modal .p2-tab').forEach(el =>
       el.classList.toggle('on', el.dataset.t === t));
+    _buildColourGrid();
   }
   function _buildColourGrid() {
     const grid = document.getElementById('p2colourGrid');
-    const cur = window.model.frame.color;
+    const key = _finishKey(_finishTarget);
+    const cur = window.model.frame[key] || window.model.frame.color;
+    const curEntry = FINISH_COLOURS.find(c => c.hex === cur) || FINISH_COLOURS[0];
+    _pendingFinish = { hex: curEntry.hex, name: curEntry.name, ral: curEntry.ral };
     grid.innerHTML = FINISH_COLOURS.map(c => `
-      <div class="p2-colour-card ${c.hex===cur?'sel':''}" data-hex="${c.hex}"
+      <div class="p2-colour-card ${c.hex===curEntry.hex?'sel':''}" data-hex="${c.hex}"
            onclick="QSPhase2._pickFinish('${c.hex}','${c.name}','${c.ral}')">
         <div class="p2-colour-sw" style="background:${c.hex}"></div>
         <div class="p2-colour-nm">${c.name}</div>
@@ -252,9 +266,20 @@
   function _applyFinish(scope) {
     const f = _pendingFinish;
     if (!f) { closeModal(); return; }
-    window.model.frame.color = f.hex;
-    window.model.frame.colorName = f.name;
-    window.model.frame.ral = f.ral;
+    if (scope === 'all') {
+      window.model.frame.color = f.hex;
+      window.model.frame.colorName = f.name;
+      window.model.frame.ral = f.ral;
+      window.model.frame.sashColor = f.hex;
+      window.model.frame.sashColorName = f.name;
+      window.model.frame.cillColor = f.hex;
+      window.model.frame.cillColorName = f.name;
+    } else {
+      const key = _finishKey(_finishTarget);
+      window.model.frame[key] = f.hex;
+      window.model.frame[key + 'Name'] = f.name;
+      if (_finishTarget === 'frame') window.model.frame.ral = f.ral;
+    }
     _pendingFinish = null;
     commit(); closeModal();
   }

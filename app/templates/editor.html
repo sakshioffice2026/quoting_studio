@@ -153,6 +153,14 @@ body { overflow:hidden; }
   color:var(--navy);background:var(--paper);border-left:3px solid var(--copper);
   padding:7px 10px;margin-bottom:12px;border-radius:0 4px 4px 0; }
 
+/* Visible "refreshed" flash on the right-side panel whenever a tab is
+   clicked / its content re-renders, so it's obvious the sidebar updated. */
+@keyframes tabFlash {
+  0%   { background:#FCEBD8; box-shadow:0 0 0 1px var(--copper) inset; }
+  100% { background:transparent; box-shadow:0 0 0 0 transparent inset; }
+}
+.tab-flash{ animation:tabFlash .5s ease-out; border-radius:6px; }
+
 /* ===== PHASE 3 ===== */
 .p3-gtoolbar{ display:flex;flex-wrap:wrap;gap:4px;background:white;border:1px solid var(--line);
   border-radius:6px;padding:5px; }
@@ -721,6 +729,8 @@ function setTab(t){
 
 function renderTab(){
   const el=document.getElementById('tabContent');
+  const tb=document.getElementById('tabBlock');
+  if(tb){ tb.classList.remove('tab-flash'); void tb.offsetWidth; tb.classList.add('tab-flash'); }
   // ── New tabs (from final prototype) ──
   if(currentTab==='profiles'){qsBuildProfs&&qsBuildProfs();return;}
   if(currentTab==='json'){
@@ -1190,8 +1200,17 @@ function importJSON(evt){
   reader.readAsText(file);
   evt.target.value='';
 }
-function exportDxf(){ window.location.href=`${API}/windows/${QS_WINDOW_ID}/engineering.dxf`; }
-function exportDwg(){ window.location.href=`${API}/windows/${QS_WINDOW_ID}/dwg`; }
+// Any export (DXF/DWG/3D) must reflect what's currently on screen, not
+// whatever was last saved. scheduleSave() debounces 800ms, so an export
+// fired right after a change (e.g. picking a colour) can otherwise hit
+// the server before that change is persisted. Flushing here guarantees
+// the DB row is current before the export route reads it.
+async function flushSave(){
+  clearTimeout(saveTimer);
+  if(_dirty) await saveModel();
+}
+async function exportDxf(){ await flushSave(); window.location.href=`${API}/windows/${QS_WINDOW_ID}/engineering.dxf`; }
+async function exportDwg(){ await flushSave(); window.location.href=`${API}/windows/${QS_WINDOW_ID}/dwg`; }
 function view3D(){ window.open(`/projects/${QS_PROJECT_ID}/windows/${QS_WINDOW_ID}/3d`,'_blank'); }
 function toggle3DMenu(){ const m=document.getElementById('menu3d'); m.style.display=m.style.display==='none'?'block':'none'; }
 document.addEventListener('click',(e)=>{ if(!document.getElementById('btn3dWrap')?.contains(e.target)) document.getElementById('menu3d')&&(document.getElementById('menu3d').style.display='none'); });
@@ -1199,6 +1218,7 @@ async function export3d(fmt){
   document.getElementById('menu3d').style.display='none';
   showToast('Generating '+fmt.toUpperCase()+'… (this may take a few seconds)','info');
   try{
+    await flushSave();
     const r=await fetch(`${API}/windows/${QS_WINDOW_ID}/3d/${fmt}`);
     if(!r.ok){
       let msg='Export failed';
