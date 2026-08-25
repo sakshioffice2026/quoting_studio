@@ -28,7 +28,9 @@ unit-testable without Flask, a DB, or a CAD kernel.
 """
 from __future__ import annotations
 
+import json
 import logging
+import math
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
@@ -93,9 +95,29 @@ class Member:
     miter_start_deg: float = 0.0
     miter_end_deg: float = 0.0
     profile_code: Optional[str] = None   # filled once profiles are resolved
+    # Curved member (arched/gothic head, or a full circular frame ring):
+    # an explicit (x, y) polyline in the same mm/Y-up space as x1..y2.
+    # When set, this is authoritative for meshing/STEP export (see
+    # model3d.py::_member_mesh / _member_solid_cq, which already sweep a
+    # profile section along `path`) — x1..y2 are left as a best-effort
+    # bounding box only, for any code that still reads the straight
+    # centreline (e.g. horn/mullion centring in model3d.py).
+    path: Optional[list] = None
+    closed: bool = False   # True for a full loop (circular ring); False for
+                            # an open curve (arched/gothic head) that still
+                            # joins straight jambs at each end.
 
     @property
     def length(self) -> float:
+        if self.path:
+            pts = self.path
+            n = len(pts)
+            count = n if self.closed else n - 1
+            return sum(
+                math.hypot(pts[(i + 1) % n][0] - pts[i][0],
+                           pts[(i + 1) % n][1] - pts[i][1])
+                for i in range(count)
+            )
         return abs(self.x2 - self.x1) + abs(self.y2 - self.y1)
 
 
@@ -110,6 +132,12 @@ class GlassCell:
     infill: str = 'glass'       # glass | panel
     opening: str = 'Fixed'
     thickness: float = 24.0     # IGU thickness (mm)
+    # For a circular frame: the glass's true visible outline (rectangle
+    # clipped to the frame's inner-face ellipse), a closed (x, y) polygon in
+    # the same absolute mm/Y-up space as x/y/w/h. x/y/w/h remain the
+    # rectangle's bounding box (kept for any code that still reads them);
+    # when clip_path is set it is authoritative for meshing/STEP export.
+    clip_path: Optional[list] = None
 
 
 @dataclass
@@ -357,6 +385,168 @@ def _uniq(vals, tol=0.5):
 
 
 # ── the build ────────────────────────────────────────────────────────────────
+def _load_design(window) -> dict:
+    """Parse window.design_json the same defensive way engineering_dxf.py
+    and canonical_geometry.py do, so all three exports read the same
+    'shape'/'archRise' the Designer wrote."""
+    try:
+        return json.loads(getattr(window, 'design_json', None) or '{}')
+    except (TypeError, ValueError):
+        return {}
+
+
+def _ellipse_points(cx, cy, rx, ry, segments=64):
+    """Full ellipse (or circle when rx==ry), sampled CCW starting at 0°."""
+    return [
+        (cx + rx * math.cos(2 * math.pi * i / segments),
+         cy + ry * math.sin(2 * math.pi * i / segments))
+        for i in range(segments)
+    ]
+
+
+def _arc_points(cx, cy, r, start_deg, end_deg, segments=32):
+    """Arc from start_deg to end_deg (inclusive), degrees measured the same
+    way as ezdxf's add_arc (0° = +X axis, CCW)."""
+    pts = []
+    for i in range(segments + 1):
+        t = start_deg + (end_deg - start_deg) * i / segments
+        rad = math.radians(t)
+        pts.append((cx + r * math.cos(rad), cy + r * math.sin(rad)))
+    return pts
+
+
+def _quad_bezier_points(p0, p1, p2, segments=20):
+    """Quadratic Bezier (p0=start, p1=control, p2=end), including both
+    endpoints. Mirrors engineering_dxf.py::_quad_bezier_points so the
+    gothic head matches the DXF elevation exactly."""
+    pts = []
+    for i in range(segments + 1):
+        t = i / segments
+        mt = 1 - t
+        x = mt * mt * p0[0] + 2 * mt * t * p1[0] + t * t * p2[0]
+        y = mt * mt * p0[1] + 2 * mt * t * p1[1] + t * t * p2[1]
+        pts.append((x, y))
+    return pts
+
+
+def _clip_polygon_convex(subject, clip):
+    """Sutherland-Hodgman: clip `subject` polygon against a CONVEX `clip`
+    polygon (an ellipse polygon is convex, so this gives an exact rectangle
+    ∩ ellipse shape — straight edges plus the elliptical arc where the
+    rectangle would otherwise poke outside the frame). Both are lists of
+    (x, y) points, implicitly closed."""
+    def _inside(p, a, b):
+        # left-of test for edge a->b of the (CCW) clip polygon
+        return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0
+
+    def _intersect(p1, p2, a, b):
+        x1, y1 = p1; x2, y2 = p2; x3, y3 = a; x4, y4 = b
+        d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(d) < 1e-9:
+            return p2
+        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / d
+        return (x1 + t * (x2 - x1), y1 + t * (y2 - y1))
+
+    output = list(subject)
+    n = len(clip)
+    for i in range(n):
+        a, b = clip[i], clip[(i + 1) % n]
+        if not output:
+            break
+        input_list = output
+        output = []
+        m = len(input_list)
+        for j in range(m):
+            cur = input_list[j]
+            prev = input_list[j - 1]
+            cur_in = _inside(cur, a, b)
+            prev_in = _inside(prev, a, b)
+            if cur_in:
+                if not prev_in:
+                    output.append(_intersect(prev, cur, a, b))
+                output.append(cur)
+            elif prev_in:
+                output.append(_intersect(prev, cur, a, b))
+    return output
+
+
+def _ellipse_span_y(x, cx, cy, rx, ry):
+    """Half-height of the ellipse at a given x, or None if x is outside it."""
+    t = (x - cx) / rx
+    if abs(t) >= 1.0:
+        return None
+    half = ry * math.sqrt(1.0 - t * t)
+    return cy - half, cy + half
+
+
+def _ellipse_span_x(y, cx, cy, rx, ry):
+    """Half-width of the ellipse at a given y, or None if y is outside it."""
+    t = (y - cy) / ry
+    if abs(t) >= 1.0:
+        return None
+    half = rx * math.sqrt(1.0 - t * t)
+    return cx - half, cx + half
+
+
+def _add_circular_frame_ring(A: Assembly, W, H, p_head, depth):
+    """Full frame as one closed elliptical ring (round/porthole window) —
+    mirrors engineering_dxf.py's 'circular' branch (ellipse inscribed in the
+    W x H bounding box) instead of the plain 4-member rectangle."""
+    cx, cy = W / 2.0, H / 2.0
+    path = _ellipse_points(cx, cy, W / 2.0, H / 2.0, segments=72)
+    bar = p_head['bar']
+    A.members.append(Member(
+        id='F_ring', role=ROLE_HEAD, orientation=ORI_H,
+        x1=0, y1=cy, x2=W, y2=cy,
+        bar_width=bar, depth=depth,
+        joint_start=JOINT_BUTT, joint_end=JOINT_BUTT,
+        profile_code=p_head['code'],
+        path=path, closed=True))
+
+
+def _add_arched_head(A: Assembly, W, spring_y, p_head, depth):
+    """Semicircular arched head spanning the two jamb tops, radius W/2,
+    centred at (W/2, spring_y) — mirrors engineering_dxf.py's 'arched'
+    branch (add_arc center=(W/2,spring_y), radius=W/2, 0deg->180deg)."""
+    cx = W / 2.0
+    path = _arc_points(cx, spring_y, W / 2.0, 180.0, 0.0, segments=32)
+    bar = p_head['bar']
+    A.members.append(Member(
+        id='F_head', role=ROLE_HEAD, orientation=ORI_H,
+        x1=0, y1=spring_y, x2=W, y2=spring_y,
+        bar_width=bar, depth=depth,
+        joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
+        miter_start_deg=45, miter_end_deg=45,
+        profile_code=p_head['code'],
+        path=path, closed=False))
+
+
+def _add_gothic_head(A: Assembly, W, H, spring_y, arch_rise, p_head, depth):
+    """Pointed (two-centre) gothic head — mirrors engineering_dxf.py's
+    'gothic' branch: two quadratic Beziers from each jamb top up to the
+    apex, spring-line / control-point (0.6 factor) geometry matched
+    exactly so the DXF elevation and the STEP/3D export agree."""
+    apex = (W / 2.0, H)
+    ctrl_y = spring_y + 0.6 * arch_rise
+    right_spring = (W, spring_y)
+    right_ctrl = (W, ctrl_y)
+    left_ctrl = (0.0, ctrl_y)
+    left_spring = (0.0, spring_y)
+
+    path = _quad_bezier_points(right_spring, right_ctrl, apex, segments=16)
+    path += _quad_bezier_points(apex, left_ctrl, left_spring, segments=16)[1:]
+
+    bar = p_head['bar']
+    A.members.append(Member(
+        id='F_head', role=ROLE_HEAD, orientation=ORI_H,
+        x1=0, y1=spring_y, x2=W, y2=spring_y,
+        bar_width=bar, depth=depth,
+        joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
+        miter_start_deg=45, miter_end_deg=45,
+        profile_code=p_head['code'],
+        path=path, closed=False))
+
+
 def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly:
     """
     Decompose `window` + `panes` into an Assembly (members + glass + warnings).
@@ -392,42 +582,100 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
     mid = 0                # members are placed on the outer box; centre lines
     # run at bar_width/2 in from each outer edge.
 
+    # Frame shape: design_json['shape'] (written by the Designer) is the
+    # source of truth, same as canonical_geometry.py (used for the pane/
+    # glass layout) and engineering_dxf.py (2D sheet). Falls back to the
+    # legacy window.shape DB column, then 'rectangle'. This is what was
+    # previously missing here — build_members() always built a plain
+    # rectangle no matter what shape was selected in the Designer.
+    design = _load_design(window)
+    shape = str(
+        design.get('shape') or getattr(window, 'shape', None) or 'rectangle'
+    ).lower()
+    if shape == 'rectangular':
+        shape = 'rectangle'
+    arch_rise = design.get('archRise')
+    try:
+        arch_rise = float(arch_rise) if arch_rise is not None else None
+    except (TypeError, ValueError):
+        arch_rise = None
+    if shape in ('arched', 'gothic') and not (arch_rise and arch_rise > 0):
+        # Designer always sends archRise alongside shape; this is only a
+        # safety net for older saved records — same fallback formula as
+        # engineering_dxf.py so the DXF sheet and the 3D/STEP model agree.
+        arch_rise = min(W * 0.25, 400.0)
+
     # ── 1. OUTER FRAME ──────────────────────────────────────────────
-    # Head (top) — centre line at y = H - bar_h/2, spanning full width.
-    A.members.append(Member(
-        id='F_head', role=ROLE_HEAD, orientation=ORI_H,
-        x1=0, y1=H - bar_h / 2, x2=W, y2=H - bar_h / 2,
-        bar_width=bar_h, depth=p_head['depth'],
-        joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
-        miter_start_deg=45, miter_end_deg=45,
-        profile_code=p_head['code']))
-    # Cill (bottom)
     cill_role = ROLE_CILL if unit_type != 'door' else ROLE_THRESHOLD
-    A.members.append(Member(
-        id='F_cill', role=cill_role, orientation=ORI_H,
-        x1=0, y1=bar_c / 2, x2=W, y2=bar_c / 2,
-        bar_width=bar_c, depth=p_cill['depth'],
-        joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
-        miter_start_deg=45, miter_end_deg=45,
-        profile_code=p_cill['code']))
-    # Jambs (left / right) — run between head and cill inner faces.
-    jy1, jy2 = bar_c, H - bar_h
-    A.members.append(Member(
-        id='F_jambL', role=ROLE_JAMB, orientation=ORI_V,
-        x1=bar_j / 2, y1=jy1, x2=bar_j / 2, y2=jy2,
-        bar_width=bar_j, depth=p_jamb['depth'],
-        joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
-        miter_start_deg=45, miter_end_deg=45,
-        profile_code=p_jamb['code']))
-    A.members.append(Member(
-        id='F_jambR', role=ROLE_JAMB, orientation=ORI_V,
-        x1=W - bar_j / 2, y1=jy1, x2=W - bar_j / 2, y2=jy2,
-        bar_width=bar_j, depth=p_jamb['depth'],
-        joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
-        miter_start_deg=45, miter_end_deg=45,
-        profile_code=p_jamb['code']))
+
+    if shape == 'circular':
+        # Whole frame is one closed elliptical ring — no separate
+        # head/cill/jambs. Internal dividers below still clamp to the W x H
+        # bounding box (bar_h/bar_c/bar_j), matching the DXF sheet's
+        # documented simplification of not clipping them to the round
+        # aperture.
+        _add_circular_frame_ring(A, W, H, p_head, dep)
+        jy1, jy2 = bar_c, H - bar_h
+    else:
+        # Cill (bottom) — same for rectangle/arched/gothic.
+        A.members.append(Member(
+            id='F_cill', role=cill_role, orientation=ORI_H,
+            x1=0, y1=bar_c / 2, x2=W, y2=bar_c / 2,
+            bar_width=bar_c, depth=p_cill['depth'],
+            joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
+            miter_start_deg=45, miter_end_deg=45,
+            profile_code=p_cill['code']))
+
+        if shape == 'arched':
+            spring_y = H - arch_rise
+            _add_arched_head(A, W, spring_y, p_head, p_head['depth'])
+            jy1, jy2 = bar_c, spring_y
+        elif shape == 'gothic':
+            spring_y = H - arch_rise
+            _add_gothic_head(A, W, H, spring_y, arch_rise, p_head, p_head['depth'])
+            jy1, jy2 = bar_c, spring_y
+        else:
+            # Plain rectangle (default). Head — centre line at
+            # y = H - bar_h/2, spanning full width.
+            A.members.append(Member(
+                id='F_head', role=ROLE_HEAD, orientation=ORI_H,
+                x1=0, y1=H - bar_h / 2, x2=W, y2=H - bar_h / 2,
+                bar_width=bar_h, depth=p_head['depth'],
+                joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
+                miter_start_deg=45, miter_end_deg=45,
+                profile_code=p_head['code']))
+            jy1, jy2 = bar_c, H - bar_h
+
+        # Jambs (left / right) — run between cill and head/spring-line.
+        A.members.append(Member(
+            id='F_jambL', role=ROLE_JAMB, orientation=ORI_V,
+            x1=bar_j / 2, y1=jy1, x2=bar_j / 2, y2=jy2,
+            bar_width=bar_j, depth=p_jamb['depth'],
+            joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
+            miter_start_deg=45, miter_end_deg=45,
+            profile_code=p_jamb['code']))
+        A.members.append(Member(
+            id='F_jambR', role=ROLE_JAMB, orientation=ORI_V,
+            x1=W - bar_j / 2, y1=jy1, x2=W - bar_j / 2, y2=jy2,
+            bar_width=bar_j, depth=p_jamb['depth'],
+            joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
+            miter_start_deg=45, miter_end_deg=45,
+            profile_code=p_jamb['code']))
 
     # ── 2. INTERNAL DIVIDERS (mullions + transoms) ──────────────────
+    # For a circular frame the ellipse's INNER face (radius reduced by half
+    # the ring's own bar width) is the real boundary — dividers and glass
+    # must stop at the arc instead of running out to the square W x H
+    # bounding box, otherwise they poke out past the round frame.
+    cx, cy = W / 2.0, H / 2.0
+    if shape == 'circular':
+        rx_in = max(W / 2.0 - bar_h / 2.0, 1.0)
+        ry_in = max(H / 2.0 - bar_h / 2.0, 1.0)
+        ellipse_poly = _ellipse_points(cx, cy, rx_in, ry_in, segments=96)
+    else:
+        rx_in = ry_in = None
+        ellipse_poly = None
+
     rects = _norm_panes(panes, W, H)
 
     # collect vertical edges (mullions) and the y-spans of panes owning each
@@ -461,6 +709,12 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             # clamp inside outer frame
             y_lo = max(y_lo, bar_c)
             y_hi = min(y_hi, H - bar_h)
+            if shape == 'circular':
+                span = _ellipse_span_y(x, cx, cy, rx_in, ry_in)
+                if span is None:
+                    continue          # this edge lies entirely outside the ring
+                y_lo = max(y_lo, span[0])
+                y_hi = min(y_hi, span[1])
             if y_hi - y_lo < 1:
                 continue
             A.members.append(Member(
@@ -476,6 +730,12 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             ti += 1
             x_lo = max(x_lo, bar_j)
             x_hi = min(x_hi, W - bar_j)
+            if shape == 'circular':
+                span = _ellipse_span_x(y, cx, cy, rx_in, ry_in)
+                if span is None:
+                    continue
+                x_lo = max(x_lo, span[0])
+                x_hi = min(x_hi, span[1])
             if x_hi - x_lo < 1:
                 continue
             A.members.append(Member(
@@ -558,10 +818,20 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         gh = r['h'] - inset['t'] - inset['b']
         if gw <= 0 or gh <= 0:
             continue
+        clip_path = None
+        if shape == 'circular':
+            # Clip the glass rectangle to the ring's inner-face ellipse so it
+            # never pokes past the round frame at the pane's outer corner.
+            rect_poly = [(gx, gy), (gx + gw, gy), (gx + gw, gy + gh), (gx, gy + gh)]
+            clipped = _clip_polygon_convex(rect_poly, ellipse_poly)
+            if len(clipped) < 3:
+                continue
+            clip_path = clipped
         A.glass.append(GlassCell(
             id=f"G{r['i']+1}", x=gx, y=gy, w=gw, h=gh,
             infill=r['infill'], opening=opening,
-            thickness=(dep * 0.6 if r['infill'] == 'panel' else 24.0)))
+            thickness=(dep * 0.6 if r['infill'] == 'panel' else 24.0),
+            clip_path=clip_path))
 
         # Bead fills the ring between the glass edge and the surface it
         # actually rebates into: for a sash pane that's the sash's OWN
@@ -569,12 +839,17 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         # the frame/mullion, which the sash member itself already fills.
         # Using the full pane-to-glass inset here would duplicate/overlap
         # the sash solid over the whole rebate-engagement zone.
+        # For a circular frame the bead is skipped on the pane's ring-facing
+        # side (a straight bar there would poke past the arc just like the
+        # glass did) — same simplification already used for the outer
+        # frame's internal dividers/glass not being individually chamfered
+        # bead-by-bead; the ring member itself covers that edge visually.
         bi += 1
         if is_sash and r['i'] in sash_rects:
             ax, ay, aw, ah = sash_rects[r['i']]
             _add_bead_ring(A, f'B{bi}', ax, ay, aw, ah, sb, sb, sb, sb,
                            bead_depth, p_bead['code'])
-        else:
+        elif shape != 'circular':
             _add_bead_ring(A, f'B{bi}', r['x'], r['y'], r['w'], r['h'],
                            inset['l'], inset['r'], inset['b'], inset['t'],
                            bead_depth, p_bead['code'])

@@ -347,28 +347,38 @@ def _build_trimesh(window, asm, fmt):
     for glass in asm.glass:
         gx = float(glass.x) + float(glass.w) / 2.0 - cx
         gy = float(glass.y) + float(glass.h) / 2.0 - cy
+        clip = getattr(glass, "clip_path", None)
+        is_panel = glass.infill == "panel"
+        thickness = float(glass.thickness) if is_panel else 8.0
+        z_center = frame_ref * 0.5 if is_panel else glass_z
+        colour = frame_colour if is_panel else list(_GLASS_RGBA)
 
-        if glass.infill == "panel":
+        mesh = None
+        if clip and len(clip) >= 3:
+            # Circular frame: glass was already clipped to the ring's
+            # inner-face ellipse in frame_assembly.py — extrude that exact
+            # polygon (offset into the same cx/cy-centred space as
+            # everything else here) instead of a plain box, so the glass
+            # follows the arc instead of poking out at the corners.
+            ring2d = [(float(px) - cx, float(py) - cy) for px, py in clip]
+            try:
+                mesh = _prism(trimesh, np, [ring2d], thickness)
+                mesh.apply_translation((0.0, 0.0, z_center - thickness / 2.0))
+            except Exception as exc:
+                logger.debug("clipped glass prism failed: %s", exc)
+                mesh = None
+
+        if mesh is None:
             mesh = trimesh.creation.box(
                 extents=(
                     max(float(glass.w), 1.0),
                     max(float(glass.h), 1.0),
-                    float(glass.thickness),
+                    thickness,
                 )
             )
-            mesh.apply_translation((gx, gy, frame_ref * 0.5))
-            mesh.visual.face_colors = frame_colour
-        else:
-            mesh = trimesh.creation.box(
-                extents=(
-                    max(float(glass.w), 1.0),
-                    max(float(glass.h), 1.0),
-                    8.0,
-                )
-            )
-            mesh.apply_translation((gx, gy, glass_z))
-            mesh.visual.face_colors = list(_GLASS_RGBA)
+            mesh.apply_translation((gx, gy, z_center))
 
+        mesh.visual.face_colors = colour
         meshes.append(mesh)
 
     if fmt == "glb":
@@ -545,25 +555,43 @@ def _build_step(window, asm, z_up=False):
     for i, glass in enumerate(asm.glass):
         gx = float(glass.x) + float(glass.w) / 2.0 - cx
         gy = float(glass.y) + float(glass.h) / 2.0 - cy
+        clip = getattr(glass, "clip_path", None)
+        is_panel = glass.infill == "panel"
+        thickness = float(glass.thickness) if is_panel else 8.0
+        z_center = frame_ref * 0.5 if is_panel else glass_z + 4.0
+        colour = (
+            cq.Color(r, g, b) if is_panel
+            else cq.Color(0.55, 0.75, 0.80, 0.35)
+        )
 
-        if glass.infill == "panel":
+        solid = None
+        if clip and len(clip) >= 3:
+            # Circular frame: extrude the exact ellipse-clipped outline
+            # (see the GLB/STL branch above) instead of a plain box, so the
+            # glass follows the arc instead of poking out at the corners.
+            ring2d = [(float(px) - cx, float(py) - cy) for px, py in clip]
+            try:
+                solid = (
+                    cq.Workplane("XY")
+                    .polyline(ring2d)
+                    .close()
+                    .extrude(thickness)
+                    .translate((0.0, 0.0, z_center - thickness / 2.0))
+                )
+            except Exception as exc:
+                logger.debug("clipped glass cq solid failed: %s", exc)
+                solid = None
+
+        if solid is None:
             solid = (
                 cq.Workplane("XY")
                 .box(
-                    float(glass.w),
-                    float(glass.h),
-                    float(glass.thickness),
+                    max(float(glass.w), 1.0),
+                    max(float(glass.h), 1.0),
+                    thickness,
                 )
-                .translate((gx, gy, frame_ref * 0.5))
+                .translate((gx, gy, z_center))
             )
-            colour = cq.Color(r, g, b)
-        else:
-            solid = (
-                cq.Workplane("XY")
-                .box(float(glass.w), float(glass.h), 8.0)
-                .translate((gx, gy, glass_z + 4.0))
-            )
-            colour = cq.Color(0.55, 0.75, 0.80, 0.35)
 
         assembly.add(zup(solid), name=f"glass_{i + 1}", color=colour)
 
