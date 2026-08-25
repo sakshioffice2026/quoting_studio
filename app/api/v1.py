@@ -12,6 +12,7 @@ from ..services.canonical_geometry import (
     assert_legacy_panes_match,
     sync_legacy_panes,
 )
+from ..services.cad_geometry_validator import validate_before_export
 
 api_v1_bp = Blueprint('api_v1', __name__)
 
@@ -229,6 +230,11 @@ def export_dwg(window_id):
             sync_legacy_panes(window, Pane, db)
             db.session.commit()
             panes = window.panes.all()
+
+        bad = _validate_or_400(window, panes)
+        if bad:
+            return bad
+
         dxf    = generate_engineering_dxf(window, panes, tenant_id=current_user.tenant_id)
         if not dxf:
             return jsonify({'error': 'Drawing generation failed'}), 500
@@ -272,6 +278,10 @@ def export_engineering_dxf(window_id):
             db.session.commit()
             panes = window.panes.all()
 
+        bad = _validate_or_400(window, panes)
+        if bad:
+            return bad
+
         data = generate_engineering_dxf(window, panes, tenant_id=current_user.tenant_id)
         if not data:
             return jsonify({'error': 'Engineering drawing generation failed'}), 500
@@ -303,6 +313,10 @@ def export_orthographic_dxf(window_id):
             sync_legacy_panes(window, Pane, db)
             db.session.commit()
             panes = window.panes.all()
+
+        bad = _validate_or_400(window, panes)
+        if bad:
+            return bad
 
         data = generate_orthographic_dxf(window, panes, tenant_id=current_user.tenant_id)
         if not data:
@@ -440,6 +454,48 @@ def _own_window(window_id: int) -> Window:
                                     window_id, current_user.tenant_id)
         abort(404)
     return w
+
+
+def _profile_dict_for_validation(window) -> dict:
+    """Load the active CAD profile as a plain dict with the keys
+    ProfileValidator expects (bar / depth / wall), independent of the
+    ezdxf-specific loader in engineering_dxf.py."""
+    material = getattr(window, 'material', 'Aluminium')
+    prof = {'bar': 58.0, 'depth': 70.0, 'wall': 4.0}
+    try:
+        from ..models.cad_profile import CadProfile
+        p = (CadProfile.query
+             .filter_by(tenant_id=current_user.tenant_id, material=material,
+                        is_active=True, is_default=True).first()
+             or CadProfile.query
+             .filter_by(tenant_id=current_user.tenant_id, is_active=True).first())
+        if p:
+            prof = {
+                'bar':   float(p.bar_width_mm),
+                'depth': float(p.depth_mm),
+                'wall':  float(p.wall_thickness_mm),
+            }
+    except Exception as exc:
+        current_app.logger.warning('profile lookup for validation failed: %s', exc)
+    return prof
+
+
+def _validate_or_400(window, panes):
+    """Run pre-export validation. Returns None if OK, else a
+    (jsonify(...), 400) tuple the caller should return immediately."""
+    profile = _profile_dict_for_validation(window)
+    result = validate_before_export(window, panes, profile)
+    if result.has_errors():
+        current_app.logger.warning(
+            'Export blocked by validation window=%d errors=%d: %s',
+            window.id, result.error_count(),
+            [i.message for i in result.issues if i.severity.value == 'error'])
+        return jsonify(result.to_dict()), 400
+    if result.has_warnings():
+        current_app.logger.info(
+            'Export proceeding with warnings window=%d: %s',
+            window.id, [i.message for i in result.issues if i.severity.value == 'warning'])
+    return None
 
 
 # ================================================================

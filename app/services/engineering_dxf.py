@@ -264,6 +264,26 @@ def _clip_polygon(subject, clip):
     return output
 
 
+def _offset_outline_inward(points, cx, cy, offset):
+    """Approximate inward offset of a closed outline by scaling each point
+    toward the outline centroid (cx, cy) by `offset` mm along its radial
+    direction. Used to build the true glass boundary on curved shapes
+    (circular/arched/gothic) so the glazing-bead margin still follows the
+    curve instead of being subtracted as a flat rectangular inset, which
+    could land entirely inside the outline and leave the glass looking
+    like a plain square instead of round (the QS-70 round-window bug)."""
+    out = []
+    for (px, py) in points:
+        dx, dy = px - cx, py - cy
+        dist = math.hypot(dx, dy)
+        if dist < 1e-6:
+            out.append((px, py))
+            continue
+        scale = max(0.0, (dist - offset) / dist)
+        out.append((cx + dx * scale, cy + dy * scale))
+    return out
+
+
 def _outline_points(shape, W, H, arch_rise, segments=64):
     """Sample the true frame outline (ellipse / arch / gothic head) into a
     dense point list for use as a clip polygon. Returns None for
@@ -414,15 +434,25 @@ def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
 
         gi = bar + 4
         gx, gw = x * W, w * W
-        glx = gx + (gi if x <= 0.001 else mb/2 + 4)
-        gly = gy + (gi if y <= 0.001 else mb/2 + 4)
-        grx = gx + gw - (gi if x + w >= 0.999 else mb/2 + 4)
-        gry = gy + gh - (gi if y + h >= 0.999 else mb/2 + 4)
-        
+
+        # On curved shapes, a flat `gi` inset on outer edges can land the
+        # rectangle's corner entirely inside the outline, so the clip below
+        # has nothing to cut and the glass renders as a square instead of
+        # following the round/arched/gothic curve. Fix: on outer edges of a
+        # curved shape, keep the rectangle flush with the bounding box and
+        # instead clip against the true outline offset inward by `gi`, so
+        # the glass margin always tracks the curve.
+        outer_inset = 0 if clip_outline is not None else gi
+        glx = gx + (outer_inset if x <= 0.001 else mb/2 + 4)
+        gly = gy + (outer_inset if y <= 0.001 else mb/2 + 4)
+        grx = gx + gw - (outer_inset if x + w >= 0.999 else mb/2 + 4)
+        gry = gy + gh - (outer_inset if y + h >= 0.999 else mb/2 + 4)
+
         if grx > glx and gry > gly:
             glass_pts = [(glx, gly), (grx, gly), (grx, gry), (glx, gry)]
             if clip_outline is not None:
-                glass_pts = _clip_polygon(glass_pts, clip_outline)
+                glass_clip = _offset_outline_inward(clip_outline, W / 2.0, H / 2.0, gi)
+                glass_pts = _clip_polygon(glass_pts, glass_clip)
             if len(glass_pts) >= 3:
                 msp.add_lwpolyline(glass_pts, close=True, dxfattribs={'layer': L_GLASS})
             _opener_symbol(msp, glx, gly, grx - glx, gry - gly, opening)
