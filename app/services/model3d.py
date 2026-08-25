@@ -658,3 +658,9 @@ def _rm(path):
             os.remove(path)
     except Exception:
         pass
+
+
+# Backward compatibility alias
+def generate_3d(window, panes, tenant_id=None, fmt="glb", method=None, z_up=False) -> bytes:
+    """Wrapper for generate_3d_assembly for backward compatibility."""
+    return generate_3d_assembly(window, panes, tenant_id=tenant_id, fmt=fmt, z_up=z_up)
