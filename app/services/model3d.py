@@ -115,12 +115,28 @@ def _build_canonical_assembly(geometry, z_up=False):
     return result
 
 
-def _curved_outer_wire(cq, shape, W, H, rise):
-    """Outer frame boundary wire for a non-rectangular shape, centred at the
+def _curved_outer_wire(cq, shape, W, H, rise, inset=0.0):
+    """Frame boundary wire for a non-rectangular shape, centred at the
     origin (x: -W/2..W/2, y: -H/2..H/2, Y-up). Geometry mirrors
     drawing-engine.js `_shapePath()` exactly so the 3D/DXF output matches
     what was drawn in the 2D designer.
+
+    `inset` (mm) shrinks the boundary uniformly on all sides — pass the
+    frame bar width to get the *inner aperture* wire. This is a deliberate
+    direct re-derivation (same formula, smaller W/H/rise) rather than a
+    true geometric offset of the outer curve: offsetting a closed periodic
+    curve (a full ellipse, in particular) is a known-fragile OpenCascade
+    operation — `Wire.offset2D()` can silently return an edge with an
+    undefined/unbounded parameter range instead of a real trimmed curve.
+    Discretizing such an edge later (e.g. in the FreeCAD orthographic-view
+    exporter) then yields OCC's "infinite curve" sentinel (~1e100) instead
+    of real coordinates, producing garbage/blank DXF output. Re-deriving
+    the inner wire from scratch avoids that operation entirely.
     """
+    W = W - 2.0 * inset
+    H = H - 2.0 * inset
+    if inset:
+        rise = max(rise - inset, 1.0)
     half_w = W / 2.0
     spring = H / 2.0 - rise   # spring line: where the curved head meets the jambs
     apex = H / 2.0            # top of the curve (= top edge of the unit)
@@ -172,20 +188,25 @@ def _build_curved_assembly(geometry, z_up=False):
     result = cq.Assembly()
 
     outer_wire = _curved_outer_wire(cq, geometry.shape, W, H, rise).wires().val()
-    inner_wires = outer_wire.offset2D(-bar)
-    inner_wire = inner_wires[0] if isinstance(inner_wires, list) else inner_wires
+    # Built directly (same shape formula, shrunk by `bar`) rather than via
+    # outer_wire.offset2D(-bar) — see the docstring on _curved_outer_wire
+    # for why offsetting a closed periodic curve is avoided here.
+    inner_wire = _curved_outer_wire(cq, geometry.shape, W, H, rise, inset=bar).wires().val()
 
-    outer_face = cq.Face.makeFromWires(outer_wire)
-    inner_face = cq.Face.makeFromWires(inner_wire)
-
-    outer_solid = cq.Solid.extrudeLinear(outer_face, cq.Vector(0, 0, depth))
-    inner_solid = cq.Solid.extrudeLinear(inner_face, cq.Vector(0, 0, depth))
+    # cq.Solid.extrudeLinear's real signature is
+    # extrudeLinear(outerWire: Wire, innerWires: list[Wire], vecNormal, taper=0)
+    # — it takes a Wire (plus a, possibly empty, list of inner wires), not a
+    # Face, and Face has no .extrude() method in this cadquery version
+    # either. Build directly from the wires we already have, matching the
+    # real signature instead of guessing at one.
+    outer_solid = cq.Solid.extrudeLinear(outer_wire, [], cq.Vector(0, 0, depth))
+    inner_solid = cq.Solid.extrudeLinear(inner_wire, [], cq.Vector(0, 0, depth))
     frame_ring = outer_solid.cut(inner_solid)
     result.add(cq.Workplane(obj=frame_ring), name="frame-shaped", color=cq.Color(*frame_color))
 
     # Tall prism of the inner aperture — used to clip anything (panes,
     # mullions, glazing bars) that would otherwise extend past the curve.
-    clip_prism = cq.Solid.extrudeLinear(inner_face, cq.Vector(0, 0, depth + 4)).translate((0, 0, -2))
+    clip_prism = cq.Solid.extrudeLinear(inner_wire, [], cq.Vector(0, 0, depth + 4)).translate((0, 0, -2))
     clip_wp = cq.Workplane(obj=clip_prism)
 
     # Internal dividers only — the outer frame-top/bottom/left/right members

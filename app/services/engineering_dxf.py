@@ -209,9 +209,24 @@ def _title_block(msp, window, prof, ox, oy, sw, th, design):
     _add_text(msp, drw_no, right_x0 + 20, oy + th * 0.3, th * 0.20, L_ANNOT)
 
 
+def _quad_bezier_points(p0, p1, p2, segments=20):
+    """Sample a quadratic Bezier (p0=start, p1=control, p2=end) into a list
+    of (x, y) points, excluding p0 (the caller already has that point from
+    the previous segment). Used to render the gothic head as a smooth
+    polyline since DXF lwpolyline has no native quadratic-bezier segment."""
+    pts = []
+    for i in range(1, segments + 1):
+        t = i / segments
+        mt = 1 - t
+        x = mt * mt * p0[0] + 2 * mt * t * p1[0] + t * t * p2[0]
+        y = mt * mt * p0[1] + 2 * mt * t * p1[1] + t * t * p2[1]
+        pts.append((x, y))
+    return pts
+
+
 def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
     mb = bar * 0.6
-    
+
     if shape == 'arched':
         # Draw arched top window. arch_height (the "spring-to-apex" rise)
         # comes from the Designer's Arch rise field when available, matching
@@ -219,12 +234,12 @@ def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
         # (canonical_geometry.py / model3d.py) exactly instead of guessing.
         arch_radius = W / 2
         arch_height = arch_rise if arch_rise and arch_rise > 0 else min(W * 0.25, 400)
-        
+
         # Bottom rectangle
         msp.add_lwpolyline(
             [(0, 0), (W, 0), (W, H - arch_height), (0, H - arch_height)],
             close=True, dxfattribs={'layer': L_FRAME})
-        
+
         # Arc for top (center at W/2, height H-arch_height)
         cx, cy = W / 2, H - arch_height
         msp.add_arc(
@@ -233,11 +248,55 @@ def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
             start_angle=0,
             end_angle=180,
             dxfattribs={'layer': L_FRAME})
-        
+
         # Left vertical line for arch
         msp.add_lwpolyline([(0, H - arch_height), (0, cy)], dxfattribs={'layer': L_FRAME})
         # Right vertical line for arch
         msp.add_lwpolyline([(W, H - arch_height), (W, cy)], dxfattribs={'layer': L_FRAME})
+
+    elif shape == 'gothic':
+        # Pointed (two-centre) gothic head — mirrors the two quadratic
+        # Beziers used client-side in drawing-engine.js and in the STEP/3D
+        # export (model3d.py::_curved_outer_wire), using the same
+        # spring-line / control-point (0.6 factor) geometry so the DXF
+        # elevation matches the 2D designer and the 3D model instead of
+        # falling back to a plain rectangle.
+        arch_height = arch_rise if arch_rise and arch_rise > 0 else min(W * 0.25, 400)
+        spring_y = H - arch_height          # where the pointed head starts
+        apex = (W / 2.0, H)                 # top of the unit
+        ctrl_y = spring_y + 0.6 * arch_height
+        right_spring = (W, spring_y)
+        right_ctrl = (W, ctrl_y)
+        left_ctrl = (0, ctrl_y)
+        left_spring = (0, spring_y)
+
+        pts = [(0, 0), (W, 0), right_spring]
+        pts += _quad_bezier_points(right_spring, right_ctrl, apex)
+        pts += _quad_bezier_points(apex, left_ctrl, left_spring)
+        msp.add_lwpolyline(pts, close=True, dxfattribs={'layer': L_FRAME})
+
+    elif shape == 'circular':
+        # Full ellipse inscribed in the W x H bounding box (round / porthole
+        # window) — mirrors model3d.py::_curved_outer_wire's "circular"
+        # branch so the DXF elevation matches the 3D STEP export instead of
+        # falling back to a plain rectangle.
+        cx, cy = W / 2.0, H / 2.0
+        half_w, half_h = W / 2.0, H / 2.0
+        if half_w >= half_h:
+            major_axis = (half_w, 0)
+            ratio = (half_h / half_w) if half_w else 1.0
+        else:
+            major_axis = (0, half_h)
+            ratio = (half_w / half_h) if half_h else 1.0
+        msp.add_ellipse(
+            center=(cx, cy),
+            major_axis=major_axis,
+            ratio=ratio,
+            dxfattribs={'layer': L_FRAME})
+        # NOTE: internal mullions/transoms/glazing below are still drawn as
+        # straight full-width/height rectangles (same simplification already
+        # used for 'arched'); they are not clipped to the round aperture.
+
     else:
         # Standard rectangular window
         msp.add_lwpolyline(
