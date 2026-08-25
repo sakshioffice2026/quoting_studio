@@ -207,6 +207,16 @@ def _serialise(window, asm) -> dict:
             # rings[1:] holes; u = across bar (0..bar), v = depth (0..depth).
             'rings':  [[[float(u), float(v)] for u, v in r]
                        for r in getattr(m, '_rings', [])],
+            # Curved member (arched/gothic head, full circular ring):
+            # authoritative polyline — mirrors model3d.py's path handling
+            # (_member_mesh_path / _member_solid_cq_path). Without this the
+            # FreeCAD builder fell back to treating the ring as a single
+            # straight x1/y1->x2/y2 bar, which doesn't reach the real
+            # ellipse touch-points the adjoining mullions/transoms/beads
+            # are trimmed to — the visible gap.
+            'path':   ([[float(px), float(py)] for px, py in m.path]
+                       if getattr(m, 'path', None) else None),
+            'closed': bool(getattr(m, 'closed', False)),
         })
 
     # Glass placement (PWQ): IGU centred at the SASH mid-depth, datum Z=0
@@ -250,7 +260,7 @@ def _build_script(json_path: str, step_path: str,
     need_stl  = 'True' if fmt in ('stl',  'glb') else 'False'
 
     return f'''
-import FreeCAD as App, Part, MeshPart, json, os
+import FreeCAD as App, Part, MeshPart, json, os, math
 V = App.Vector
 
 data   = json.load(open(r"{jpath}", encoding="utf-8"))
@@ -311,19 +321,64 @@ def make_face_rings(rings, plane, bar, depth):
             print("hole face skipped:", e, flush=True)
     return outer, holes
 
+def make_path_solid(rings, bar, depth, path, closed):
+    """Curved member (arched/gothic head, full circular ring): sweep the
+    section along each straight polyline edge of `path` — the FreeCAD
+    mirror of model3d.py::_member_mesh_path / _member_solid_cq_path, so
+    all three exporters (trimesh/cadquery/FreeCAD) agree on placement."""
+    n = len(path)
+    count = n if closed else n - 1
+    solids = []
+    for i in range(count):
+        p0 = path[i]
+        p1 = path[(i + 1) % n] if closed else path[i + 1]
+        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+        seg_len = math.hypot(dx, dy)
+        if seg_len < 0.5:
+            continue
+        theta_deg = math.degrees(math.atan2(dy, dx))
+
+        face, holes = make_face_rings(rings, 'H', bar, depth)
+        seg = face.extrude(V(seg_len, 0.0, 0.0))
+        for hf in holes:
+            try:    seg = seg.cut(hf.extrude(V(seg_len, 0.0, 0.0)))
+            except Exception as e: print("path hole cut failed:", e, flush=True)
+
+        seg = seg.rotate(V(0, 0, 0), V(0, 0, 1), theta_deg)
+
+        theta = math.radians(theta_deg)
+        ux, uy = -math.sin(theta), math.cos(theta)
+        tx = p0[0] - cx - ux * bar / 2.0
+        ty = p0[1] - cy - uy * bar / 2.0
+        seg.translate(V(tx, ty, 0.0))
+        solids.append(seg)
+
+    if not solids:
+        return None
+    result = solids[0]
+    for s in solids[1:]:
+        result = result.fuse(s)
+    return result
+
 # ── build each member ────────────────────────────────────────────────
 for m in data["members"]:
-    bar   = float(m["bar"])
-    depth = float(m["depth"])
-    L     = float(m["length"])
-    rings = m.get("rings") or []
+    bar    = float(m["bar"])
+    depth  = float(m["depth"])
+    L      = float(m["length"])
+    rings  = m.get("rings") or []
+    path   = m.get("path")
+    closed = bool(m.get("closed"))
 
     # World-space position of member (centred coords)
     mx = (m["x1"] + m["x2"]) / 2.0 - cx
     my = (m["y1"] + m["y2"]) / 2.0 - cy
 
     try:
-        if m["orientation"] == "horizontal":
+        if path:
+            solid = make_path_solid(rings, bar, depth, path, closed)
+            if solid is None:
+                raise ValueError("empty path sweep")
+        elif m["orientation"] == "horizontal":
             x_start = min(m["x1"], m["x2"]) - cx
             face, holes = make_face_rings(rings, 'H', bar, depth)
             solid = face.extrude(V(L, 0.0, 0.0))
@@ -353,7 +408,13 @@ for m in data["members"]:
         # Bulletproof fallback: a plain box the size of the member's bounding
         # section, positioned like the real member. Guarantees a non-blank STEP.
         try:
-            if m["orientation"] == "horizontal":
+            if path:
+                xs = [p[0] for p in path]; ys = [p[1] for p in path]
+                bx0, by0 = min(xs) - cx, min(ys) - cy
+                bw = max(max(xs) - min(xs), 1.0)
+                bh = max(max(ys) - min(ys), 1.0)
+                box = Part.makeBox(bw, bh, depth, V(bx0, by0, 0.0))
+            elif m["orientation"] == "horizontal":
                 x_start = min(m["x1"], m["x2"]) - cx
                 box = Part.makeBox(L, bar, depth,
                                    V(x_start, my - bar/2.0, 0.0))
@@ -365,9 +426,6 @@ for m in data["members"]:
             print(f"  {{m['id']}} BOX-FALLBACK ({{e}})", flush=True)
         except Exception as e2:
             print(f"  {{m['id']}} FAILED entirely: {{e2}}", flush=True)
-
-    except Exception as e:
-        print(f"  {{m['id']}} FAILED: {{e}}", flush=True)
 
 # ── glass / panel boxes ──────────────────────────────────────────────
 glass_z = float(data.get("glass_z", dep_max * 0.5))

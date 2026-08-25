@@ -330,7 +330,12 @@ def export_3d(window_id, fmt):
     method = request.args.get('method', 'auto')
     if method not in ('auto', 'assembly', 'freecad', 'profile', 'extrude', 'sweep'):
         method = 'auto'
-    z_up = request.args.get('axis', 'y').lower() == 'zup'
+    # GLB stays Y-up (glTF spec, and the in-app three.js viewer already
+    # assumes this — it calls this endpoint with no axis param). STEP
+    # defaults to Z-up instead, since FreeCAD/CAD tools are Z-up and a
+    # Y-up STEP file opens "lying flat" there. ?axis= overrides either way.
+    default_axis = 'zup' if fmt == 'step' else 'y'
+    z_up = request.args.get('axis', default_axis).lower() == 'zup'
     try:
         window = _own_window(window_id)
         panes  = window.panes.all()
