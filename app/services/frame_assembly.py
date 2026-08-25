@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ── roles ────────────────────────────────────────────────────────────────
 ROLE_HEAD         = 'head'          # top outer-frame member
 ROLE_CILL         = 'cill'          # bottom outer-frame member
-ROLE_JAMB         = 'jamb'          # left / right outer-frame members
+ROLE_JAMB         = 'jamb'          # lFeft / right outer-frame members
 ROLE_MULLION      = 'mullion'       # internal vertical divider
 ROLE_TRANSOM      = 'transom'       # internal horizontal divider
 ROLE_SASH         = 'sash'          # opening-leaf sub-frame member
