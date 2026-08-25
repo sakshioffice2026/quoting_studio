@@ -986,6 +986,7 @@ function setShape(s){
   document.getElementById('shp-'+s).classList.add('on');
   document.getElementById('riseRow').style.display=(s==='arched'||s==='gothic')?'block':'none';
   dc._pushHistory();dc.fitView();scheduleSave();fetchPricing();
+  if(typeof qsBuildProfs==='function') qsBuildProfs();
 }
 function setArchRise(){ model.archRise=+document.getElementById('archR').value||400;
   dc.render();scheduleSave(); }
@@ -994,6 +995,7 @@ function setUnitType(){
   document.getElementById('doorCfg').style.display=model.unitType==='door'?'block':'none';
   applyUnitTabs();
   dc.render();scheduleSave();fetchPricing();
+  if(typeof qsBuildProfs==='function') qsBuildProfs();
 }
 /* Show only the config tabs that make sense for the current unit type.
    Doors: hide Easy Draw (Georgian bar drawing is window-centric). */
@@ -1468,14 +1470,8 @@ function qsBuildProfs(){
     return;
   }
 
-  // Group by role (role=null goes into "Unassigned")
-  const groups = {};
-  profiles.forEach(p=>{
-    const key = p.role || '__none__';
-    (groups[key]||(groups[key]=[])).push(p);
-  });
-
   const unitType = (window.model && window.model.unitType) || 'window';
+  const curShape = (window.model && window.model.shape) || 'rectangle';
   const DOOR_ONLY   = ['threshold','door_leaf','meeting_stile'];
   const WINDOW_ONLY = ['cill'];
   const hide = unitType === 'door' ? WINDOW_ONLY : DOOR_ONLY;
@@ -1486,9 +1482,21 @@ function qsBuildProfs(){
                     : [];
   const hideAll = Array.from(new Set([...hide, ...filterHide]));
 
+  // Shape filter: a profile with a non-empty compatible_shapes list only
+  // shows when the current window/door shape is in that list. Profiles
+  // with no restriction (empty list) show for every shape.
+  const shapeOk = p => !p.compatible_shapes || !p.compatible_shapes.length
+                        || p.compatible_shapes.includes(curShape);
+  const shapeFilteredProfiles = profiles.filter(shapeOk);
+
   const roleOrder = ['head','cill','jamb','outer_frame','mullion','transom','sash','glazing_bead','threshold','coupler','__none__']
     .filter(k => !hideAll.includes(k));
-  const sorted = roleOrder.filter(k=>groups[k]).concat(Object.keys(groups).filter(k=>!roleOrder.includes(k) && !hideAll.includes(k)));
+  const groups2 = {};
+  shapeFilteredProfiles.forEach(p=>{
+    const key = p.role || '__none__';
+    (groups2[key]||(groups2[key]=[])).push(p);
+  });
+  const sorted = roleOrder.filter(k=>groups2[k]).concat(Object.keys(groups2).filter(k=>!roleOrder.includes(k) && !hideAll.includes(k)));
 
   let html = '<div class="sec-head">Profile System</div>';
   // ── Profile System picker — pins a full named DXF-profile set to this window ──
@@ -1537,7 +1545,7 @@ function qsBuildProfs(){
     html += `<div style="font-size:10px;font-weight:700;color:${col};letter-spacing:.06em;`
            +`text-transform:uppercase;margin:14px 0 5px;padding-bottom:3px;border-bottom:1px solid var(--line);">`
            +label+'</div>';
-    groups[role].forEach(p=>{
+    groups2[role].forEach(p=>{
       const star = p.is_role_default
         ? `<span title="Role default" style="color:${col};font-size:12px;">★</span>` : '';
       const dxf  = p.has_geometry

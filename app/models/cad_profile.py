@@ -32,6 +32,12 @@ class CadProfile(db.Model):
     # When true, this profile is the default for its role in the assembly.
     is_role_default  = db.Column(db.Boolean, default=False)
 
+    # Which frame shapes this profile can be used on — JSON array of
+    # 'rectangle' | 'arched' | 'gothic' | 'circular'. NULL/empty means
+    # "compatible with every shape" (the default — most profiles, e.g. a
+    # generic glazing bead, aren't shape-specific).
+    compatible_shapes = db.Column(db.Text, nullable=True)
+
     # Profile dimensions (mm)
     bar_width_mm     = db.Column(db.Float, nullable=False, default=40.0)
     wall_thickness_mm= db.Column(db.Float, nullable=False, default=4.0)
@@ -59,6 +65,18 @@ class CadProfile(db.Model):
     def has_geometry(self):
         return bool(self.geometry_json)
 
+    @property
+    def compatible_shapes_list(self) -> list:
+        """Parsed shape list. Empty list means 'all shapes'."""
+        import json
+        if not self.compatible_shapes:
+            return []
+        try:
+            val = json.loads(self.compatible_shapes)
+            return val if isinstance(val, list) else []
+        except (ValueError, TypeError):
+            return []
+
     def to_dict(self) -> dict:
         return {
             'id':            self.id,
@@ -67,6 +85,7 @@ class CadProfile(db.Model):
             'category':      self.category,
             'role':          self.role,
             'is_role_default': self.is_role_default,
+            'compatible_shapes': self.compatible_shapes_list,
             'drawing_ref':   self.drawing_ref,
             'material':      self.material,
             'bar_width_mm':  self.bar_width_mm,

@@ -1,353 +1,660 @@
-"""3D exporters.
+"""
+app/services/model3d_assembly.py
+VERSION: 3.1 - deterministic frame alignment
 
-Primary path: the full member-graph assembly (frame_assembly + model3d_assembly),
-which includes head/cill/jamb/mullion/transom/sash/glazing-bead members with
-real profile sections and cill horn extensions — i.e. all components.
+Coordinate contract:
+    local section = (u, v), extrusion = w
+    horizontal: (u, v, w) -> (w, u, v)
+    vertical:   (u, v, w) -> (-u, w, v)
 
-Falls back to the simplified canonical-geometry box assembly only if the
-full assembly build fails for some reason.
+All placement is performed from deterministic member anchors. No transformed
+bounding-box centre is used to decide a member centreline.
 """
 from __future__ import annotations
 
-import logging
 import os
+import logging
 import tempfile
-
-from .canonical_geometry import build_geometry
 
 logger = logging.getLogger(__name__)
 
-_GLASS_THICKNESS = 24.0
+_GLASS_RGBA = (140, 190, 205, 110)
+_MIN_DEPTH = 20.0
+
+# Pure rotations; the vertical mapping preserves handedness.
+_PERM_H = (
+    (0.0, 0.0, 1.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0, 0.0),
+    (0.0, 0.0, 0.0, 1.0),
+)
+_PERM_V = (
+    (-1.0, 0.0, 0.0, 0.0),
+    ( 0.0, 0.0, 1.0, 0.0),
+    ( 0.0, 1.0, 0.0, 0.0),
+    ( 0.0, 0.0, 0.0, 1.0),
+)
 
 
-def generate_3d(window, panes, tenant_id=None, fmt="step", method="auto", z_up=False) -> bytes:
+def generate_3d_assembly(window, panes, tenant_id=None, fmt="glb", z_up=False) -> bytes:
     fmt = fmt.lower()
-    if fmt not in {"step", "stl", "glb"}:
-        raise ValueError("fmt must be step, stl or glb")
+    from .frame_assembly import build_members, resolve_profiles
 
-    geometry = build_geometry(window, panes, tenant_id=tenant_id)
+    profiles = resolve_profiles(
+        tenant_id,
+        getattr(window, "material", "Aluminium"),
+        window=window,
+    )
+    _apply_window_overrides(profiles, window, tenant_id)
 
-    # The full member-graph assembly (frame_assembly.py) only knows how to
-    # build straight horizontal/vertical members, so it cannot represent an
-    # arched/gothic/circular frame. Route curved shapes straight to the
-    # canonical builder below, which handles the curve properly.
-    if not geometry.is_curved:
-        try:
-            from .model3d_assembly import generate_3d_assembly
-            return generate_3d_assembly(window, panes, tenant_id=tenant_id, fmt=fmt, z_up=z_up)
-        except Exception as exc:
-            logger.warning("full member-graph 3D assembly failed (%s); falling back to canonical box builder", exc)
+    asm = build_members(window, panes, profiles)
+    if not asm.members:
+        raise RuntimeError("member graph: no members")
 
-    assembly = _build_canonical_assembly(geometry, z_up=z_up)
+    _normalise_assembly_geometry(window, asm)
+    real = prepare_sections(asm, profiles)
+    logger.info(
+        "3D assembly: %d/%d members have real DXF sections",
+        real, len(asm.members),
+    )
 
     if fmt == "step":
-        return _export_cadquery(assembly, "step")
+        return _build_step(window, asm, z_up=z_up)
+    return _build_trimesh(window, asm, fmt)
+
+
+def _normalise_assembly_geometry(window, asm):
+    """
+    Last geometry guard before export.
+
+    Frame graph coordinates remain authoritative. This function only corrects
+    centreline/boundary invariants and extends an explicit cill symmetrically
+    when horn metadata is available.
+    """
+    W = float(window.width_mm)
+
+    vertical = [
+        m for m in asm.members
+        if abs(float(m.x2) - float(m.x1)) < 0.5
+    ]
+
+    # Centre any mullion exactly on the two-pane frame centre when the member
+    # graph contains a single central mullion.
+    mullions = [m for m in vertical if getattr(m, "role", "") == "mullion"]
+    if len(mullions) == 1:
+        m = mullions[0]
+        m.x1 = m.x2 = W / 2.0
+
+    # Cill horns: use explicit metadata if supplied by the geometry/profile
+    # pipeline. Never invent an arbitrary horn length.
+    for m in asm.members:
+        if getattr(m, "role", "") != "cill":
+            continue
+        horn = (
+            getattr(m, "horn_length", None)
+            or getattr(m, "_horn_length", None)
+            or getattr(window, "horn_length_mm", None)
+            or 0.0
+        )
+        try:
+            horn = max(0.0, float(horn))
+        except (TypeError, ValueError):
+            horn = 0.0
+        if horn > 0:
+            left = min(float(m.x1), float(m.x2))
+            right = max(float(m.x1), float(m.x2))
+            m.x1 = left - horn
+            m.x2 = right + horn
+            try:
+                m.length = abs(m.x2 - m.x1)
+            except Exception:
+                pass
+
+
+def prepare_sections(asm, profiles) -> int:
+    real = 0
+    cache = {}
+
+    for m in asm.members:
+        prof = profiles.get(m.role)
+        loops = prof.get("loops")
+        key = (
+            f"{m.profile_code or m.role}:"
+            f"{float(m.bar_width):.4f}x{float(m.depth):.4f}:"
+            f"{'L' if loops else 'R'}"
+        )
+
+        if key not in cache:
+            rings, sec_bar, sec_dep = _section_rings(
+                loops, float(m.bar_width), float(m.depth)
+            )
+            if 0 < sec_dep < _MIN_DEPTH:
+                scale = _MIN_DEPTH / sec_dep
+                rings = [[(u, v * scale) for u, v in ring] for ring in rings]
+                sec_dep = _MIN_DEPTH
+            cache[key] = (rings, sec_bar, sec_dep)
+
+        m._rings, m._sec_bar, m._sec_dep = cache[key]
+        m._has_dxf = bool(loops)
+        m.depth = m._sec_dep
+        if loops:
+            real += 1
+
+    return real
+
+
+def _apply_window_overrides(profiles, window, tenant_id):
+    import json
+
     try:
-        return _export_cadquery(assembly, fmt)
+        design = json.loads(getattr(window, "design_json", None) or "{}")
+        overrides = design.get("profileRoles", {})
+        if not overrides or not tenant_id:
+            return
+
+        from ..models.cad_profile import CadProfile
+
+        for role, profile_code in overrides.items():
+            if not profile_code:
+                continue
+
+            profile = CadProfile.query.filter_by(
+                tenant_id=tenant_id,
+                code=profile_code,
+                is_active=True,
+            ).first()
+            if not profile:
+                continue
+
+            loops = None
+            if profile.geometry_json:
+                try:
+                    loops = json.loads(profile.geometry_json)
+                except Exception:
+                    loops = None
+
+            profiles.by_role[role] = {
+                "code": profile.code,
+                "bar": float(profile.bar_width_mm),
+                "depth": float(profile.depth_mm),
+                "glass_rebate": float(profile.glass_rebate_mm or 20.0),
+                "loops": loops,
+            }
     except Exception as exc:
-        logger.info("cadquery %s export unavailable (%s); using mesh serializer", fmt, exc)
-        return _export_trimesh(geometry, fmt, z_up=z_up)
+        logger.debug("_apply_window_overrides skipped: %s", exc)
 
 
-def _build_canonical_assembly(geometry, z_up=False):
-    """Build all solids from the canonical member/pane list."""
-    import cadquery as cq
+def _ring_area(ring):
+    total = 0.0
+    for i, (x1, y1) in enumerate(ring):
+        x2, y2 = ring[(i + 1) % len(ring)]
+        total += x1 * y2 - x2 * y1
+    return abs(total) * 0.5
 
-    W, H = geometry.width_mm, geometry.height_mm
-    bar, depth = geometry.profile.bar, geometry.profile.depth
-    frame_color = _frame_rgb(getattr(geometry, "frame_colour_hex", None))
-    result = cq.Assembly()
 
-    if geometry.is_curved:
-        return _build_curved_assembly(geometry, z_up=z_up)
+def _section_rings(loops, bar, depth):
+    rect = (
+        [[(0.0, 0.0), (bar, 0.0), (bar, depth), (0.0, depth)]],
+        float(bar),
+        float(depth),
+    )
+    if not loops:
+        return rect
 
-    for member in geometry.members:
-        if member.orientation == "horizontal":
-            length = member.length * W
-            thickness = bar
-            solid = cq.Workplane("XY").box(length, thickness, depth)
-            solid = solid.translate((
-                (member.x + member.length / 2) * W - W / 2,
-                member.y * H - H / 2,
-                depth / 2,
+    rings = []
+    for loop in loops:
+        points = [(float(x), float(y)) for x, y in loop]
+        if len(points) >= 2 and points[0] == points[-1]:
+            points.pop()
+        if len(points) >= 3:
+            rings.append(points)
+
+    if not rings:
+        return rect
+
+    rings.sort(key=_ring_area, reverse=True)
+
+    xs = [x for x, _ in rings[0]]
+    ys = [y for _, y in rings[0]]
+    w = max(xs) - min(xs)
+    h = max(ys) - min(ys)
+
+    rotate = (
+        abs(w - bar) + abs(h - depth)
+        > abs(h - bar) + abs(w - depth)
+    )
+
+    if rotate:
+        rings = [[(y, x) for x, y in ring] for ring in rings]
+
+    xs = [x for ring in rings for x, _ in ring]
+    ys = [y for ring in rings for _, y in ring]
+    minx, maxx = min(xs), max(xs)
+    miny, maxy = min(ys), max(ys)
+
+    rings = [
+        [(x - minx, y - miny) for x, y in ring]
+        for ring in rings
+    ]
+    return rings, float(maxx - minx), float(maxy - miny)
+
+
+def _prism(trimesh, np, rings, length):
+    try:
+        import mapbox_earcut as earcut
+    except Exception:
+        earcut = None
+
+    if earcut is not None:
+        try:
+            valid = [
+                np.asarray(ring, dtype=np.float64)
+                for ring in rings if len(ring) >= 3
+            ]
+            verts2d = np.concatenate(valid, axis=0)
+            ends = np.cumsum([len(r) for r in valid]).astype(np.uint32)
+            triangles = earcut.triangulate_float64(
+                verts2d, ends
+            ).reshape(-1, 3)
+
+            n = len(verts2d)
+            vertices = np.vstack((
+                np.column_stack((verts2d, np.zeros(n))),
+                np.column_stack((verts2d, np.full(n, length))),
             ))
-        else:
-            length = member.length * H
-            thickness = bar
-            solid = cq.Workplane("XY").box(thickness, length, depth)
-            solid = solid.translate((
-                member.x * W - W / 2,
-                (member.y + member.length / 2) * H - H / 2,
-                depth / 2,
-            ))
-        result.add(solid, name=member.id, color=cq.Color(*frame_color))
 
-    for index, pane in enumerate(geometry.panes, 1):
-        x0 = pane.x * W + bar
-        y0 = pane.y_bottom * H + bar
-        x1 = (pane.x + pane.w) * W - bar
-        y1 = (pane.y_bottom + pane.h) * H - bar
-        if x1 <= x0 or y1 <= y0:
-            continue
-        infill = cq.Workplane("XY").box(x1 - x0, y1 - y0, _GLASS_THICKNESS)
-        infill = infill.translate(((x0 + x1) / 2 - W / 2,
-                                   (y0 + y1) / 2 - H / 2,
-                                   depth / 2))
-        if pane.infill == "panel":
-            result.add(infill, name=f"panel-{index}", color=cq.Color(*frame_color))
-        else:
-            result.add(infill, name=f"glass-{index}", color=cq.Color(.55, .75, .80, .35))
+            faces = []
+            for tri in triangles:
+                faces.append((tri[0], tri[2], tri[1]))
+                faces.append((tri[0] + n, tri[1] + n, tri[2] + n))
 
-        # Glazing bars are derived from the same pane rectangles in design_json.
-        for bar_index, glazing_bar in enumerate(pane.glazing_bars):
-            thickness = float(glazing_bar.get("thickness", 18))
-            pos = float(glazing_bar.get("pos", .5))
-            if glazing_bar.get("type") == "vertical":
-                gx = x0 + (x1 - x0) * pos
-                bar_solid = cq.Workplane("XY").box(thickness, y1 - y0, depth * .7)
-                bar_solid = bar_solid.translate((gx - W / 2, (y0 + y1) / 2 - H / 2, depth * .5))
-            else:
-                gy = y0 + (y1 - y0) * pos
-                bar_solid = cq.Workplane("XY").box(x1 - x0, thickness, depth * .7)
-                bar_solid = bar_solid.translate(((x0 + x1) / 2 - W / 2, gy - H / 2, depth * .5))
-            result.add(bar_solid, name=f"glazing-bar-{index}-{bar_index}", color=cq.Color(*frame_color))
+            base = 0
+            for ring in valid:
+                count = len(ring)
+                for i in range(count):
+                    a = base + i
+                    b = base + (i + 1) % count
+                    faces.append((a, b, b + n))
+                    faces.append((a, b + n, a + n))
+                base += count
 
-    return result
+            return trimesh.Trimesh(
+                vertices=vertices,
+                faces=np.asarray(faces),
+                process=True,
+            )
+        except Exception as exc:
+            logger.debug("earcut prism failed: %s", exc)
+
+    xs = [x for ring in rings for x, _ in ring]
+    ys = [y for ring in rings for _, y in ring]
+    bx, by = max(xs) - min(xs), max(ys) - min(ys)
+    solid = trimesh.creation.box(extents=(bx, by, length))
+    solid.apply_translation((
+        min(xs) + bx / 2.0,
+        min(ys) + by / 2.0,
+        length / 2.0,
+    ))
+    return solid
 
 
-def _curved_outer_wire(cq, shape, W, H, rise, inset=0.0):
-    """Frame boundary wire for a non-rectangular shape, centred at the
-    origin (x: -W/2..W/2, y: -H/2..H/2, Y-up). Geometry mirrors
-    drawing-engine.js `_shapePath()` exactly so the 3D/DXF output matches
-    what was drawn in the 2D designer.
-
-    `inset` (mm) shrinks the boundary uniformly on all sides — pass the
-    frame bar width to get the *inner aperture* wire. This is a deliberate
-    direct re-derivation (same formula, smaller W/H/rise) rather than a
-    true geometric offset of the outer curve: offsetting a closed periodic
-    curve (a full ellipse, in particular) is a known-fragile OpenCascade
-    operation — `Wire.offset2D()` can silently return an edge with an
-    undefined/unbounded parameter range instead of a real trimmed curve.
-    Discretizing such an edge later (e.g. in the FreeCAD orthographic-view
-    exporter) then yields OCC's "infinite curve" sentinel (~1e100) instead
-    of real coordinates, producing garbage/blank DXF output. Re-deriving
-    the inner wire from scratch avoids that operation entirely.
-    """
-    W = W - 2.0 * inset
-    H = H - 2.0 * inset
-    if inset:
-        rise = max(rise - inset, 1.0)
-    half_w = W / 2.0
-    spring = H / 2.0 - rise   # spring line: where the curved head meets the jambs
-    apex = H / 2.0            # top of the curve (= top edge of the unit)
-
-    if shape == "circular":
-        # Full ellipse inscribed in the W x H bounding box (round/porthole window).
-        wp = (
-            cq.Workplane("XY")
-            .moveTo(half_w, 0)
-            .ellipseArc(half_w, H / 2.0, angle1=0, angle2=180, sense=1, startAtCurrent=True)
-            .ellipseArc(half_w, H / 2.0, angle1=180, angle2=360, sense=1, startAtCurrent=True)
-        )
-        return wp.close()
-
-    wp = cq.Workplane("XY").moveTo(-half_w, -H / 2.0).lineTo(half_w, -H / 2.0)
-
-    if shape == "gothic":
-        # Two-point pointed head — matches the two quadratic Beziers used
-        # client-side (handle factor 0.6 between spring line and apex).
-        ctrl_y = apex * 0.6 + spring * 0.4
-        wp = (
-            wp.lineTo(half_w, spring)
-              .bezier([(half_w, spring), (half_w, ctrl_y), (0.0, apex)])
-              .bezier([(0.0, apex), (-half_w, ctrl_y), (-half_w, spring)])
-        )
-    else:
-        # 'arched' (default for any other/unknown curved value): segmental /
-        # semicircular dome from the spring line up to the apex.
-        wp = (
-            wp.lineTo(half_w, spring)
-              .threePointArc((0.0, apex), (-half_w, spring))
-        )
-
-    return wp.close()
-
-
-def _build_curved_assembly(geometry, z_up=False):
-    """Arched / gothic / circular frame: build the outer profile as a real
-    curve, offset it inward for the frame aperture, extrude a ring solid for
-    the frame, and boolean-clip every pane / internal mullion / glazing bar
-    against that aperture so nothing pokes outside the curved boundary.
-    """
-    import cadquery as cq
-
-    W, H = geometry.width_mm, geometry.height_mm
-    bar, depth = geometry.profile.bar, geometry.profile.depth
-    rise = geometry.arch_rise_mm
-    frame_color = _frame_rgb(getattr(geometry, "frame_colour_hex", None))
-    result = cq.Assembly()
-
-    outer_wire = _curved_outer_wire(cq, geometry.shape, W, H, rise).wires().val()
-    # Built directly (same shape formula, shrunk by `bar`) rather than via
-    # outer_wire.offset2D(-bar) — see the docstring on _curved_outer_wire
-    # for why offsetting a closed periodic curve is avoided here.
-    inner_wire = _curved_outer_wire(cq, geometry.shape, W, H, rise, inset=bar).wires().val()
-
-    # cq.Solid.extrudeLinear's real signature is
-    # extrudeLinear(outerWire: Wire, innerWires: list[Wire], vecNormal, taper=0)
-    # — it takes a Wire (plus a, possibly empty, list of inner wires), not a
-    # Face, and Face has no .extrude() method in this cadquery version
-    # either. Build directly from the wires we already have, matching the
-    # real signature instead of guessing at one.
-    outer_solid = cq.Solid.extrudeLinear(outer_wire, [], cq.Vector(0, 0, depth))
-    inner_solid = cq.Solid.extrudeLinear(inner_wire, [], cq.Vector(0, 0, depth))
-    frame_ring = outer_solid.cut(inner_solid)
-    result.add(cq.Workplane(obj=frame_ring), name="frame-shaped", color=cq.Color(*frame_color))
-
-    # Tall prism of the inner aperture — used to clip anything (panes,
-    # mullions, glazing bars) that would otherwise extend past the curve.
-    clip_prism = cq.Solid.extrudeLinear(inner_wire, [], cq.Vector(0, 0, depth + 4)).translate((0, 0, -2))
-    clip_wp = cq.Workplane(obj=clip_prism)
-
-    # Internal dividers only — the outer frame-top/bottom/left/right members
-    # are replaced by the ring above.
-    for member in geometry.members:
-        if member.id.startswith("frame-"):
-            continue
-        if member.orientation == "horizontal":
-            length = member.length * W
-            thickness = bar
-            solid = cq.Workplane("XY").box(length, thickness, depth)
-            solid = solid.translate((
-                (member.x + member.length / 2) * W - W / 2,
-                member.y * H - H / 2,
-                depth / 2,
-            ))
-        else:
-            length = member.length * H
-            thickness = bar
-            solid = cq.Workplane("XY").box(thickness, length, depth)
-            solid = solid.translate((
-                member.x * W - W / 2,
-                (member.y + member.length / 2) * H - H / 2,
-                depth / 2,
-            ))
-        clipped = solid.intersect(clip_wp)
-        if clipped.val() is not None:
-            result.add(clipped, name=member.id, color=cq.Color(*frame_color))
-
-    for index, pane in enumerate(geometry.panes, 1):
-        x0 = pane.x * W + bar
-        y0 = pane.y_bottom * H + bar
-        x1 = (pane.x + pane.w) * W - bar
-        y1 = (pane.y_bottom + pane.h) * H - bar
-        if x1 <= x0 or y1 <= y0:
-            continue
-        infill = cq.Workplane("XY").box(x1 - x0, y1 - y0, _GLASS_THICKNESS)
-        infill = infill.translate(((x0 + x1) / 2 - W / 2,
-                                   (y0 + y1) / 2 - H / 2,
-                                   depth / 2))
-        infill = infill.intersect(clip_wp)
-        if infill.val() is None:
-            continue
-        if pane.infill == "panel":
-            result.add(infill, name=f"panel-{index}", color=cq.Color(*frame_color))
-        else:
-            result.add(infill, name=f"glass-{index}", color=cq.Color(.55, .75, .80, .35))
-
-        for bar_index, glazing_bar in enumerate(pane.glazing_bars):
-            thickness = float(glazing_bar.get("thickness", 18))
-            pos = float(glazing_bar.get("pos", .5))
-            if glazing_bar.get("type") == "vertical":
-                gx = x0 + (x1 - x0) * pos
-                bar_solid = cq.Workplane("XY").box(thickness, y1 - y0, depth * .7)
-                bar_solid = bar_solid.translate((gx - W / 2, (y0 + y1) / 2 - H / 2, depth * .5))
-            else:
-                gy = y0 + (y1 - y0) * pos
-                bar_solid = cq.Workplane("XY").box(x1 - x0, thickness, depth * .7)
-                bar_solid = bar_solid.translate(((x0 + x1) / 2 - W / 2, gy - H / 2, depth * .5))
-            bar_solid = bar_solid.intersect(clip_wp)
-            if bar_solid.val() is not None:
-                result.add(bar_solid, name=f"glazing-bar-{index}-{bar_index}", color=cq.Color(*frame_color))
-
-    return result
-
-
-def _export_cadquery(assembly, fmt):
-    import cadquery as cq
-
-    export_type = {"step": "STEP", "stl": "STL", "glb": "GLTF"}[fmt]
-
-    with tempfile.TemporaryDirectory() as td:
-        path = os.path.join(td, f"model.{fmt}")
-
-        exporters = getattr(cq, "exporters", None)
-        export_fn = getattr(exporters, "exportAssembly", None) if exporters else None
-
-        if callable(export_fn):
-            export_fn(assembly, path, exportType=export_type)
-        elif hasattr(assembly, "save"):
-            assembly.save(path, exportType=export_type)
-        else:
-            compound = assembly.toCompound()
-            cq.exporters.export(compound, path, exportType=export_type)
-
-        with open(path, "rb") as fh:
-            return fh.read()
-
-
-def _export_trimesh(geometry, fmt, z_up=False):
+def _build_trimesh(window, asm, fmt):
+    import numpy as np
     import trimesh
-    meshes = []
-    W, H = geometry.width_mm, geometry.height_mm
-    bar, depth = geometry.profile.bar, geometry.profile.depth
 
-    def box(extents, center):
-        mesh = trimesh.creation.box(extents=extents)
-        mesh.apply_translation(center)
-        return mesh
+    W = float(window.width_mm)
+    H = float(window.height_mm)
+    cx, cy = W / 2.0, H / 2.0
 
-    for member in geometry.members:
-        if member.orientation == "horizontal":
-            meshes.append(box((member.length * W, bar, depth),
-                              ((member.x + member.length / 2) * W - W / 2,
-                               member.y * H - H / 2, depth / 2)))
+    fr, fg, fb = _frame_rgb(
+        getattr(window, "frame_colour_hex", "#6a6a6c")
+    )
+    frame_colour = [
+        int(fr * 255), int(fg * 255), int(fb * 255), 255
+    ]
+
+    frame_meshes = []
+    for m in asm.members:
+        mesh = _member_mesh(
+            trimesh, np, m,
+            m._rings, m._sec_bar, m._sec_dep,
+            cx, cy,
+        )
+        if mesh is not None and len(mesh.faces):
+            frame_meshes.append(mesh)
+
+    if not frame_meshes:
+        raise RuntimeError("no frame meshes built")
+
+    frame = trimesh.util.concatenate(frame_meshes)
+    frame.visual.face_colors = frame_colour
+    meshes = [frame]
+
+    frame_ref = max(
+        (
+            float(m.depth)
+            for m in asm.members
+            if m.role in (
+                "head", "jamb", "mullion", "transom",
+                "sash", "outer_frame",
+            )
+        ),
+        default=_MIN_DEPTH,
+    )
+    glass_z = max(frame_ref - 24.0, frame_ref * 0.35)
+
+    for glass in asm.glass:
+        gx = float(glass.x) + float(glass.w) / 2.0 - cx
+        gy = float(glass.y) + float(glass.h) / 2.0 - cy
+
+        if glass.infill == "panel":
+            mesh = trimesh.creation.box(
+                extents=(
+                    max(float(glass.w), 1.0),
+                    max(float(glass.h), 1.0),
+                    float(glass.thickness),
+                )
+            )
+            mesh.apply_translation((gx, gy, frame_ref * 0.5))
+            mesh.visual.face_colors = frame_colour
         else:
-            meshes.append(box((bar, member.length * H, depth),
-                              (member.x * W - W / 2,
-                               (member.y + member.length / 2) * H - H / 2,
-                               depth / 2)))
+            mesh = trimesh.creation.box(
+                extents=(
+                    max(float(glass.w), 1.0),
+                    max(float(glass.h), 1.0),
+                    8.0,
+                )
+            )
+            mesh.apply_translation((gx, gy, glass_z))
+            mesh.visual.face_colors = list(_GLASS_RGBA)
 
-    for pane in geometry.panes:
-        x0 = pane.x * W + bar
-        y0 = pane.y_bottom * H + bar
-        x1 = (pane.x + pane.w) * W - bar
-        y1 = (pane.y_bottom + pane.h) * H - bar
-        if x1 > x0 and y1 > y0:
-            meshes.append(box((x1 - x0, y1 - y0, _GLASS_THICKNESS),
-                              ((x0 + x1) / 2 - W / 2,
-                               (y0 + y1) / 2 - H / 2, depth / 2)))
+        meshes.append(mesh)
 
-    scene = trimesh.Scene(meshes)
-    if z_up:
-        import numpy as np
-        rot = trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0])
-        scene.apply_transform(rot)
+    if fmt == "glb":
+        return trimesh.Scene(meshes).export(file_type="glb")
+    if fmt == "stl":
+        return trimesh.util.concatenate(meshes).export(file_type="stl")
+    raise ValueError(f"unsupported fmt: {fmt}")
 
-    with tempfile.TemporaryDirectory() as td:
-        path = os.path.join(td, f"model.{fmt}")
-        if fmt == "stl":
-            combined = trimesh.util.concatenate(meshes)
-            combined.export(path, file_type="stl")
+
+def _member_mesh(trimesh, np, m, rings, sec_bar, sec_dep, cx, cy):
+    """
+    Deterministic placement.
+
+    Horizontal:
+        member boundary starts at min(x1, x2)
+        member centreline is y1
+        profile u=0 starts at centreline-sec_bar/2
+
+    Vertical:
+        member centreline is x1
+        member boundary starts at min(y1, y2)
+        transformed u=0 is explicitly mapped to centreline+sec_bar/2
+        because X=-u under _PERM_V.
+    """
+    length = float(m.length)
+    if length < 1.0:
+        return None
+
+    solid = _prism(trimesh, np, rings, length)
+    if solid is None:
+        return None
+
+    horizontal = abs(float(m.y2) - float(m.y1)) < 0.5
+
+    if horizontal:
+        solid.apply_transform(np.asarray(_PERM_H))
+        x_start = min(float(m.x1), float(m.x2)) - cx
+        y_start = float(m.y1) - cy - sec_bar / 2.0
+        # After _PERM_H, local u maps to world Y and local v to world Z.
+        solid.apply_translation((x_start, y_start, 0.0))
+    else:
+        solid.apply_transform(np.asarray(_PERM_V))
+        x_centre = float(m.x1) - cx
+        y_start = min(float(m.y1), float(m.y2)) - cy
+        # Local u=0 maps to X=0 before translation; therefore place it at
+        # centreline + sec_bar/2 so u in [0,bar] spans centreline symmetrically.
+        solid.apply_translation((
+            x_centre + sec_bar / 2.0,
+            y_start,
+            0.0,
+        ))
+
+    return solid
+
+
+def _build_step(window, asm, z_up=False):
+    try:
+        import cadquery as cq
+    except ImportError:
+        raise RuntimeError("STEP requires cadquery (OCP kernel).")
+
+    W = float(window.width_mm)
+    H = float(window.height_mm)
+    cx, cy = W / 2.0, H / 2.0
+    r, g, b = _frame_rgb(
+        getattr(window, "frame_colour_hex", "#6a6a6c")
+    )
+
+    assembly = cq.Assembly()
+    count = 0
+    failed_ids = []
+
+    def zup(solid):
+        if not z_up:
+            return solid
+        return solid.rotate((0, 0, 0), (1, 0, 0), 90)
+
+    for m in asm.members:
+        try:
+            solid = _member_solid_cq(
+                cq, m, m._rings, m._sec_bar, m._sec_dep, cx, cy
+            )
+        except Exception as exc:
+            logger.warning(
+                "cq member %s failed: %s",
+                getattr(m, "id", "?"), exc,
+            )
+            solid = None
+
+        if solid is None:
+            failed_ids.append(getattr(m, "id", "?"))
         else:
-            scene.export(path, file_type="glb")
-        with open(path, "rb") as fh:
-            return fh.read()
+            count += 1
+            assembly.add(
+                zup(solid),
+                name=f"{m.role}_{m.id}",
+                color=cq.Color(r, g, b),
+            )
+
+    if count == 0:
+        raise RuntimeError("no frame solids built")
+
+    if failed_ids:
+        raise RuntimeError(
+            f"STEP export incomplete — {len(failed_ids)} member(s) failed "
+            f"to build and were dropped: {failed_ids}. Refusing to export "
+            f"a silently-incomplete model; see server log for the "
+            f"underlying cadquery error per member."
+        )
+
+    frame_ref = max(
+        (
+            float(m.depth)
+            for m in asm.members
+            if m.role in (
+                "head", "jamb", "mullion", "transom",
+                "sash", "outer_frame",
+            )
+        ),
+        default=_MIN_DEPTH,
+    )
+    glass_z = max(frame_ref - 24.0, frame_ref * 0.35)
+
+    for i, glass in enumerate(asm.glass):
+        gx = float(glass.x) + float(glass.w) / 2.0 - cx
+        gy = float(glass.y) + float(glass.h) / 2.0 - cy
+
+        if glass.infill == "panel":
+            solid = (
+                cq.Workplane("XY")
+                .box(
+                    float(glass.w),
+                    float(glass.h),
+                    float(glass.thickness),
+                )
+                .translate((gx, gy, frame_ref * 0.5))
+            )
+            colour = cq.Color(r, g, b)
+        else:
+            solid = (
+                cq.Workplane("XY")
+                .box(float(glass.w), float(glass.h), 8.0)
+                .translate((gx, gy, glass_z + 4.0))
+            )
+            colour = cq.Color(0.55, 0.75, 0.80, 0.35)
+
+        assembly.add(zup(solid), name=f"glass_{i + 1}", color=colour)
+
+    with tempfile.NamedTemporaryFile(
+        suffix=".step", delete=False
+    ) as handle:
+        path = handle.name
+
+    try:
+        assembly.export(path)
+        with open(path, "rb") as handle:
+            return handle.read()
+    finally:
+        _rm(path)
+
+
+def _simplify_ring(points, tol=1e-4, collinear_tol=1e-8):
+    if len(points) < 3:
+        return points
+
+    kept = []
+    for p in points:
+        if not kept:
+            kept.append(p)
+            continue
+        dx = p[0] - kept[-1][0]
+        dy = p[1] - kept[-1][1]
+        if dx * dx + dy * dy > tol * tol:
+            kept.append(p)
+
+    if len(kept) >= 2:
+        dx = kept[0][0] - kept[-1][0]
+        dy = kept[0][1] - kept[-1][1]
+        if dx * dx + dy * dy <= tol * tol:
+            kept.pop()
+
+    if len(kept) < 3:
+        return kept
+
+    out = []
+    n = len(kept)
+    for i in range(n):
+        a = kept[(i - 1) % n]
+        b = kept[i]
+        c = kept[(i + 1) % n]
+        cross = (
+            (b[0] - a[0]) * (c[1] - b[1])
+            - (b[1] - a[1]) * (c[0] - b[0])
+        )
+        if abs(cross) > collinear_tol:
+            out.append(b)
+
+    return out if len(out) >= 3 else kept
+
+
+def _member_solid_cq(cq, m, rings, sec_bar, sec_dep, cx, cy):
+    """
+    CadQuery implementation of the exact same anchor contract as trimesh.
+
+    No bounding-box centre is used for horizontal or vertical placement.
+    Bounding boxes are only unnecessary geometry inspection and therefore are
+    deliberately absent from placement.
+    """
+    length = float(m.length)
+    if length < 1.0:
+        return None
+
+    outer = _simplify_ring(
+        [(float(x), float(y)) for x, y in rings[0]]
+    )
+    holes = [
+        _simplify_ring([(float(x), float(y)) for x, y in ring])
+        for ring in rings[1:]
+    ]
+    holes = [ring for ring in holes if len(ring) >= 3]
+
+    if len(outer) < 3:
+        return None
+
+    solid = (
+        cq.Workplane("XY")
+        .polyline(outer)
+        .close()
+        .extrude(length)
+    )
+
+    for hole in holes:
+        try:
+            hole_solid = (
+                cq.Workplane("XY")
+                .polyline(hole)
+                .close()
+                .extrude(length)
+            )
+            solid = solid.cut(hole_solid)
+        except Exception:
+            pass
+
+    horizontal = abs(float(m.y2) - float(m.y1)) < 0.5
+
+    if horizontal:
+        # (u,v,w) -> (w,u,v): Z(length)->X, X(u)->Y, Y(v)->Z
+        solid = solid.rotate((0, 0, 0), (0, 1, 0), 90)
+        solid = solid.rotate((0, 0, 0), (1, 0, 0), 90)
+
+        x_start = min(float(m.x1), float(m.x2)) - cx
+        y_start = float(m.y1) - cy - sec_bar / 2.0
+        return solid.translate((x_start, y_start, 0.0))
+
+    # (u,v,w) -> (-u,w,v):
+    # first Z(length)->Y, then orient u so that the final world X=-u.
+    solid = solid.rotate((0, 0, 0), (1, 0, 0), -90)
+
+    # After the rotation above CadQuery gives X=u, Y=w, Z=-v.
+    # Rotate 180° around Y to obtain X=-u and Z=v.
+    solid = solid.rotate((0, 0, 0), (0, 1, 0), 180)
+
+    x_centre = float(m.x1) - cx
+    y_start = min(float(m.y1), float(m.y2)) - cy
+
+    return solid.translate((
+        x_centre + sec_bar / 2.0,
+        y_start,
+        0.0,
+    ))
 
 
 def _frame_rgb(hex_colour):
     try:
-        h = (hex_colour or "#6a6a6c").lstrip("#")
-        return (int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255)
+        value = (hex_colour or "#6a6a6c").lstrip("#")
+        return (
+            int(value[0:2], 16) / 255.0,
+            int(value[2:4], 16) / 255.0,
+            int(value[4:6], 16) / 255.0,
+        )
     except Exception:
-        return (.62, .62, .64)
+        return 0.42, 0.42, 0.44
+
+
+def _rm(path):
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass

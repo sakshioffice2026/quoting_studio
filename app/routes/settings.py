@@ -717,6 +717,8 @@ def backfill_geometry():
 def create_profile():
     if request.method == 'POST':
         try:
+            import json
+            shapes = request.form.getlist('compatible_shapes')
             p = CadProfile(
                 tenant_id       = current_user.tenant_id,
                 code            = request.form.get('code','').strip().upper(),
@@ -730,6 +732,7 @@ def create_profile():
                 material        = request.form.get('material','Aluminium'),
                 drawing_ref     = request.form.get('drawing_ref','').strip(),
                 is_builtin      = False,
+                compatible_shapes = json.dumps(shapes) if shapes else None,
             )
             db.session.add(p)
             db.session.commit()
@@ -813,7 +816,26 @@ _VALID_ROLES = [
 ]
 
 
-@settings_bp.route('/profiles/<int:profile_id>/role', methods=['POST'])
+@settings_bp.route('/profiles/<int:profile_id>/shapes', methods=['POST'])
+@login_required
+@admin_required
+def set_profile_shapes(profile_id):
+    """Restrict a profile to specific frame shapes (rectangle/arched/gothic/
+    circular). No selection = compatible with every shape."""
+    import json
+    profile = CadProfile.query.filter_by(
+        id=profile_id, tenant_id=current_user.tenant_id).first_or_404()
+    shapes = request.form.getlist('compatible_shapes')
+    valid = {'rectangle', 'arched', 'gothic', 'circular'}
+    shapes = [s for s in shapes if s in valid]
+    profile.compatible_shapes = json.dumps(shapes) if shapes else None
+    db.session.commit()
+    label = ', '.join(shapes) if shapes else 'all shapes'
+    flash(f'{profile.code or profile.name} → compatible with {label}.', 'success')
+    return redirect(url_for('settings.profiles_library'))
+
+
+
 @login_required
 @admin_required
 def set_profile_role(profile_id):

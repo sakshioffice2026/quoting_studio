@@ -14,14 +14,12 @@ logger = logging.getLogger(__name__)
 L_VIS = 'PROF_OUTLINE'
 L_HID = 'HIDDEN_LINE'
 L_ANNOT = 'DIM_ANNOTATION'
+L_DIM = 'DIMENSIONS'
 
 VIEW_GAP = 150  # mm gap between views on sheet
 
 
 def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
-    import ezdxf
-    from .dxf_layers import setup_layers, setup_text_styles
-
     freecad = _find_freecad()
     if not freecad:
         raise RuntimeError('FreeCAD not found — tried all known paths')
@@ -106,14 +104,18 @@ def project_pts(pts, view):
     findShapeOutline) either don't exist across FreeCAD versions or only
     return the outer silhouette, silently dropping interior mullion/sash/
     bead lines — which is what caused the earlier near-empty drawings."""
+    LIMIT = 1e6  # anything beyond this is FreeCAD's degenerate/invalid sentinel
     out = []
     for p in pts:
         if view == "front":
-            out.append((p.x, p.y))
+            x, y = p.x, p.y
         elif view == "top":
-            out.append((p.x, p.z))
+            x, y = p.x, p.z
         else:  # side
-            out.append((p.z, p.y))
+            x, y = p.z, p.y
+        if abs(x) > LIMIT or abs(y) > LIMIT or x != x or y != y:  # x!=x -> NaN
+            return []  # degenerate edge: drop the whole edge, not just the point
+        out.append((x, y))
     return out
 
 doc = App.newDocument("QS_Ortho")
@@ -129,13 +131,22 @@ else:
     directions = ["front", "top", "side"]
     for view in directions:
         vis_edges = []
+        dropped = 0
         for shp in shapes:
             for e in shp.Edges:
-                pts = e.discretize(Deflection=0.15)
+                try:
+                    pts = e.discretize(Deflection=0.15)
+                except Exception:
+                    dropped += 1
+                    continue
                 if len(pts) >= 2:
-                    vis_edges.append(project_pts(pts, view))
+                    proj = project_pts(pts, view)
+                    if len(proj) >= 2:
+                        vis_edges.append(proj)
+                    else:
+                        dropped += 1
         result[view] = {{"visible": vis_edges, "hidden": []}}
-        print(f"{{view}}: {{len(vis_edges)}} edges", flush=True)
+        print(f"{{view}}: {{len(vis_edges)}} edges, {{dropped}} degenerate edges dropped", flush=True)
 
 with open(r"{opath}", "w", encoding="utf-8") as f:
     json.dump(result, f)
@@ -176,16 +187,30 @@ def _draw_view(msp, view, ox, oy, label):
     w, h = x1 - x0, y1 - y0
     t = msp.add_text(label, dxfattribs={'layer': L_ANNOT, 'height': 20})
     t.set_placement((ox, oy - 30), align=ezdxf.enums.TextEntityAlignment.LEFT)
+
+    # overall width (below) and height (right) dimensions
+    if w > 0:
+        dim_w = msp.add_linear_dim(
+            base=(ox, oy - 80), p1=(ox, oy), p2=(ox + w, oy),
+            dimstyle='ENGINEERING', dxfattribs={'layer': L_DIM})
+        dim_w.render()
+    if h > 0:
+        dim_h = msp.add_linear_dim(
+            base=(ox + w + 80, oy), p1=(ox + w, oy), p2=(ox + w, oy + h),
+            angle=90, dimstyle='ENGINEERING', dxfattribs={'layer': L_DIM})
+        dim_h.render()
+
     return w, h
 
 
 def _write_dxf(views, window) -> bytes:
     import ezdxf, io
-    from .dxf_layers import setup_layers, setup_text_styles
+    from .dxf_layers import setup_layers, setup_text_styles, setup_dimstyle
 
     doc = ezdxf.new('R2010', setup=True)
     setup_layers(doc)
     setup_text_styles(doc)
+    setup_dimstyle(doc)
     doc.layers.add(L_HID, dxfattribs={'color': 1})
     if 'DASHED' not in doc.linetypes:
         doc.linetypes.add('DASHED', pattern=[0.6, 0.3, -0.3])
@@ -195,6 +220,12 @@ def _write_dxf(views, window) -> bytes:
     front = views.get('front', {'visible': [], 'hidden': []})
     top   = views.get('top',   {'visible': [], 'hidden': []})
     side  = views.get('side',  {'visible': [], 'hidden': []})
+
+    for name, v in (('front', front), ('top', top), ('side', side)):
+        if not v.get('visible') and not v.get('hidden'):
+            raise RuntimeError(
+                f'Orthographic "{name}" view has no valid geometry after '
+                f'filtering degenerate edges — STEP solid may be corrupt.')
 
     fw, fh = _draw_view(msp, front, 0, 0, 'FRONT (ELEVATION)')
     _draw_view(msp, top,   0, fh + VIEW_GAP, 'TOP (PLAN)')
