@@ -13,6 +13,7 @@ bounding-box centre is used to decide a member centreline.
 from __future__ import annotations
 
 import os
+import math
 import logging
 import tempfile
 
@@ -377,6 +378,51 @@ def _build_trimesh(window, asm, fmt):
     raise ValueError(f"unsupported fmt: {fmt}")
 
 
+def _path_segment_transform(theta_deg, p0, sec_bar, cx, cy):
+    theta = math.radians(theta_deg)
+    u_dir = (-math.sin(theta), math.cos(theta))
+    tx = p0[0] - cx - u_dir[0] * sec_bar / 2.0
+    ty = p0[1] - cy - u_dir[1] * sec_bar / 2.0
+    return tx, ty
+
+
+def _member_mesh_path(trimesh, np, m, rings, sec_bar, sec_dep, cx, cy):
+    """Curved member (arched/gothic/circular): sweep the section along
+    m.path as a chain of straight sub-prisms, one per polyline edge, each
+    using the base horizontal mapping plus an extra Z rotation for that
+    segment's own angle — generalises the fixed-angle horizontal/vertical
+    placement below to an arbitrary in-plane direction."""
+    pts = m.path
+    n = len(pts)
+    count = n if m.closed else n - 1
+    solids = []
+    for i in range(count):
+        p0 = pts[i]
+        p1 = pts[(i + 1) % n] if m.closed else pts[i + 1]
+        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+        seg_len = math.hypot(dx, dy)
+        if seg_len < 0.5:
+            continue
+        theta_deg = math.degrees(math.atan2(dy, dx))
+
+        solid = _prism(trimesh, np, rings, seg_len)
+        if solid is None:
+            continue
+        solid.apply_transform(np.asarray(_PERM_H))
+        solid.apply_transform(
+            trimesh.transformations.rotation_matrix(
+                math.radians(theta_deg), [0, 0, 1]
+            )
+        )
+        tx, ty = _path_segment_transform(theta_deg, p0, sec_bar, cx, cy)
+        solid.apply_translation((tx, ty, 0.0))
+        solids.append(solid)
+
+    if not solids:
+        return None
+    return trimesh.util.concatenate(solids)
+
+
 def _member_mesh(trimesh, np, m, rings, sec_bar, sec_dep, cx, cy):
     """
     Deterministic placement.
@@ -391,7 +437,12 @@ def _member_mesh(trimesh, np, m, rings, sec_bar, sec_dep, cx, cy):
         member boundary starts at min(y1, y2)
         transformed u=0 is explicitly mapped to centreline+sec_bar/2
         because X=-u under _PERM_V.
+
+    Curved (m.path set): see _member_mesh_path.
     """
+    if getattr(m, "path", None):
+        return _member_mesh_path(trimesh, np, m, rings, sec_bar, sec_dep, cx, cy)
+
     length = float(m.length)
     if length < 1.0:
         return None
@@ -568,6 +619,61 @@ def _simplify_ring(points, tol=1e-4, collinear_tol=1e-8):
     return out if len(out) >= 3 else kept
 
 
+def _cq_section_solid(cq, outer, holes, length):
+    solid = (
+        cq.Workplane("XY")
+        .polyline(outer)
+        .close()
+        .extrude(length)
+    )
+    for hole in holes:
+        try:
+            hole_solid = (
+                cq.Workplane("XY")
+                .polyline(hole)
+                .close()
+                .extrude(length)
+            )
+            solid = solid.cut(hole_solid)
+        except Exception:
+            pass
+    return solid
+
+
+def _member_solid_cq_path(cq, m, outer, holes, sec_bar, sec_dep, cx, cy):
+    """Curved member (arched/gothic/circular): union of straight sub-solids,
+    one per polyline edge of m.path, each built with the same base
+    horizontal orientation used for straight horizontal members plus an
+    extra Z rotation for that segment's own angle — the cadquery mirror of
+    _member_mesh_path so STEP matches the GLB/STL viewer exactly."""
+    pts = m.path
+    n = len(pts)
+    count = n if m.closed else n - 1
+    result = None
+    for i in range(count):
+        p0 = pts[i]
+        p1 = pts[(i + 1) % n] if m.closed else pts[i + 1]
+        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+        seg_len = math.hypot(dx, dy)
+        if seg_len < 0.5:
+            continue
+        theta_deg = math.degrees(math.atan2(dy, dx))
+
+        solid = _cq_section_solid(cq, outer, holes, seg_len)
+        # base horizontal mapping: Z(length)->X, X(u)->Y, Y(v)->Z
+        solid = solid.rotate((0, 0, 0), (0, 1, 0), 90)
+        solid = solid.rotate((0, 0, 0), (1, 0, 0), 90)
+        # extra rotation to this segment's own in-plane angle
+        solid = solid.rotate((0, 0, 0), (0, 0, 1), theta_deg)
+
+        tx, ty = _path_segment_transform(theta_deg, p0, sec_bar, cx, cy)
+        solid = solid.translate((tx, ty, 0.0))
+
+        result = solid if result is None else result.union(solid)
+
+    return result
+
+
 def _member_solid_cq(cq, m, rings, sec_bar, sec_dep, cx, cy):
     """
     CadQuery implementation of the exact same anchor contract as trimesh.
@@ -575,11 +681,9 @@ def _member_solid_cq(cq, m, rings, sec_bar, sec_dep, cx, cy):
     No bounding-box centre is used for horizontal or vertical placement.
     Bounding boxes are only unnecessary geometry inspection and therefore are
     deliberately absent from placement.
-    """
-    length = float(m.length)
-    if length < 1.0:
-        return None
 
+    Curved (m.path set): see _member_solid_cq_path.
+    """
     outer = _simplify_ring(
         [(float(x), float(y)) for x, y in rings[0]]
     )
@@ -592,24 +696,14 @@ def _member_solid_cq(cq, m, rings, sec_bar, sec_dep, cx, cy):
     if len(outer) < 3:
         return None
 
-    solid = (
-        cq.Workplane("XY")
-        .polyline(outer)
-        .close()
-        .extrude(length)
-    )
+    if getattr(m, "path", None):
+        return _member_solid_cq_path(cq, m, outer, holes, sec_bar, sec_dep, cx, cy)
 
-    for hole in holes:
-        try:
-            hole_solid = (
-                cq.Workplane("XY")
-                .polyline(hole)
-                .close()
-                .extrude(length)
-            )
-            solid = solid.cut(hole_solid)
-        except Exception:
-            pass
+    length = float(m.length)
+    if length < 1.0:
+        return None
+
+    solid = _cq_section_solid(cq, outer, holes, length)
 
     horizontal = abs(float(m.y2) - float(m.y1)) < 0.5
 
