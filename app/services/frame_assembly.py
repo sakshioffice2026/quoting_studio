@@ -70,6 +70,28 @@ ORI_V = 'vertical'
 
 _EPS = 1e-4
 
+# Extra distance (mm) a mullion/transom end is pushed past the calculated
+# ellipse touch-point on a circular frame. The ring is a facetted polygon
+# approximating the true ellipse, and its inner boundary is itself only an
+# approximate constant-width offset, so the two curves don't coincide
+# exactly. A flat-cut bar end stopped precisely on the touch-point can
+# therefore land just outside the ring's actual solid material and leave a
+# visible sliver/notch. Overlapping by this margin guarantees the end is
+# buried inside the ring instead — and, critically, this is also the margin
+# that makes the downstream boolean union (model3d.py::_build_step) succeed:
+# solids that only TOUCH can produce a fragile/failed union or a visible
+# seam even when unioned; solids that genuinely OVERLAP in volume always
+# fuse cleanly.
+#
+# A flat mm value is fragile across profile sizes — a slim mullion on a
+# large-diameter ring needs less embed depth than a heavy mullion on a
+# small ring. Scale the overlap off the member's OWN bar width instead, so
+# the embed depth is always proportionate to that member's actual solid
+# cross-section: never less than 6mm, and at least half the bar width so a
+# skinny cross-section still buries a meaningful fraction of itself.
+def _ring_embed_overlap(bar_width: float) -> float:
+    return max(6.0, float(bar_width) * 0.5)
+
 
 # ── data structures ────────────────────────────────────────────────────────
 @dataclass
@@ -689,6 +711,44 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         if _EPS < ty < H - _EPS:
             h_edges.setdefault(round(ty, 2), []).append((r['x'], r['x'] + r['w']))
 
+    # ── Lock every pane's internal-facing edges onto the divider that
+    # actually gets built ────────────────────────────────────────────
+    # v_edges/h_edges above only look at ONE side of each shared line (a
+    # pane's own RIGHT edge for mullions, own TOP edge for transoms) — the
+    # neighbouring pane's facing edge (its own left/bottom) is never cross-
+    # checked against it. _norm_panes() already runs a general edge-snap
+    # pass, but only within _SNAP_TOL_MM (3mm); a larger mismatch from the
+    # saved design (x_norm/y_norm rounding at a large W/H, etc) survives
+    # that pass untouched. The result: the mullion/transom gets built from
+    # one pane's edge, but the OTHER pane's glass is positioned from its
+    # own, still slightly different, edge — leaving a one-sided sliver
+    # between that pane's glass and the divider that doesn't reach it.
+    # Now that the real divider positions are known (v_edges/h_edges keys),
+    # snap every pane's edge onto the nearest one directly — this is the
+    # ground truth for where the solid divider actually is, so this always
+    # wins over whatever the pane's own stored coordinate says.
+    _DIVIDER_SNAP_TOL = 20.0
+    mull_xs = sorted(v_edges.keys())
+    tran_ys = sorted(h_edges.keys())
+
+    def _snap_to_divider(value, candidates, tol=_DIVIDER_SNAP_TOL):
+        best, best_d = None, tol
+        for c in candidates:
+            d = abs(value - c)
+            if d <= best_d:
+                best, best_d = c, d
+        return best if best is not None else value
+
+    for r in rects:
+        x0, x1 = r['x'], r['x'] + r['w']
+        y0, y1 = r['y'], r['y'] + r['h']
+        x0 = _snap_to_divider(x0, mull_xs)
+        x1 = _snap_to_divider(x1, mull_xs)
+        y0 = _snap_to_divider(y0, tran_ys)
+        y1 = _snap_to_divider(y1, tran_ys)
+        r['x'], r['w'] = x0, x1 - x0
+        r['y'], r['h'] = y0, y1 - y0
+
     def _merge(spans):
         s = sorted(spans)
         out = [list(s[0])]
@@ -706,15 +766,35 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
     for x, spans in sorted(v_edges.items()):
         for (y_lo, y_hi) in _merge(spans):
             mi += 1
-            # clamp inside outer frame
-            y_lo = max(y_lo, bar_c)
-            y_hi = min(y_hi, H - bar_h)
             if shape == 'circular':
+                # The rectangular-frame clamp below (bar_c/bar_h) has no
+                # relationship to a round ring's own inner boundary — it was
+                # setting y_lo/y_hi from the CILL/HEAD bar widths, which can
+                # land on either side of the ring's true ellipse touch-point
+                # depending on how those bars compare to the ring's own bar
+                # width. When it happened to land short of the touch-point
+                # the end floated in the aperture instead of reaching the
+                # ring at all, which is exactly the gap in the screenshot.
+                # For a circular frame ONLY the ellipse touch-point matters,
+                # so skip the rectangular clamp entirely and drive both ends
+                # unconditionally from the ring geometry.
                 span = _ellipse_span_y(x, cx, cy, rx_in, ry_in)
                 if span is None:
                     continue          # this edge lies entirely outside the ring
-                y_lo = max(y_lo, span[0])
-                y_hi = min(y_hi, span[1])
+                # Bury the end past the true touch-point so the flat cut
+                # always lands inside the ring's solid material instead of
+                # stopping exactly on the (facetted/approximated) inner
+                # boundary, which leaves a sliver gap at the join. Depth of
+                # the embed scales with this member's OWN bar width.
+                embed = _ring_embed_overlap(mb)
+                if y_lo <= span[0]:
+                    y_lo = span[0] - embed
+                if y_hi >= span[1]:
+                    y_hi = span[1] + embed
+            else:
+                # clamp inside outer frame (rectangular/arched/gothic only)
+                y_lo = max(y_lo, bar_c)
+                y_hi = min(y_hi, H - bar_h)
             if y_hi - y_lo < 1:
                 continue
             A.members.append(Member(
@@ -728,14 +808,21 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
     for y, spans in sorted(h_edges.items()):
         for (x_lo, x_hi) in _merge(spans):
             ti += 1
-            x_lo = max(x_lo, bar_j)
-            x_hi = min(x_hi, W - bar_j)
             if shape == 'circular':
+                # Same reasoning as the mullion loop above: the JAMB-bar
+                # clamp is a rectangular-frame concept and must not be
+                # allowed to override the ring's true touch-point.
                 span = _ellipse_span_x(y, cx, cy, rx_in, ry_in)
                 if span is None:
                     continue
-                x_lo = max(x_lo, span[0])
-                x_hi = min(x_hi, span[1])
+                embed = _ring_embed_overlap(tb)
+                if x_lo <= span[0]:
+                    x_lo = span[0] - embed
+                if x_hi >= span[1]:
+                    x_hi = span[1] + embed
+            else:
+                x_lo = max(x_lo, bar_j)
+                x_hi = min(x_hi, W - bar_j)
             if x_hi - x_lo < 1:
                 continue
             A.members.append(Member(

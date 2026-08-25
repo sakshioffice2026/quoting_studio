@@ -500,6 +500,7 @@ def _build_step(window, asm, z_up=False):
     assembly = cq.Assembly()
     count = 0
     failed_ids = []
+    frame_solids = []
 
     def zup(solid):
         if not z_up:
@@ -522,11 +523,7 @@ def _build_step(window, asm, z_up=False):
             failed_ids.append(getattr(m, "id", "?"))
         else:
             count += 1
-            assembly.add(
-                zup(solid),
-                name=f"{m.role}_{m.id}",
-                color=cq.Color(r, g, b),
-            )
+            frame_solids.append((m, solid))
 
     if count == 0:
         raise RuntimeError("no frame solids built")
@@ -537,6 +534,38 @@ def _build_step(window, asm, z_up=False):
             f"to build and were dropped: {failed_ids}. Refusing to export "
             f"a silently-incomplete model; see server log for the "
             f"underlying cadquery error per member."
+        )
+
+    # ── FUSE every member into ONE continuous solid ──────────────────
+    # Members used to be added to the assembly individually, each its own
+    # separate BREP solid that only TOUCHES its neighbours (ring <->
+    # mullion/transom, jamb <-> head, sash <-> frame, ...). Two touching-
+    # but-unfused solids share a coincident boundary with no real
+    # topological connection between them, so any viewer renders a visible
+    # seam/sliver right at that join — this is true regardless of how
+    # precisely the member coordinates line up, which is why extending the
+    # mullion/transom ends past the ring's touch-point closed most, but not
+    # all, of the gap. Boolean-union every member into a single watertight
+    # solid so the export has no internal seams at all. Members that fail
+    # to union cleanly (rare, but OCC booleans can be fragile on complex
+    # profiles) are kept as separate parts rather than aborting the whole
+    # export, so a single bad union never blanks the download.
+    fused = frame_solids[0][1]
+    loose_parts = []
+    for m, solid in frame_solids[1:]:
+        try:
+            fused = fused.union(solid)
+        except Exception as exc:
+            logger.warning(
+                "frame union failed for %s, keeping as separate part: %s",
+                getattr(m, "id", "?"), exc,
+            )
+            loose_parts.append((m, solid))
+
+    assembly.add(zup(fused), name="frame", color=cq.Color(r, g, b))
+    for m, solid in loose_parts:
+        assembly.add(
+            zup(solid), name=f"{m.role}_{m.id}", color=cq.Color(r, g, b)
         )
 
     frame_ref = max(
