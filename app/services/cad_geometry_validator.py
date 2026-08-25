@@ -288,8 +288,12 @@ class PaneValidator:
                     suggested_fix="Adjust pane position or height"
                 ))
         
-        # Validate opener type
-        valid_openers = ['Fixed light', 'Side hung left', 'Side hung right', 'Top hung', 'Bottom hung']
+        # Validate opener type — must match the actual set offered by the
+        # pane editor UI (editor.html's opener dropdown), not an invented
+        # list, or every real window would falsely warn.
+        valid_openers = ['Fixed', 'Sliding', 'Left Open', 'Right Open',
+                          'Top Hung', 'Bottom Hung', 'Tilt', 'Tilt & Turn',
+                          'French', 'Casement']
         if 'opener_type' in pane and pane['opener_type'] not in valid_openers:
             issues.append(ValidationIssue(
                 severity=ValidationSeverity.WARNING,
@@ -298,14 +302,15 @@ class PaneValidator:
                 suggested_fix=f"Use one of: {', '.join(valid_openers)}"
             ))
         
-        # Validate glazing type
-        valid_glazing = ['Single glazed', 'Double, Low-E', 'Double, standard', 'Triple glazed']
-        if 'glazing_type' in pane and pane['glazing_type'] not in valid_glazing:
+        # Validate glazing type — kept permissive (DGU/'Double, Low-E' style
+        # free-text values are set from the profile/glazing catalog, not a
+        # fixed enum), so only flag a completely empty value.
+        if 'glazing_type' in pane and not str(pane.get('glazing_type') or '').strip():
             issues.append(ValidationIssue(
                 severity=ValidationSeverity.WARNING,
-                code="UNKNOWN_GLAZING_TYPE",
-                message=f"Glazing type '{pane['glazing_type']}' not recognized",
-                suggested_fix=f"Use one of: {', '.join(valid_glazing)}"
+                code="MISSING_GLAZING_TYPE",
+                message="Glazing type is empty",
+                suggested_fix="Assign a glazing type (e.g. DGU, Double Low-E)"
             ))
         
         return issues

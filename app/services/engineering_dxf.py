@@ -224,8 +224,88 @@ def _quad_bezier_points(p0, p1, p2, segments=20):
     return pts
 
 
+def _clip_polygon(subject, clip):
+    """Sutherland-Hodgman polygon clip: returns `subject` clipped to the
+    inside of convex polygon `clip`. Used to clip mullion bars / glass
+    rectangles to the true curved outline on circular/arched/gothic
+    shapes instead of drawing them as full-width/height rectangles that
+    stick out past the frame (the QS-70 round-window issue)."""
+    def inside(p, a, b):
+        # left side of a->b, given clip polygon is wound CCW
+        return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= -1e-9
+
+    def intersect(p1, p2, a, b):
+        x1, y1 = p1; x2, y2 = p2; x3, y3 = a; x4, y4 = b
+        d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(d) < 1e-12:
+            return p2
+        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / d
+        return (x1 + t * (x2 - x1), y1 + t * (y2 - y1))
+
+    output = list(subject)
+    n = len(clip)
+    for i in range(n):
+        a, b = clip[i], clip[(i + 1) % n]
+        if not output:
+            break
+        input_list = output
+        output = []
+        prev = input_list[-1]
+        prev_in = inside(prev, a, b)
+        for cur in input_list:
+            cur_in = inside(cur, a, b)
+            if cur_in:
+                if not prev_in:
+                    output.append(intersect(prev, cur, a, b))
+                output.append(cur)
+            elif prev_in:
+                output.append(intersect(prev, cur, a, b))
+            prev, prev_in = cur, cur_in
+    return output
+
+
+def _outline_points(shape, W, H, arch_rise, segments=64):
+    """Sample the true frame outline (ellipse / arch / gothic head) into a
+    dense point list for use as a clip polygon. Returns None for
+    'rectangle' since rectangular bars/glass never need clipping."""
+    if shape == 'circular':
+        cx, cy = W / 2.0, H / 2.0
+        rx, ry = W / 2.0, H / 2.0
+        return [(cx + rx * math.cos(2 * math.pi * i / segments),
+                 cy + ry * math.sin(2 * math.pi * i / segments))
+                for i in range(segments)]
+
+    if shape == 'arched':
+        arch_height = arch_rise if arch_rise and arch_rise > 0 else min(W * 0.25, 400)
+        cx, cy = W / 2.0, H - arch_height
+        r = W / 2.0
+        pts = [(0.0, 0.0), (W, 0.0)]
+        arc_n = max(segments // 2, 12)
+        for i in range(arc_n + 1):
+            a = math.radians(i * 180.0 / arc_n)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+        return pts
+
+    if shape == 'gothic':
+        arch_height = arch_rise if arch_rise and arch_rise > 0 else min(W * 0.25, 400)
+        spring_y = H - arch_height
+        apex = (W / 2.0, H)
+        ctrl_y = spring_y + 0.6 * arch_height
+        right_spring = (W, spring_y)
+        right_ctrl = (W, ctrl_y)
+        left_ctrl = (0, ctrl_y)
+        left_spring = (0, spring_y)
+        pts = [(0.0, 0.0), (W, 0.0), right_spring]
+        pts += _quad_bezier_points(right_spring, right_ctrl, apex, segments=segments // 2)
+        pts += _quad_bezier_points(apex, left_ctrl, left_spring, segments=segments // 2)
+        return pts
+
+    return None  # rectangle — no clipping needed
+
+
 def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
     mb = bar * 0.6
+    clip_outline = _outline_points(shape, W, H, arch_rise)
 
     if shape == 'arched':
         # Draw arched top window. arch_height (the "spring-to-apex" rise)
@@ -293,15 +373,24 @@ def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
             major_axis=major_axis,
             ratio=ratio,
             dxfattribs={'layer': L_FRAME})
-        # NOTE: internal mullions/transoms/glazing below are still drawn as
-        # straight full-width/height rectangles (same simplification already
-        # used for 'arched'); they are not clipped to the round aperture.
+        # Internal mullions/transoms/glazing are clipped to this ellipse
+        # below via clip_outline so they don't stick out past the round
+        # aperture (previously drawn as full-width/height rectangles).
 
     else:
         # Standard rectangular window
         msp.add_lwpolyline(
             [(0, 0), (W, 0), (W, H), (0, H)],
             close=True, dxfattribs={'layer': L_FRAME})
+
+    def _add_clipped_poly(pts, layer):
+        """Draw `pts` as-is on rectangular windows; on curved shapes clip
+        to the true outline first so bars/glass never poke outside the
+        frame."""
+        if clip_outline is not None:
+            pts = _clip_polygon(pts, clip_outline)
+        if len(pts) >= 3:
+            msp.add_lwpolyline(pts, close=True, dxfattribs={'layer': layer})
 
     seen_v = set()
     seen_h = set()
@@ -310,20 +399,18 @@ def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
         if 0.001 < rx < 0.999 and round(rx, 3) not in seen_v:
             seen_v.add(round(rx, 3))
             mx = rx * W
-            msp.add_lwpolyline(
+            _add_clipped_poly(
                 [(mx - mb/2, 0), (mx + mb/2, 0),
-                 (mx + mb/2, H), (mx - mb/2, H)],
-                close=True, dxfattribs={'layer': L_FRAME})
+                 (mx + mb/2, H), (mx - mb/2, H)], L_FRAME)
 
         gy, gh = y * H, h * H
         ty = y + h
         if 0.001 < ty < 0.999 and round(ty, 3) not in seen_h:
             seen_h.add(round(ty, 3))
             my = ty * H
-            msp.add_lwpolyline(
+            _add_clipped_poly(
                 [(bar, my - mb/2), (W - bar, my - mb/2),
-                 (W - bar, my + mb/2), (bar, my + mb/2)],
-                close=True, dxfattribs={'layer': L_FRAME})
+                 (W - bar, my + mb/2), (bar, my + mb/2)], L_FRAME)
 
         gi = bar + 4
         gx, gw = x * W, w * W
@@ -333,9 +420,11 @@ def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
         gry = gy + gh - (gi if y + h >= 0.999 else mb/2 + 4)
         
         if grx > glx and gry > gly:
-            msp.add_lwpolyline(
-                [(glx, gly), (grx, gly), (grx, gry), (glx, gry)],
-                close=True, dxfattribs={'layer': L_GLASS})
+            glass_pts = [(glx, gly), (grx, gly), (grx, gry), (glx, gry)]
+            if clip_outline is not None:
+                glass_pts = _clip_polygon(glass_pts, clip_outline)
+            if len(glass_pts) >= 3:
+                msp.add_lwpolyline(glass_pts, close=True, dxfattribs={'layer': L_GLASS})
             _opener_symbol(msp, glx, gly, grx - glx, gry - gly, opening)
 
 

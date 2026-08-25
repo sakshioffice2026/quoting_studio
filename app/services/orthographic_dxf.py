@@ -231,6 +231,39 @@ def _write_dxf(views, window) -> bytes:
     _draw_view(msp, top,   0, fh + VIEW_GAP, 'TOP (PLAN)')
     _draw_view(msp, side,  fw + VIEW_GAP, 0, 'SIDE VIEW')
 
+    # Cross-check: the FRONT view is projected straight from the STEP
+    # solid, so its bounding box should match the quoted window.width_mm /
+    # height_mm. If it doesn't, the STEP geometry has drifted from the
+    # stored size — flag it loudly instead of silently shipping a drawing
+    # whose dimension lines don't match the quote.
+    tol = 1.0  # mm
+    quoted_w = float(getattr(window, 'width_mm', 0) or 0)
+    quoted_h = float(getattr(window, 'height_mm', 0) or 0)
+    if quoted_w and abs(fw - quoted_w) > tol:
+        logger.warning(
+            'Orthographic FRONT view width %.2fmm does not match quoted '
+            'window.width_mm %.2fmm (window id=%s) — STEP geometry may '
+            'have drifted from the stored dimension.',
+            fw, quoted_w, getattr(window, 'id', '?'))
+        _add_text_note(
+            msp, f'DIMENSION MISMATCH: drawing width {fw:.0f}mm '
+                 f'vs quoted {quoted_w:.0f}mm', 0, -60)
+    if quoted_h and abs(fh - quoted_h) > tol:
+        logger.warning(
+            'Orthographic FRONT view height %.2fmm does not match quoted '
+            'window.height_mm %.2fmm (window id=%s) — STEP geometry may '
+            'have drifted from the stored dimension.',
+            fh, quoted_h, getattr(window, 'id', '?'))
+        _add_text_note(
+            msp, f'DIMENSION MISMATCH: drawing height {fh:.0f}mm '
+                 f'vs quoted {quoted_h:.0f}mm', 0, -100)
+
     buf = io.StringIO()
     doc.write(buf)
     return buf.getvalue().encode('utf-8')
+
+
+def _add_text_note(msp, text, x, y):
+    import ezdxf
+    t = msp.add_text(text, dxfattribs={'layer': L_ANNOT, 'height': 20, 'color': 1})
+    t.set_placement((x, y), align=ezdxf.enums.TextEntityAlignment.LEFT)
