@@ -511,19 +511,42 @@ def _ellipse_span_x(y, cx, cy, rx, ry):
 
 
 def _add_circular_frame_ring(A: Assembly, W, H, p_head, depth):
-    """Full frame as one closed elliptical ring (round/porthole window) —
-    mirrors engineering_dxf.py's 'circular' branch (ellipse inscribed in the
-    W x H bounding box) instead of the plain 4-member rectangle."""
+    """Build the circular/elliptical frame from its true outer envelope.
+
+    W/H are OUTER bounds.  The profile centreline is inset by half the
+    actual profile width; the glass boundary is one full profile width
+    inside the outer envelope.
+    """
     cx, cy = W / 2.0, H / 2.0
-    path = _ellipse_points(cx, cy, W / 2.0, H / 2.0, segments=72)
-    bar = p_head['bar']
+    bar = float(p_head['bar'])
+
+    rx_outer = W / 2.0
+    ry_outer = H / 2.0
+
+    # True profile centreline.
+    rx_path = max(rx_outer - bar / 2.0, 1.0)
+    ry_path = max(ry_outer - bar / 2.0, 1.0)
+
+    path = _ellipse_points(
+        cx, cy, rx_path, ry_path, segments=256
+    )
+
     A.members.append(Member(
-        id='F_ring', role=ROLE_HEAD, orientation=ORI_H,
-        x1=0, y1=cy, x2=W, y2=cy,
-        bar_width=bar, depth=depth,
-        joint_start=JOINT_BUTT, joint_end=JOINT_BUTT,
+        id='F_ring',
+        role=ROLE_HEAD,
+        orientation=ORI_H,
+        x1=cx - rx_path,
+        y1=cy,
+        x2=cx + rx_path,
+        y2=cy,
+        bar_width=bar,
+        depth=depth,
+        joint_start=JOINT_BUTT,
+        joint_end=JOINT_BUTT,
         profile_code=p_head['code'],
-        path=path, closed=True))
+        path=path,
+        closed=True,
+    ))
 
 
 def _add_arched_head(A: Assembly, W, spring_y, p_head, depth):

@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import logging
 import tempfile
+import multiprocessing
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ def generate_3d_assembly(window, panes, tenant_id=None, fmt="glb", z_up=False) -
     )
 
     if fmt == "step":
-        return _build_step(window, asm, z_up=z_up)
+        return _build_step_isolated(window, asm, z_up=z_up)
     return _build_trimesh(window, asm, fmt)
 
 
@@ -473,6 +474,76 @@ def _member_mesh(trimesh, np, m, rings, sec_bar, sec_dep, cx, cy):
         ))
 
     return solid
+
+
+class _StepWindow:
+    """Minimal picklable stand-in for the ORM `window` object, carrying only
+    the scalar fields `_build_step` actually reads. Passing the real
+    SQLAlchemy `window` across a process boundary risks pickling failures
+    and detached-session errors when the child touches a lazy-loaded
+    attribute; this avoids both."""
+    __slots__ = ("width_mm", "height_mm", "frame_colour_hex")
+
+    def __init__(self, window):
+        self.width_mm = float(window.width_mm)
+        self.height_mm = float(window.height_mm)
+        self.frame_colour_hex = getattr(window, "frame_colour_hex", "#6a6a6c")
+
+
+def _step_worker(window, asm, z_up, conn):
+    """Runs in a child process (spawned via multiprocessing, which works on
+    Windows unlike os.fork). Isolates cadquery/OCP's native CAD-kernel
+    calls — long, GIL-holding C calls for the boolean cuts/extrudes behind
+    circular-window clipping — so they can never stall the Flask worker's
+    own event loop/thread pool while running."""
+    try:
+        data = _build_step(window, asm, z_up=z_up)
+        conn.send((True, data))
+    except Exception as exc:  # pragma: no cover - defensive, re-raised in parent
+        conn.send((False, f"{type(exc).__name__}: {exc}"))
+    finally:
+        conn.close()
+
+
+def _build_step_isolated(window, asm, z_up=False, timeout=180):
+    """
+    Runs `_build_step` in a separate OS process instead of the Flask
+    worker's own process/thread.
+
+    Why: cadquery/OCP's native CAD-kernel calls (boolean cuts/extrudes,
+    heaviest for circular-window mullion/glass clipping) are long CPU-bound
+    C calls that hold the GIL for their duration. Running them in-process
+    means one heavy STEP build stalls every other in-flight request on the
+    same server (visible as requests stuck "Pending"). A child process has
+    its own interpreter/GIL, so the parent (and every other request it is
+    serving) stays responsive while this runs. Uses multiprocessing's
+    'spawn' start method, which — unlike os.fork() — works on Windows.
+    """
+    step_window = _StepWindow(window)
+    ctx = multiprocessing.get_context("spawn")
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    proc = ctx.Process(
+        target=_step_worker,
+        args=(step_window, asm, z_up, child_conn),
+        daemon=True,
+    )
+    proc.start()
+    child_conn.close()
+    try:
+        if not parent_conn.poll(timeout):
+            proc.terminate()
+            proc.join(5)
+            raise RuntimeError(
+                f"STEP build timed out after {timeout}s (child process killed)"
+            )
+        ok, payload = parent_conn.recv()
+    finally:
+        parent_conn.close()
+        proc.join(5)
+
+    if not ok:
+        raise RuntimeError(f"STEP build failed in child process: {payload}")
+    return payload
 
 
 def _build_step(window, asm, z_up=False):

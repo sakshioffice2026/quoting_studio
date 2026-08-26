@@ -234,6 +234,14 @@ def _serialise(window, asm) -> dict:
             'x': gc.x, 'y': gc.y, 'w': gc.w, 'h': gc.h,
             'infill':    gc.infill,
             'thickness': float(gc.thickness),
+            # Circular/arched/gothic frames clip this pane's polygon to the
+            # ring's inner ellipse/arc in frame_assembly.py (GlassCell.
+            # clip_path). Without forwarding it here, the FreeCAD builder
+            # always extruded the full rectangular glass.w x glass.h box,
+            # which is the rectangle poking out past the round frame in
+            # the FreeCAD-based GLB/techdraw output.
+            'clip_path': ([[float(px), float(py)] for px, py in gc.clip_path]
+                          if getattr(gc, 'clip_path', None) else None),
         })
 
     return {
@@ -435,9 +443,20 @@ for g in data["glass"]:
     gy = g["y"] + g["h"] / 2.0 - cy
     z0 = panel_z if g["infill"] == "panel" else glass_z
     th = g["thickness"] if g["infill"] == "panel" else 8.0
+    clip = g.get("clip_path")
     try:
-        gs = Part.makeBox(g["w"], g["h"], th,
-                          V(gx - g["w"]/2, gy - g["h"]/2, z0 - th/2.0))
+        if clip and len(clip) >= 3:
+            # Circular/arched/gothic frame: extrude the exact clipped
+            # outline instead of a plain box, so the glass follows the
+            # curved frame instead of poking out at the corners.
+            pts = [V(px - cx, py - cy, z0 - th / 2.0) for px, py in clip]
+            pts.append(pts[0])
+            wire = Part.makePolygon(pts)
+            face = Part.Face(wire)
+            gs = face.extrude(V(0, 0, th))
+        else:
+            gs = Part.makeBox(g["w"], g["h"], th,
+                              V(gx - g["w"]/2, gy - g["h"]/2, z0 - th/2.0))
         glass_solids.append(gs)
     except Exception as e:
         print(f"  glass FAILED: {{e}}", flush=True)

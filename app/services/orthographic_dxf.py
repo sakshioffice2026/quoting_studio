@@ -5,7 +5,7 @@ via headless FreeCAD (freecadcmd, Part.projectEx — no Gui needed) and
 written out as a real DXF using ezdxf.
 """
 from __future__ import annotations
-import os, json, subprocess, tempfile, logging
+import os, json, subprocess, tempfile, logging, hashlib, time, threading
 
 from .model3d_freecad import _find_freecad, _read
 
@@ -22,8 +22,72 @@ VIEW_GAP = 150  # mm gap between views on sheet
 _STEP_CACHE = {}
 _VIEWS_CACHE = {}  # cache_key -> parsed {front, top, side} view dict (skips FreeCAD subprocess entirely)
 
+_DISK_CACHE_TTL = 1800  # seconds
 
-def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
+_KEY_LOCKS = {}
+_KEY_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for(cache_key: str) -> threading.Lock:
+    """One lock per cache_key so concurrent requests for the SAME window
+    coalesce into a single FreeCAD subprocess run (the second/third request
+    just waits, then reads the cache the first one filled) instead of each
+    launching its own FreeCAD process and thrashing the machine. Different
+    windows still run fully in parallel."""
+    with _KEY_LOCKS_GUARD:
+        lock = _KEY_LOCKS.get(cache_key)
+        if lock is None:
+            lock = threading.Lock()
+            _KEY_LOCKS[cache_key] = lock
+        return lock
+
+
+def _disk_cache_path(cache_key: str) -> str:
+    h = hashlib.sha1(cache_key.encode('utf-8')).hexdigest()
+    return os.path.join(tempfile.gettempdir(), f'qs_ortho_views_{h}.json')
+
+
+def _disk_cache_get(cache_key: str):
+    """Cross-process cache: orthographic.dxf and engineering.dxf are served
+    by separate HTTP requests that may land on different worker processes,
+    so the in-memory _VIEWS_CACHE alone doesn't dedupe the FreeCAD subprocess
+    across them. A small on-disk cache lets any worker reuse a projection
+    another worker just computed for the same window/pane layout."""
+    path = _disk_cache_path(cache_key)
+    try:
+        if time.time() - os.path.getmtime(path) > _DISK_CACHE_TTL:
+            return None
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _disk_cache_set(cache_key: str, views: dict) -> None:
+    path = _disk_cache_path(cache_key)
+    try:
+        tmp = path + f'.{os.getpid()}.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(views, f)
+        os.replace(tmp, path)
+    except Exception:
+        logger.debug('Could not write disk views cache %s', path, exc_info=True)
+
+
+def get_step_views(window, panes, tenant_id=None) -> dict:
+    """
+    Single source of truth for 2D geometry: generates the STEP solid for
+    this window/pane configuration first, then projects it (via headless
+    FreeCAD) into front/top/side edge sets.
+
+    Every consumer that needs a circular-window elevation (orthographic
+    views, the engineering drawing sheet, the advanced parametric DXF)
+    must call this instead of recomputing circle/arc geometry independently,
+    so downstream drawings can never drift from the STEP file.
+
+    Returns {'front'|'top'|'side': {'visible': [...], 'hidden': [...],
+    'frame': [...], 'glass': {label: [edges...]}}}.
+    """
     from .model3d import generate_3d
     # Cache STEP generation to avoid regenerating for same window
     wid = getattr(window, 'id', 0)
@@ -35,7 +99,42 @@ def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
     # this endpoint, so this is the single biggest win for repeat exports.
     if cache_key in _VIEWS_CACHE:
         logger.debug('Using cached orthographic views for window=%s', wid)
-        return _write_dxf(_VIEWS_CACHE[cache_key], window)
+        return _VIEWS_CACHE[cache_key]
+
+    disk_views = _disk_cache_get(cache_key)
+    if disk_views is not None:
+        logger.debug('Using disk-cached orthographic views for window=%s', wid)
+        _VIEWS_CACHE[cache_key] = disk_views
+        return disk_views
+
+    # Serialize concurrent requests for the SAME window: without this,
+    # simultaneous requests to /3d, /orthographic.dxf and /engineering.dxf
+    # for one window each launch their own FreeCAD subprocess in parallel,
+    # which can thrash a modest machine badly enough to look hung. The
+    # first request through the lock does the real work; the rest wait
+    # and then hit the cache above.
+    lock = _lock_for(cache_key)
+    with lock:
+        if cache_key in _VIEWS_CACHE:
+            return _VIEWS_CACHE[cache_key]
+        disk_views = _disk_cache_get(cache_key)
+        if disk_views is not None:
+            _VIEWS_CACHE[cache_key] = disk_views
+            return disk_views
+
+        views = _compute_step_views(window, panes, tenant_id, wid, cache_key)
+
+    _KEY_LOCKS_GUARD.acquire()
+    try:
+        _KEY_LOCKS.pop(cache_key, None)
+    finally:
+        _KEY_LOCKS_GUARD.release()
+
+    return views
+
+
+def _compute_step_views(window, panes, tenant_id, wid, cache_key) -> dict:
+    from .model3d import generate_3d
 
     freecad = _find_freecad()
     if not freecad:
@@ -98,7 +197,13 @@ def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
     _VIEWS_CACHE[cache_key] = views
     if len(_VIEWS_CACHE) > 50:
         _VIEWS_CACHE.pop(next(iter(_VIEWS_CACHE)))
+    _disk_cache_set(cache_key, views)
 
+    return views
+
+
+def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
+    views = get_step_views(window, panes, tenant_id=tenant_id)
     return _write_dxf(views, window)
 
 
@@ -135,22 +240,26 @@ doc = App.newDocument("QS_Ortho")
 Import.insert(r"{spath}", doc.Name)
 doc.recompute()
 
-shapes = [o.Shape for o in doc.Objects if hasattr(o, "Shape") and o.Shape and not o.Shape.isNull()]
+objs = [o for o in doc.Objects if hasattr(o, "Shape") and o.Shape and not o.Shape.isNull()]
 result = {{}}
 
-if not shapes:
+if not objs:
     print("ERROR: no shapes imported from STEP", flush=True)
 else:
     directions = ["front", "top", "side"]
     vis_edges = {{v: [] for v in directions}}
+    frame_edges = {{v: [] for v in directions}}
+    glass_edges = {{v: {{}} for v in directions}}
     dropped = {{v: 0 for v in directions}}
 
     # Discretize each edge ONCE (this is the expensive tessellation call),
     # then reuse the same 3D points for all three view projections instead
     # of re-discretizing per view. This is a ~3x speedup on the projection
     # pass for models with many edges (mullions/sashes/beads).
-    for shp in shapes:
-        for e in shp.Edges:
+    for o in objs:
+        label = (o.Label or o.Name or "").lower()
+        is_glass = label.startswith("glass")
+        for e in o.Shape.Edges:
             try:
                 pts = e.discretize(Deflection=0.15)
             except Exception:
@@ -165,11 +274,18 @@ else:
                 proj = project_pts(pts, view)
                 if len(proj) >= 2:
                     vis_edges[view].append(proj)
+                    if is_glass:
+                        glass_edges[view].setdefault(label, []).append(proj)
+                    else:
+                        frame_edges[view].append(proj)
                 else:
                     dropped[view] += 1
 
     for view in directions:
-        result[view] = {{"visible": vis_edges[view], "hidden": []}}
+        result[view] = {{
+            "visible": vis_edges[view], "hidden": [],
+            "frame": frame_edges[view], "glass": glass_edges[view],
+        }}
         print(f"{{view}}: {{len(vis_edges[view])}} edges, {{dropped[view]}} degenerate edges dropped", flush=True)
 
 with open(r"{opath}", "w", encoding="utf-8") as f:

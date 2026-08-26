@@ -216,6 +216,9 @@ def _build(window, panes, prof, tenant_id, **params) -> bytes:
         bar,
         panes_data,
         shape=shape,
+        window=window,
+        panes=panes,
+        tenant_id=tenant_id,
     )
 
     # ---- PARAMETRIC CILL (below elevation) ----
@@ -359,22 +362,34 @@ def _setup_dimstyle(doc, bar):
 # VIEW 1: ELEVATION
 # ================================================================
 
-def _elevation(msp, W, H, bar, panes_data, shape="rectangle"):
+def _elevation(msp, W, H, bar, panes_data, shape="rectangle",
+                window=None, panes=None, tenant_id=None):
     """
     Draw front elevation.
 
     Rectangular windows use the original rectangular renderer.
 
-    Circular windows:
-      - outer frame = circle
-      - glass = each pane clipped to the circular aperture
-      - mullions/transoms = clipped to the circular aperture
-
-    This is the key fix for the square-glass-in-round-window problem.
+    Circular windows are drawn strictly from the STEP solid (generated
+    first via model3d.generate_3d, projected with headless FreeCAD) so
+    this DXF can never disagree with the exported 3D/STEP model. Falls
+    back to the parametric circle/arc renderer only if STEP generation
+    is unavailable, or if window/panes weren't supplied by the caller.
     """
     shape = _normalise_shape(shape)
 
     if shape == "circular":
+        if window is not None and panes is not None:
+            try:
+                _circular_elevation_from_step(
+                    msp, window, panes, tenant_id, W, H,
+                )
+                return
+            except Exception:
+                logger.exception(
+                    "STEP-derived circular elevation failed for window=%s "
+                    "— falling back to parametric circle geometry",
+                    getattr(window, "id", "?"),
+                )
         _circular_elevation(
             msp,
             W,
@@ -471,6 +486,54 @@ def _elevation(msp, W, H, bar, panes_data, shape="rectangle"):
                     gry - gy,
                     opening,
                 )
+
+
+def _circular_elevation_from_step(msp, window, panes, tenant_id, W, H):
+    """
+    Circular-window elevation sourced strictly from the STEP solid: reuses
+    (or triggers) the same STEP generation and FreeCAD front-view
+    projection as the orthographic-views export, so the parametric DXF's
+    circular frame/glass geometry is always identical to the STEP file.
+    """
+    import math
+    from .orthographic_dxf import get_step_views
+
+    views = get_step_views(window, panes, tenant_id=tenant_id)
+    front = views.get("front") or {}
+    frame_edges = front.get("frame") or front.get("visible") or []
+    glass_by_label = front.get("glass") or {}
+    if not frame_edges and not glass_by_label:
+        raise RuntimeError("empty STEP front projection")
+
+    all_pts = [p for e in frame_edges for p in e]
+    for edges in glass_by_label.values():
+        all_pts += [p for e in edges for p in e]
+    x0 = min(p[0] for p in all_pts)
+    y0 = min(p[1] for p in all_pts)
+
+    for label, edges in glass_by_label.items():
+        pts = [(px - x0, py - y0) for e in edges for px, py in e]
+        if len(pts) < 3:
+            continue
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        ordered = sorted(pts, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+        dedup = []
+        for p in ordered:
+            if not dedup or math.hypot(p[0] - dedup[-1][0], p[1] - dedup[-1][1]) > 0.5:
+                dedup.append(p)
+        if len(dedup) >= 3:
+            msp.add_lwpolyline(
+                dedup, close=True,
+                dxfattribs={"layer": "FRAME_GEOMETRY", "lineweight": 18},
+            )
+
+    for edge in frame_edges:
+        pts = [(px - x0, py - y0) for px, py in edge]
+        if len(pts) >= 2:
+            msp.add_lwpolyline(
+                pts, dxfattribs={"layer": "FRAME_GEOMETRY", "lineweight": 50},
+            )
 
 
 def _circular_elevation(msp, W, H, bar, panes_data):

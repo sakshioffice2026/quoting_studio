@@ -153,6 +153,7 @@ function renderGrid(){
 }
 
 /* Small SVG preview drawn directly from the template's pane list. */
+let _miniPreviewSeq = 0;
 function miniPreview(t){
   const W=160, H=130, pad=8;
   const iw=W-pad*2, ih=H-pad*2;
@@ -210,11 +211,20 @@ function miniPreview(t){
   // door handle dot
   if(isDoor){ body+=`<circle cx="${pad+iw*0.9}" cy="${pad+ih*0.5}" r="2.4" fill="${col}"/>`; }
 
+  // for circular templates, clip the pane/glass body to the frame's inner
+  // ellipse so the glass follows the round shape instead of showing as a
+  // rectangle poking out past the circular frame's corners.
+  const clipId = `cuClip${_miniPreviewSeq++}`;
+  const bodyEl = (shape==='circular')
+    ? `<clipPath id="${clipId}"><ellipse cx="${pad+iw/2}" cy="${pad+ih/2}" rx="${iw/2}" ry="${ih/2}"/></clipPath>
+       <g clip-path="url(#${clipId})">${body}</g>`
+    : body;
+
   return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs><linearGradient id="gPrev" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#c5dae0"/><stop offset="100%" stop-color="#93b3bd"/>
     </linearGradient></defs>
-    ${frameEl}${body}</svg>`;
+    ${frameEl}${bodyEl}</svg>`;
 }
 
 function barsList(spec){

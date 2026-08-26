@@ -91,9 +91,15 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     # curved outline as the glass itself (previously always a plain
     # rectangle, sticking out past round/arched/gothic frames — the QS-70
     # round-window issue).
-    _add_hatching(msp, cells, W, H, bar, shape, arch_rise)
-
-    _elevation(msp, W, H, bar, cells, shape, arch_rise)
+    if shape == 'circular':
+        # Circular windows: elevation + glass hatch are drawn strictly from
+        # the STEP solid (via FreeCAD projection) instead of the
+        # independently-computed circle/arc math below, so this sheet can
+        # never drift from the exported 3D/STEP model.
+        _elevation_from_step(msp, window, panes, tenant_id, W, H)
+    else:
+        _add_hatching(msp, cells, W, H, bar, shape, arch_rise)
+        _elevation(msp, W, H, bar, cells, shape, arch_rise)
     _plan_strip(msp, W, bar, dep, cells, prof, plan_y0)
     _vertical_section(msp, H, bar, dep, prof, sect_x)
     _pane_schedule(msp, cells, design, sched_x, H, W, H, shape, arch_rise)
@@ -305,6 +311,70 @@ def _outline_points(shape, W, H, arch_rise, segments=64):
         return pts
 
     return None  # rectangle — no clipping needed
+
+
+def _elevation_from_step(msp, window, panes, tenant_id, W, H):
+    """
+    Circular-window elevation, sourced strictly from the STEP solid.
+
+    Generates (or reuses the cached) STEP file for this window via
+    model3d.generate_3d, projects its FRONT view with headless FreeCAD,
+    and draws the resulting frame/glass edges directly — no independent
+    circle/ellipse recomputation, so the drawing can never disagree with
+    the STEP export.
+    """
+    from .orthographic_dxf import get_step_views
+
+    try:
+        views = get_step_views(window, panes, tenant_id=tenant_id)
+        front = views.get('front') or {}
+        frame_edges = front.get('frame') or front.get('visible') or []
+        glass_by_label = front.get('glass') or {}
+        if not frame_edges and not glass_by_label:
+            raise RuntimeError('empty STEP front projection')
+    except Exception:
+        logger.exception(
+            'STEP-derived circular elevation failed for window=%s — '
+            'falling back to parametric circle geometry',
+            getattr(window, 'id', '?'))
+        _add_hatching(msp, _cells(panes, _load_design(window)), W, H,
+                       _load_profile(tenant_id, getattr(window, 'material', 'Aluminium'))['bar'],
+                       'circular', None)
+        _elevation(msp, W, H,
+                   _load_profile(tenant_id, getattr(window, 'material', 'Aluminium'))['bar'],
+                   _cells(panes, _load_design(window)), 'circular', None)
+        return
+
+    all_pts = [p for e in frame_edges for p in e]
+    for edges in glass_by_label.values():
+        all_pts += [p for e in edges for p in e]
+    x0 = min(p[0] for p in all_pts)
+    y0 = min(p[1] for p in all_pts)
+
+    # Glass hatch first so it sits behind the frame outline, same draw
+    # order as the rectangular/arched path.
+    for label, edges in glass_by_label.items():
+        pts = [(px - x0, py - y0) for e in edges for px, py in e]
+        if len(pts) < 3:
+            continue
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        ordered = sorted(pts, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+        dedup = []
+        for p in ordered:
+            if not dedup or math.hypot(p[0] - dedup[-1][0], p[1] - dedup[-1][1]) > 0.5:
+                dedup.append(p)
+        if len(dedup) >= 3:
+            hatch = msp.add_hatch(color=7)
+            hatch.set_pattern_fill('ANSI31', scale=8)
+            hatch.paths.add_polyline_path(dedup, is_closed=True)
+            hatch.dxf.layer = L_HATCH
+            msp.add_lwpolyline(dedup, close=True, dxfattribs={'layer': L_GLASS})
+
+    for edge in frame_edges:
+        pts = [(px - x0, py - y0) for px, py in edge]
+        if len(pts) >= 2:
+            msp.add_lwpolyline(pts, dxfattribs={'layer': L_FRAME})
 
 
 def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
