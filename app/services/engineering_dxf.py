@@ -424,11 +424,19 @@ def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
         gry = gy + gh - (gi if y + h >= 0.999 else mb/2 + 4)
         
         if grx > glx and gry > gly:
-            glass_pts = [(glx, gly), (grx, gly), (grx, gry), (glx, gry)]
-            if clip_outline is not None:
-                glass_pts = _clip_polygon(glass_pts, clip_outline)
-            if len(glass_pts) >= 3:
-                msp.add_lwpolyline(glass_pts, close=True, dxfattribs={'layer': L_GLASS})
+            if shape == 'circular':
+                # Circular window: draw circle instead of rectangle
+                cx = W / 2.0
+                cy = H / 2.0
+                radius = min(grx - glx, gry - gly) / 2.0
+                msp.add_circle((cx, cy), radius, dxfattribs={'layer': L_GLASS})
+            else:
+                # Rectangle window: original logic
+                glass_pts = [(glx, gly), (grx, gly), (grx, gry), (glx, gry)]
+                if clip_outline is not None:
+                    glass_pts = _clip_polygon(glass_pts, clip_outline)
+                if len(glass_pts) >= 3:
+                    msp.add_lwpolyline(glass_pts, close=True, dxfattribs={'layer': L_GLASS})
             _opener_symbol(msp, glx, gly, grx - glx, gry - gly, opening)
 
 
@@ -644,18 +652,38 @@ def _add_hatching(msp, cells, W, H, bar, shape='rectangle', arch_rise=None):
         gh = h * H - 8
         
         if gw > 0 and gh > 0:
-            pts = [(gx, gy), (gx + gw, gy),
-                   (gx + gw, gy + gh), (gx, gy + gh)]
-            if clip_outline is not None:
-                pts = _clip_polygon(pts, clip_outline)
-            if len(pts) < 3:
-                continue
-            hatch = msp.add_hatch()
-            hatch.set_pattern_fill('ANSI31', scale=6)
-            hatch.paths.add_polyline_path(pts, is_closed=True)
-            hatch.dxf.layer = L_HATCH
-            hatch.dxf.color = 9          # light gray, not white
-            hatch.transparency = 0.75    # 75% transparent
+            # CIRCULAR FIX: For circular windows, create circular hatch
+            if shape == 'circular':
+                cx = W / 2.0
+                cy = H / 2.0
+                radius = min(gw, gh) / 2.0
+                hatch = msp.add_hatch()
+                hatch.set_pattern_fill('ANSI31', scale=6)
+                # Create circle path for hatch
+                from math import pi, cos, sin
+                circle_pts = []
+                segments = 64
+                for i in range(segments):
+                    angle = 2 * pi * i / segments
+                    circle_pts.append((cx + radius * cos(angle), cy + radius * sin(angle)))
+                hatch.paths.add_polyline_path(circle_pts, is_closed=True)
+                hatch.dxf.layer = L_HATCH
+                hatch.dxf.color = 9
+                hatch.transparency = 0.75
+            else:
+                # Rectangle/arched/gothic: original logic
+                pts = [(gx, gy), (gx + gw, gy),
+                       (gx + gw, gy + gh), (gx, gy + gh)]
+                if clip_outline is not None:
+                    pts = _clip_polygon(pts, clip_outline)
+                if len(pts) < 3:
+                    continue
+                hatch = msp.add_hatch()
+                hatch.set_pattern_fill('ANSI31', scale=6)
+                hatch.paths.add_polyline_path(pts, is_closed=True)
+                hatch.dxf.layer = L_HATCH
+                hatch.dxf.color = 9          # light gray, not white
+                hatch.transparency = 0.75    # 75% transparent
 
 
 def _add_gasket_seals(msp, W, H, bar):

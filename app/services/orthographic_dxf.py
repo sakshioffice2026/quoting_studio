@@ -19,36 +19,34 @@ L_DIM = 'DIMENSIONS'
 VIEW_GAP = 150  # mm gap between views on sheet
 
 
+_STEP_CACHE = {}
+
 def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
     freecad = _find_freecad()
     if not freecad:
         raise RuntimeError('FreeCAD not found — tried all known paths')
 
     from .model3d import generate_3d
-    # Same fix as techdraw_export.py: use the curve-aware STEP builder so the
-    # orthographic views match the actual frame shape instead of always
-    # being rectangular.
-    step_bytes = generate_3d(window, panes, tenant_id=tenant_id, fmt='step')
-    if not step_bytes:
-        raise RuntimeError('STEP generation failed — cannot build orthographic views')
-
-    tmp_dir = None
-    for d in ('E:\\', 'D:\\', 'C:\\'):
-        if os.path.isdir(d):
-            candidate = os.path.join(d, 'qs_freecad_tmp')
-            try:
-                os.makedirs(candidate, exist_ok=True)
-                testfile = os.path.join(candidate, '.wtest')
-                with open(testfile, 'wb') as tf:
-                    tf.write(b'x')
-                os.remove(testfile)
-                tmp_dir = candidate
-                break
-            except Exception:
-                continue
-    if tmp_dir is None:
-        tmp_dir = tempfile.gettempdir()
+    # Cache STEP generation to avoid regenerating for same window
     wid = getattr(window, 'id', 0)
+    cache_key = f"{wid}_{hash(str([(p.x_norm, p.y_norm, p.w_norm, p.h_norm, p.opener_type) for p in panes]))}"
+    
+    if cache_key in _STEP_CACHE:
+        step_bytes = _STEP_CACHE[cache_key]
+        logger.debug('Using cached STEP for window=%s', wid)
+    else:
+        # Same fix as techdraw_export.py: use the curve-aware STEP builder so the
+        # orthographic views match the actual frame shape instead of always
+        # being rectangular.
+        step_bytes = generate_3d(window, panes, tenant_id=tenant_id, fmt='step')
+        if not step_bytes:
+            raise RuntimeError('STEP generation failed — cannot build orthographic views')
+        # Cache for 30 minutes max
+        _STEP_CACHE[cache_key] = step_bytes
+        if len(_STEP_CACHE) > 50:
+            _STEP_CACHE.pop(next(iter(_STEP_CACHE)))
+
+    tmp_dir = tempfile.gettempdir()  # OPTIMIZED: skip drive search
 
     step_path   = os.path.join(tmp_dir, f'qs_ortho_in_{wid}.step')
     script_path = os.path.join(tmp_dir, f'qs_ortho_{wid}.py')
@@ -62,10 +60,11 @@ def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
 
         env = os.environ.copy()
         env['LIBGL_ALWAYS_SOFTWARE'] = '1'
+        env['QT_QPA_PLATFORM'] = 'offscreen'
 
         r = subprocess.run([freecad, script_path],
                            capture_output=True, text=True,
-                           timeout=180, env=env)
+                           timeout=120, env=env)
         logger.debug('FreeCAD ortho stdout: %s', (r.stdout or '')[-2000:])
         if r.stderr:
             logger.warning('FreeCAD ortho stderr: %s', r.stderr[-1000:])

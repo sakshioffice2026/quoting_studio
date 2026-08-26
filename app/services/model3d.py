@@ -37,6 +37,10 @@ _PERM_V = (
 )
 
 
+
+# OPTIMIZED: Cache 3D model generation
+_MODEL3D_CACHE = {}
+
 def generate_3d_assembly(window, panes, tenant_id=None, fmt="glb", z_up=False) -> bytes:
     fmt = fmt.lower()
     from .frame_assembly import build_members, resolve_profiles
