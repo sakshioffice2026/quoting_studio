@@ -364,13 +364,25 @@ def _build_trimesh(window, asm, fmt):
             # polygon (offset into the same cx/cy-centred space as
             # everything else here) instead of a plain box, so the glass
             # follows the arc instead of poking out at the corners.
-            ring2d = [(float(px) - cx, float(py) - cy) for px, py in clip]
-            try:
-                mesh = _prism(trimesh, np, [ring2d], thickness)
-                mesh.apply_translation((0.0, 0.0, z_center - thickness / 2.0))
-            except Exception as exc:
-                logger.debug("clipped glass prism failed: %s", exc)
-                mesh = None
+            #
+            # FIX: dedupe/collinear-strip the raw clip output first (same
+            # as the STEP path below) — without this, near-duplicate
+            # vertices from the Sutherland-Hodgman clip make _prism() throw,
+            # which was silently caught and produced the rectangular glass
+            # panel sticking out behind the round frame in the 3D viewer.
+            ring2d = _simplify_ring(
+                [(float(px) - cx, float(py) - cy) for px, py in clip]
+            )
+            if len(ring2d) >= 3:
+                try:
+                    mesh = _prism(trimesh, np, [ring2d], thickness)
+                    mesh.apply_translation((0.0, 0.0, z_center - thickness / 2.0))
+                except Exception as exc:
+                    logger.warning(
+                        "clipped glass prism failed, falling back to "
+                        "rectangular box: %s", exc
+                    )
+                    mesh = None
 
         if mesh is None:
             mesh = trimesh.creation.box(
@@ -602,18 +614,38 @@ def _build_step(window, asm, z_up=False):
             # Circular frame: extrude the exact ellipse-clipped outline
             # (see the GLB/STL branch above) instead of a plain box, so the
             # glass follows the arc instead of poking out at the corners.
-            ring2d = [(float(px) - cx, float(py) - cy) for px, py in clip]
-            try:
-                solid = (
-                    cq.Workplane("XY")
-                    .polyline(ring2d)
-                    .close()
-                    .extrude(thickness)
-                    .translate((0.0, 0.0, z_center - thickness / 2.0))
-                )
-            except Exception as exc:
-                logger.debug("clipped glass cq solid failed: %s", exc)
-                solid = None
+            #
+            # FIX: the raw Sutherland-Hodgman clip output from
+            # _clip_polygon_convex() can contain near-duplicate consecutive
+            # points (zero-length edges) right at the rectangle/ellipse
+            # intersection vertices. cadquery's polyline().close() throws on
+            # those degenerate edges, which was being silently swallowed
+            # below and made the glass fall back to a plain W x H box —
+            # i.e. a visible rectangle behind the correctly-circular frame
+            # ring. Run the same _simplify_ring() dedupe/collinear-strip
+            # used for member cross-sections on the clip outline first so
+            # the wire is always valid.
+            ring2d = _simplify_ring(
+                [(float(px) - cx, float(py) - cy) for px, py in clip]
+            )
+            if len(ring2d) >= 3:
+                try:
+                    solid = (
+                        cq.Workplane("XY")
+                        .polyline(ring2d)
+                        .close()
+                        .extrude(thickness)
+                        .translate((0.0, 0.0, z_center - thickness / 2.0))
+                    )
+                except Exception as exc:
+                    # Bumped from debug->warning: this failure is exactly
+                    # what causes a circular window to silently ship with
+                    # rectangular glass, so it needs to be visible in logs.
+                    logger.warning(
+                        "clipped glass cq solid failed for glass_%d, "
+                        "falling back to rectangular box: %s", i + 1, exc
+                    )
+                    solid = None
 
         if solid is None:
             solid = (

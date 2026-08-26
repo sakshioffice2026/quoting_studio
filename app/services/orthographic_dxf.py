@@ -20,17 +20,27 @@ VIEW_GAP = 150  # mm gap between views on sheet
 
 
 _STEP_CACHE = {}
+_VIEWS_CACHE = {}  # cache_key -> parsed {front, top, side} view dict (skips FreeCAD subprocess entirely)
+
 
 def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
-    freecad = _find_freecad()
-    if not freecad:
-        raise RuntimeError('FreeCAD not found — tried all known paths')
-
     from .model3d import generate_3d
     # Cache STEP generation to avoid regenerating for same window
     wid = getattr(window, 'id', 0)
     cache_key = f"{wid}_{hash(str([(p.x_norm, p.y_norm, p.w_norm, p.h_norm, p.opener_type) for p in panes]))}"
-    
+
+    # Fast path: identical window/panes already projected before — skip both
+    # STEP (re)generation and the FreeCAD subprocess launch entirely. The
+    # FreeCAD subprocess start-up + projection pass is the dominant cost of
+    # this endpoint, so this is the single biggest win for repeat exports.
+    if cache_key in _VIEWS_CACHE:
+        logger.debug('Using cached orthographic views for window=%s', wid)
+        return _write_dxf(_VIEWS_CACHE[cache_key], window)
+
+    freecad = _find_freecad()
+    if not freecad:
+        raise RuntimeError('FreeCAD not found — tried all known paths')
+
     if cache_key in _STEP_CACHE:
         step_bytes = _STEP_CACHE[cache_key]
         logger.debug('Using cached STEP for window=%s', wid)
@@ -85,6 +95,10 @@ def generate_orthographic_dxf(window, panes, tenant_id=None) -> bytes:
             except Exception:
                 pass
 
+    _VIEWS_CACHE[cache_key] = views
+    if len(_VIEWS_CACHE) > 50:
+        _VIEWS_CACHE.pop(next(iter(_VIEWS_CACHE)))
+
     return _write_dxf(views, window)
 
 
@@ -128,24 +142,35 @@ if not shapes:
     print("ERROR: no shapes imported from STEP", flush=True)
 else:
     directions = ["front", "top", "side"]
+    vis_edges = {{v: [] for v in directions}}
+    dropped = {{v: 0 for v in directions}}
+
+    # Discretize each edge ONCE (this is the expensive tessellation call),
+    # then reuse the same 3D points for all three view projections instead
+    # of re-discretizing per view. This is a ~3x speedup on the projection
+    # pass for models with many edges (mullions/sashes/beads).
+    for shp in shapes:
+        for e in shp.Edges:
+            try:
+                pts = e.discretize(Deflection=0.15)
+            except Exception:
+                for v in directions:
+                    dropped[v] += 1
+                continue
+            if len(pts) < 2:
+                for v in directions:
+                    dropped[v] += 1
+                continue
+            for view in directions:
+                proj = project_pts(pts, view)
+                if len(proj) >= 2:
+                    vis_edges[view].append(proj)
+                else:
+                    dropped[view] += 1
+
     for view in directions:
-        vis_edges = []
-        dropped = 0
-        for shp in shapes:
-            for e in shp.Edges:
-                try:
-                    pts = e.discretize(Deflection=0.15)
-                except Exception:
-                    dropped += 1
-                    continue
-                if len(pts) >= 2:
-                    proj = project_pts(pts, view)
-                    if len(proj) >= 2:
-                        vis_edges.append(proj)
-                    else:
-                        dropped += 1
-        result[view] = {{"visible": vis_edges, "hidden": []}}
-        print(f"{{view}}: {{len(vis_edges)}} edges, {{dropped}} degenerate edges dropped", flush=True)
+        result[view] = {{"visible": vis_edges[view], "hidden": []}}
+        print(f"{{view}}: {{len(vis_edges[view])}} edges, {{dropped[view]}} degenerate edges dropped", flush=True)
 
 with open(r"{opath}", "w", encoding="utf-8") as f:
     json.dump(result, f)

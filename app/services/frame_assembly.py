@@ -879,6 +879,50 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         ay = r['y'] + ib
         aw = r['w'] - il - ir
         ah = r['h'] - ib - it
+
+        # A sash on the OUTER perimeter (on_l/on_r/on_b/on_t) was being run
+        # straight out to the square W x H pane-cell edge via il/ir/ib/it
+        # above. That's correct for a rectangular/arched/gothic outer frame,
+        # but for a circular frame the outer frame is a ring — running the
+        # sash out to the square cell edge pokes it past the round frame,
+        # which is the rectangular shape visible over the circular window.
+        # Pull those perimeter edges back to the ring's own inner boundary
+        # (worst case across the sash's own span, so it never pokes out at
+        # any point along that edge) instead of the flat pane-cell edge.
+        if shape == 'circular':
+            if on_l or on_r:
+                y_lo_s = min(max(ay, 1e-6), H - 1e-6)
+                y_hi_s = min(max(ay + ah, 1e-6), H - 1e-6)
+                spans = [s for s in (
+                    _ellipse_span_x(y_lo_s, cx, cy, rx_in, ry_in),
+                    _ellipse_span_x(y_hi_s, cx, cy, rx_in, ry_in),
+                    _ellipse_span_x((y_lo_s + y_hi_s) / 2.0, cx, cy, rx_in, ry_in),
+                ) if s is not None]
+                if spans:
+                    if on_l:
+                        new_ax = max(ax, max(s[0] for s in spans))
+                        aw -= (new_ax - ax)
+                        ax = new_ax
+                    if on_r:
+                        new_right = min(ax + aw, min(s[1] for s in spans))
+                        aw = new_right - ax
+            if on_b or on_t:
+                x_lo_s = min(max(ax, 1e-6), W - 1e-6)
+                x_hi_s = min(max(ax + aw, 1e-6), W - 1e-6)
+                spans = [s for s in (
+                    _ellipse_span_y(x_lo_s, cx, cy, rx_in, ry_in),
+                    _ellipse_span_y(x_hi_s, cx, cy, rx_in, ry_in),
+                    _ellipse_span_y((x_lo_s + x_hi_s) / 2.0, cx, cy, rx_in, ry_in),
+                ) if s is not None]
+                if spans:
+                    if on_b:
+                        new_ay = max(ay, max(s[0] for s in spans))
+                        ah -= (new_ay - ay)
+                        ay = new_ay
+                    if on_t:
+                        new_top = min(ay + ah, min(s[1] for s in spans))
+                        ah = new_top - ay
+
         if aw <= 2 * sb or ah <= 2 * sb:
             continue
         sash_rects[r['i']] = (ax, ay, aw, ah)

@@ -298,6 +298,45 @@ def _prism(trimesh, np, rings, length):
     return solid
 
 
+def _extrude_polygon_pts(trimesh, np, pts2d, thickness):
+    """Extrude a simple closed 2D polygon (list of (x, y) points, no holes)
+    into a solid Trimesh of the given thickness, centred on z=0.
+
+    Uses mapbox-earcut directly (already a project dependency) instead of
+    trimesh.creation.extrude_polygon, which requires shapely — not
+    installed in this project's requirements.txt.
+    """
+    import mapbox_earcut as earcut
+
+    pts = np.asarray(pts2d, dtype=np.float64)
+    if len(pts) >= 2 and np.allclose(pts[0], pts[-1]):
+        pts = pts[:-1]
+    n = len(pts)
+
+    rings = np.array([n], dtype=np.uint32)
+    tri_idx = earcut.triangulate_float64(pts, rings).reshape(-1, 3)
+
+    half = thickness / 2.0
+    top = np.column_stack([pts, np.full(n, half)])
+    bot = np.column_stack([pts, np.full(n, -half)])
+    vertices = np.vstack([top, bot])
+
+    faces = []
+    for a, b, c in tri_idx:
+        faces.append([a, b, c])                       # top (CCW, +Z)
+        faces.append([n + c, n + b, n + a])            # bottom (reversed)
+    for i in range(n):
+        j = (i + 1) % n
+        # side wall quad -> 2 triangles, outward-facing
+        faces.append([i, j, n + j])
+        faces.append([i, n + j, n + i])
+
+    mesh = trimesh.Trimesh(vertices=vertices, faces=np.array(faces), process=True)
+    if mesh.volume < 0:
+        mesh.invert()
+    return mesh
+
+
 def _build_trimesh(window, asm, fmt):
     import numpy as np
     import trimesh
@@ -347,27 +386,40 @@ def _build_trimesh(window, asm, fmt):
         gx = float(glass.x) + float(glass.w) / 2.0 - cx
         gy = float(glass.y) + float(glass.h) / 2.0 - cy
 
+        # Same fix as _build_step(): a circular/arched/gothic frame already
+        # has this pane's polygon clipped to the ring's inner ellipse/arc
+        # in glass.clip_path — this box path was ignoring it and always
+        # extruding the full rectangular glass.w x glass.h box, which is
+        # the rectangle poking out past the round frame in the 3D viewer
+        # (GLB). Build the clipped polygon when available; only fall back
+        # to a plain box when there's no clip_path (genuinely rectangular
+        # pane).
+        clip_pts = getattr(glass, 'clip_path', None)
+
         if glass.infill == "panel":
-            mesh = trimesh.creation.box(
-                extents=(
-                    max(float(glass.w), 1.0),
-                    max(float(glass.h), 1.0),
-                    float(glass.thickness),
-                )
-            )
-            mesh.apply_translation((gx, gy, frame_ref * 0.5))
-            mesh.visual.face_colors = frame_colour
+            thickness = float(glass.thickness)
+            z_pos = frame_ref * 0.5
+            colour = frame_colour
+        else:
+            thickness = 8.0
+            z_pos = glass_z
+            colour = list(_GLASS_RGBA)
+
+        if clip_pts and len(clip_pts) >= 3:
+            pts2d = [(float(px) - cx, float(py) - cy) for px, py in clip_pts]
+            mesh = _extrude_polygon_pts(trimesh, np, pts2d, thickness)
+            mesh.apply_translation((0, 0, z_pos - thickness / 2.0))
         else:
             mesh = trimesh.creation.box(
                 extents=(
                     max(float(glass.w), 1.0),
                     max(float(glass.h), 1.0),
-                    8.0,
+                    thickness,
                 )
             )
-            mesh.apply_translation((gx, gy, glass_z))
-            mesh.visual.face_colors = list(_GLASS_RGBA)
+            mesh.apply_translation((gx, gy, z_pos))
 
+        mesh.visual.face_colors = colour
         meshes.append(mesh)
 
     if fmt == "glb":
@@ -484,24 +536,48 @@ def _build_step(window, asm, z_up=False):
         gx = float(glass.x) + float(glass.w) / 2.0 - cx
         gy = float(glass.y) + float(glass.h) / 2.0 - cy
 
+        # For a circular/arched/gothic frame, frame_assembly.py already
+        # clips this pane's polygon to the ring's inner ellipse/arc
+        # (asm's GlassCell.clip_path) so it never pokes out past the round
+        # frame. This box-extrusion path was ignoring clip_path entirely
+        # and always building a plain rectangular box from glass.w/glass.h
+        # instead — which is exactly the flat rectangular plate visible
+        # sticking out past the ring in the STEP/DXF output. Build the
+        # clipped polygon when one is available; only fall back to the
+        # plain box when there's no clip_path (rectangular/arched-free
+        # frames, where the pane genuinely is a rectangle).
+        clip_pts = getattr(glass, 'clip_path', None)
+
         if glass.infill == "panel":
+            thickness = float(glass.thickness)
+            z_pos = frame_ref * 0.5
+            colour = cq.Color(r, g, b)
+        else:
+            thickness = 8.0
+            z_pos = glass_z + 4.0
+            colour = cq.Color(0.55, 0.75, 0.80, 0.35)
+
+        if clip_pts and len(clip_pts) >= 3:
+            pts = [(float(px) - cx, float(py) - cy) for px, py in clip_pts]
             solid = (
                 cq.Workplane("XY")
-                .box(
-                    float(glass.w),
-                    float(glass.h),
-                    float(glass.thickness),
-                )
-                .translate((gx, gy, frame_ref * 0.5))
+                .polyline(pts)
+                .close()
+                .extrude(thickness)
+                .translate((0, 0, z_pos - thickness / 2.0))
             )
-            colour = cq.Color(r, g, b)
+        elif glass.infill == "panel":
+            solid = (
+                cq.Workplane("XY")
+                .box(float(glass.w), float(glass.h), thickness)
+                .translate((gx, gy, z_pos))
+            )
         else:
             solid = (
                 cq.Workplane("XY")
-                .box(float(glass.w), float(glass.h), 8.0)
-                .translate((gx, gy, glass_z + 4.0))
+                .box(float(glass.w), float(glass.h), thickness)
+                .translate((gx, gy, z_pos))
             )
-            colour = cq.Color(0.55, 0.75, 0.80, 0.35)
 
         assembly.add(zup(solid), name=f"glass_{i + 1}", color=colour)
 

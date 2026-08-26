@@ -1,4 +1,5 @@
 import os
+
 from flask import Flask, jsonify, render_template
 from .extensions import db, login_manager, migrate, csrf
 from config import config
