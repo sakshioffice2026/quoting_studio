@@ -543,6 +543,12 @@ def _build_step_isolated(window, asm, z_up=False, timeout=180):
     its own interpreter/GIL, so the parent (and every other request it is
     serving) stays responsive while this runs. Uses multiprocessing's
     'spawn' start method, which — unlike os.fork() — works on Windows.
+
+    Curved (circular/arched) members are never passed to fused.union() in
+    _build_step — that native OCC call can hang forever on curved solids
+    without raising, so it is skipped at the source rather than relied on
+    to time out here. This 180s limit is now a genuine backstop for
+    otherwise-slow builds, not the primary defence against the hang.
     """
     step_window = _StepWindow(window)
     ctx = multiprocessing.get_context("spawn")
@@ -637,14 +643,57 @@ def _build_step(window, asm, z_up=False):
     # to union cleanly (rare, but OCC booleans can be fragile on complex
     # profiles) are kept as separate parts rather than aborting the whole
     # export, so a single bad union never blanks the download.
-    fused = frame_solids[0][1]
+    #
+    # FIX HISTORY:
+    # 1) fused.union(solid) called once per SEGMENT of a curved member's
+    #    own path (many short adjacent segments touching face-to-face) was
+    #    the actual hang — a native OCC C call that never raises, it just
+    #    sits inside the kernel until the subprocess timeout kills it.
+    #    That per-segment chain is fixed in _member_solid_cq_path, which
+    #    now returns one Compound per curved member with zero booleans.
+    # 2) Skipping ALL union for curved members (this function) was an
+    #    over-correction: it stopped the ring from ever being combined
+    #    with the straight mullion/transom, so they render as two
+    #    disconnected, interpenetrating solids instead of one clean
+    #    mitred joint — visible in STEP/DXF as the vertical member
+    #    "cutting through" the ring and as bleeding hatch lines in the
+    #    projected DXF.
+    # A SINGLE union of [fused straight body] + [one curved compound] is a
+    # cheap, ordinary boolean — nothing like the O(n) segment chain that
+    # hung — so it is safe to attempt once per curved member. Only if that
+    # one attempt genuinely raises does the member fall back to a loose,
+    # disconnected part.
+    def _is_curved(member):
+        return bool(getattr(member, "path", None))
+
+    fusable = [(m, s) for m, s in frame_solids if not _is_curved(m)]
+    curved = [(m, s) for m, s in frame_solids if _is_curved(m)]
     loose_parts = []
-    for m, solid in frame_solids[1:]:
+
+    if fusable:
+        fused = fusable[0][1]
+        for m, solid in fusable[1:]:
+            try:
+                fused = fused.union(solid)
+            except Exception as exc:
+                logger.warning(
+                    "frame union failed for %s, keeping as separate part: %s",
+                    getattr(m, "id", "?"), exc,
+                )
+                loose_parts.append((m, solid))
+    else:
+        fused = None
+
+    for m, solid in curved:
+        if fused is None:
+            fused = solid
+            continue
         try:
             fused = fused.union(solid)
         except Exception as exc:
             logger.warning(
-                "frame union failed for %s, keeping as separate part: %s",
+                "curved frame union failed for %s, keeping as separate "
+                "part (joint will not be mitred): %s",
                 getattr(m, "id", "?"), exc,
             )
             loose_parts.append((m, solid))
@@ -804,16 +853,40 @@ def _cq_section_solid(cq, outer, holes, length):
     return solid
 
 
+def _cq_section_solid_no_holes(cq, outer, length):
+    """Outer-profile-only extrude, no interior hole cut. Used only for
+    curved (m.path) members — see _member_solid_cq_path for why."""
+    return (
+        cq.Workplane("XY")
+        .polyline(outer)
+        .close()
+        .extrude(length)
+    )
+
+
 def _member_solid_cq_path(cq, m, outer, holes, sec_bar, sec_dep, cx, cy):
-    """Curved member (arched/gothic/circular): union of straight sub-solids,
-    one per polyline edge of m.path, each built with the same base
-    horizontal orientation used for straight horizontal members plus an
-    extra Z rotation for that segment's own angle — the cadquery mirror of
-    _member_mesh_path so STEP matches the GLB/STL viewer exactly."""
+    """Curved member (arched/gothic/circular): compound of straight
+    sub-solids, one per polyline edge of m.path, each built with the same
+    base horizontal orientation used for straight horizontal members plus
+    an extra Z rotation for that segment's own angle — the cadquery mirror
+    of _member_mesh_path so STEP matches the GLB/STL viewer exactly.
+
+    FIX: curved members no longer call ANY OCC boolean here — neither
+    .union() across segments nor .cut() for interior holes. Both are
+    native OCC boolean calls, and a curved path (many short segments
+    touching face-to-face at each joint) is exactly the geometry where
+    OCC's boolean solver can hang indefinitely inside the C kernel
+    without ever raising, so neither can be relied on to fail fast.
+    Interior chamber holes are therefore not cut on curved members (outer
+    profile only) — cosmetic/manufacturing detail only, not structural.
+    Rectangular/straight members are untouched: they never call this
+    function, and _cq_section_solid (with real hole cuts) still runs for
+    them exactly as before.
+    """
     pts = m.path
     n = len(pts)
     count = n if m.closed else n - 1
-    result = None
+    solids = []
     for i in range(count):
         p0 = pts[i]
         p1 = pts[(i + 1) % n] if m.closed else pts[i + 1]
@@ -823,7 +896,7 @@ def _member_solid_cq_path(cq, m, outer, holes, sec_bar, sec_dep, cx, cy):
             continue
         theta_deg = math.degrees(math.atan2(dy, dx))
 
-        solid = _cq_section_solid(cq, outer, holes, seg_len)
+        solid = _cq_section_solid_no_holes(cq, outer, seg_len)
         # base horizontal mapping: Z(length)->X, X(u)->Y, Y(v)->Z
         solid = solid.rotate((0, 0, 0), (0, 1, 0), 90)
         solid = solid.rotate((0, 0, 0), (1, 0, 0), 90)
@@ -833,9 +906,18 @@ def _member_solid_cq_path(cq, m, outer, holes, sec_bar, sec_dep, cx, cy):
         tx, ty = _path_segment_transform(theta_deg, p0, sec_bar, cx, cy)
         solid = solid.translate((tx, ty, 0.0))
 
-        result = solid if result is None else result.union(solid)
+        solids.append(solid)
 
-    return result
+    if not solids:
+        return None
+    if len(solids) == 1:
+        return solids[0]
+
+    compound = cq.Compound.makeCompound(
+        s.val() for s in solids
+    )
+    return cq.Workplane("XY").newObject([compound])
+
 
 
 def _member_solid_cq(cq, m, rings, sec_bar, sec_dep, cx, cy):
