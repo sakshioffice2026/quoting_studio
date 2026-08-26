@@ -89,9 +89,40 @@ def get_step_views(window, panes, tenant_id=None) -> dict:
     'frame': [...], 'glass': {label: [edges...]}}}.
     """
     from .model3d import generate_3d
-    # Cache STEP generation to avoid regenerating for same window
+    # Cache STEP generation to avoid regenerating for same window.
+    #
+    # FIX: the cache key used to be built ONLY from window id + pane
+    # layout (x_norm/y_norm/w_norm/h_norm/opener_type). It omitted every
+    # sizing/shape parameter that also feeds the STEP geometry — width_mm,
+    # height_mm, shape, archRise, material/profile. If a user edited the
+    # window's overall size or shape WITHOUT touching the pane grid, the
+    # key stayed identical to the pre-edit key, so this function kept
+    # returning the stale pre-edit projection forever (or until the 30min
+    # TTL/eviction happened to clear it) — while the dimension line and
+    # pane schedule, which read window.height_mm directly rather than
+    # through this cache, correctly showed the new value. That's exactly
+    # what produced a drawing whose envelope disagreed with the quoted
+    # size (and tripped the DIMENSION MISMATCH self-check below) even
+    # though model3d.py's STEP builder itself was already correct.
+    #
+    # Every consumer of get_step_views() (orthographic.dxf, the circular
+    # branch of engineering_dxf.py, cad_export.py) shares this one cache,
+    # so the fix here fixes all of them at once.
     wid = getattr(window, 'id', 0)
-    cache_key = f"{wid}_{hash(str([(p.x_norm, p.y_norm, p.w_norm, p.h_norm, p.opener_type) for p in panes]))}"
+    design = getattr(window, 'design_json', None)
+    arch_rise = None
+    if isinstance(design, dict):
+        arch_rise = design.get('archRise')
+    size_shape_key = (
+        float(getattr(window, 'width_mm', 0) or 0),
+        float(getattr(window, 'height_mm', 0) or 0),
+        str(getattr(window, 'shape', None) or (design.get('shape') if isinstance(design, dict) else None) or 'rectangle').lower(),
+        arch_rise,
+        str(getattr(window, 'material', None) or ''),
+        str(getattr(window, 'frame_colour_hex', None) or ''),
+    )
+    pane_key = [(p.x_norm, p.y_norm, p.w_norm, p.h_norm, p.opener_type) for p in panes]
+    cache_key = f"{wid}_{hash(str(size_shape_key))}_{hash(str(pane_key))}"
 
     # Fast path: identical window/panes already projected before — skip both
     # STEP (re)generation and the FreeCAD subprocess launch entirely. The
