@@ -86,8 +86,12 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     sect_x = W + 300
     sched_x = sect_x + bar + SCHED_GAP
 
-    # Hatching drawn first so it sits behind frame/glass/swing-line geometry
-    _add_hatching(msp, cells, W, H, bar)
+    # Hatching drawn first so it sits behind frame/glass/swing-line geometry.
+    # Pass shape/arch_rise through so the hatch fill is clipped to the same
+    # curved outline as the glass itself (previously always a plain
+    # rectangle, sticking out past round/arched/gothic frames — the QS-70
+    # round-window issue).
+    _add_hatching(msp, cells, W, H, bar, shape, arch_rise)
 
     _elevation(msp, W, H, bar, cells, shape, arch_rise)
     _plan_strip(msp, W, bar, dep, cells, prof, plan_y0)
@@ -516,9 +520,13 @@ def _cell_clipped_bbox(x, y, w, h, W, H, outline):
     xs = [p[0] for p in clipped]
     ys = [p[1] for p in clipped]
     cw, ch = max(xs) - min(xs), max(ys) - min(ys)
-    # Curved if the clipped envelope is measurably smaller than the raw
-    # rectangle — i.e. the frame outline actually cut this cell.
-    is_curved = (cw < (x1 - x0) - 0.5) or (ch < (y1 - y0) - 0.5)
+    # A corner cut only touches the raw rectangle at a single tangent point
+    # (e.g. a quadrant cell in a 2x2 grid inside a circle), so its bbox can
+    # still equal the unclipped rectangle's even though the frame outline
+    # did cut it. Compare vertex counts too: clipping a rectangle against a
+    # convex outline that actually trims a corner always adds at least one
+    # extra vertex versus the plain 4-corner rectangle.
+    is_curved = (cw < (x1 - x0) - 0.5) or (ch < (y1 - y0) - 0.5) or (len(clipped) > 4)
     return cw, ch, is_curved
 
 
@@ -622,7 +630,13 @@ def _dimensions(msp, W, H, cells, plan_y0, plan_y1, sect_x, dep):
 
 # FIXED: ADD MISSING FUNCTIONS
 
-def _add_hatching(msp, cells, W, H, bar):
+def _add_hatching(msp, cells, W, H, bar, shape='rectangle', arch_rise=None):
+    # Clip each cell's hatch boundary to the true frame outline on curved
+    # shapes (circular/arched/gothic) — same outline _elevation() uses for
+    # the glass polyline — so the hatch fill never boxes out past the round
+    # aperture as a plain rectangle.
+    clip_outline = _outline_points(shape, W, H, arch_rise) if shape != 'rectangle' else None
+
     for (x, y, w, h, opening) in cells:
         gx = x * W + bar + 4
         gy = y * H + bar + 4
@@ -630,14 +644,15 @@ def _add_hatching(msp, cells, W, H, bar):
         gh = h * H - 8
         
         if gw > 0 and gh > 0:
+            pts = [(gx, gy), (gx + gw, gy),
+                   (gx + gw, gy + gh), (gx, gy + gh)]
+            if clip_outline is not None:
+                pts = _clip_polygon(pts, clip_outline)
+            if len(pts) < 3:
+                continue
             hatch = msp.add_hatch()
             hatch.set_pattern_fill('ANSI31', scale=6)
-            hatch.paths.add_polyline_path([
-                (gx, gy),
-                (gx + gw, gy),
-                (gx + gw, gy + gh),
-                (gx, gy + gh)
-            ], is_closed=True)
+            hatch.paths.add_polyline_path(pts, is_closed=True)
             hatch.dxf.layer = L_HATCH
             hatch.dxf.color = 9          # light gray, not white
             hatch.transparency = 0.75    # 75% transparent

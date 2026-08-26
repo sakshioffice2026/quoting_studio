@@ -14,6 +14,7 @@ python-dotenv==1.0.1
 # 3D model export
 # trimesh: powers GLB + STL 3D output and the web 3D viewer (pure python, works on 3.14)
 trimesh==4.12.2
+mapbox-earcut==1.0.3
 # cadquery: OpenCASCADE kernel — needed ONLY for STEP (.step) B-rep export.
 # If pip fails on Python 3.14 (no cadquery-ocp wheels yet), skip it —
 # GLB/STL/viewer still work via trimesh. Install when 3.14 wheels land, or use Python 3.12.
