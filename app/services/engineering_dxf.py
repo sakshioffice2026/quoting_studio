@@ -92,7 +92,7 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     _elevation(msp, W, H, bar, cells, shape, arch_rise)
     _plan_strip(msp, W, bar, dep, cells, prof, plan_y0)
     _vertical_section(msp, H, bar, dep, prof, sect_x)
-    _pane_schedule(msp, cells, design, sched_x, H, W, H)
+    _pane_schedule(msp, cells, design, sched_x, H, W, H, shape, arch_rise)
     _dimensions(msp, W, H, cells, plan_y0, plan_y1, sect_x, dep)
 
     # FIXED: Add missing geometry functions
@@ -264,26 +264,6 @@ def _clip_polygon(subject, clip):
     return output
 
 
-def _offset_outline_inward(points, cx, cy, offset):
-    """Approximate inward offset of a closed outline by scaling each point
-    toward the outline centroid (cx, cy) by `offset` mm along its radial
-    direction. Used to build the true glass boundary on curved shapes
-    (circular/arched/gothic) so the glazing-bead margin still follows the
-    curve instead of being subtracted as a flat rectangular inset, which
-    could land entirely inside the outline and leave the glass looking
-    like a plain square instead of round (the QS-70 round-window bug)."""
-    out = []
-    for (px, py) in points:
-        dx, dy = px - cx, py - cy
-        dist = math.hypot(dx, dy)
-        if dist < 1e-6:
-            out.append((px, py))
-            continue
-        scale = max(0.0, (dist - offset) / dist)
-        out.append((cx + dx * scale, cy + dy * scale))
-    return out
-
-
 def _outline_points(shape, W, H, arch_rise, segments=64):
     """Sample the true frame outline (ellipse / arch / gothic head) into a
     dense point list for use as a clip polygon. Returns None for
@@ -434,25 +414,15 @@ def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
 
         gi = bar + 4
         gx, gw = x * W, w * W
-
-        # On curved shapes, a flat `gi` inset on outer edges can land the
-        # rectangle's corner entirely inside the outline, so the clip below
-        # has nothing to cut and the glass renders as a square instead of
-        # following the round/arched/gothic curve. Fix: on outer edges of a
-        # curved shape, keep the rectangle flush with the bounding box and
-        # instead clip against the true outline offset inward by `gi`, so
-        # the glass margin always tracks the curve.
-        outer_inset = 0 if clip_outline is not None else gi
-        glx = gx + (outer_inset if x <= 0.001 else mb/2 + 4)
-        gly = gy + (outer_inset if y <= 0.001 else mb/2 + 4)
-        grx = gx + gw - (outer_inset if x + w >= 0.999 else mb/2 + 4)
-        gry = gy + gh - (outer_inset if y + h >= 0.999 else mb/2 + 4)
-
+        glx = gx + (gi if x <= 0.001 else mb/2 + 4)
+        gly = gy + (gi if y <= 0.001 else mb/2 + 4)
+        grx = gx + gw - (gi if x + w >= 0.999 else mb/2 + 4)
+        gry = gy + gh - (gi if y + h >= 0.999 else mb/2 + 4)
+        
         if grx > glx and gry > gly:
             glass_pts = [(glx, gly), (grx, gly), (grx, gry), (glx, gry)]
             if clip_outline is not None:
-                glass_clip = _offset_outline_inward(clip_outline, W / 2.0, H / 2.0, gi)
-                glass_pts = _clip_polygon(glass_pts, glass_clip)
+                glass_pts = _clip_polygon(glass_pts, clip_outline)
             if len(glass_pts) >= 3:
                 msp.add_lwpolyline(glass_pts, close=True, dxfattribs={'layer': L_GLASS})
             _opener_symbol(msp, glx, gly, grx - glx, gry - gly, opening)
@@ -528,10 +498,37 @@ def _vertical_section(msp, H, bar, dep, prof, sect_x):
                      dxfattribs={'layer': L_GLASS})
 
 
-def _pane_schedule(msp, cells, design, ox, top_y, W, H):
-    col_w = [80, 240, 360, 220]
+def _cell_clipped_bbox(x, y, w, h, W, H, outline):
+    """True bounding box of a cell rectangle after clipping to the curved
+    frame outline. Falls back to the plain rectangle bbox when there is no
+    outline (rectangular windows) or the clip produces nothing (shouldn't
+    happen for cells generated inside the frame)."""
+    x0, y0 = x * W, y * H
+    x1, y1 = (x + w) * W, (y + h) * H
+    rect = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    if not outline:
+        return x1 - x0, y1 - y0, False
+
+    clipped = _clip_polygon(rect, outline)
+    if not clipped:
+        return x1 - x0, y1 - y0, False
+
+    xs = [p[0] for p in clipped]
+    ys = [p[1] for p in clipped]
+    cw, ch = max(xs) - min(xs), max(ys) - min(ys)
+    # Curved if the clipped envelope is measurably smaller than the raw
+    # rectangle — i.e. the frame outline actually cut this cell.
+    is_curved = (cw < (x1 - x0) - 0.5) or (ch < (y1 - y0) - 0.5)
+    return cw, ch, is_curved
+
+
+def _pane_schedule(msp, cells, design, ox, top_y, W, H,
+                    shape='rectangle', arch_rise=None):
+    col_w = [80, 200, 300, 240, 100]
     row_h = 80
-    headers = ['#', 'Opener', 'Glazing', 'Size']
+    headers = ['#', 'Opener', 'Glazing', 'Size (env.)', 'Shape']
+
+    outline = _outline_points(shape, W, H, arch_rise) if shape != 'rectangle' else None
 
     total_w = sum(col_w)
     n_rows  = len(cells) + 1
@@ -559,6 +556,7 @@ def _pane_schedule(msp, cells, design, ox, top_y, W, H):
                   28, L_ANNOT, halign=1)
         cx += col_w[i]
 
+    any_curved = False
     for r_idx, (x, y, w, h, opening) in enumerate(cells):
         ry = top_y - (r_idx + 2) * row_h
         msp.add_line((ox, ry), (ox + total_w, ry),
@@ -567,14 +565,23 @@ def _pane_schedule(msp, cells, design, ox, top_y, W, H):
         if design and design.get('panes') and r_idx < len(design['panes']):
             dp = design['panes'][r_idx]
             glazing = dp.get('glazing') or dp.get('glazingType') or 'DGU'
+
+        cw, ch, is_curved = _cell_clipped_bbox(x, y, w, h, W, H, outline)
+        any_curved = any_curved or is_curved
+        shape_lbl = 'Curved*' if is_curved else 'Straight'
+
         cx = ox
         vals = [str(r_idx + 1), opening or 'Fixed', glazing,
-                f'{w*W:.0f}×{h*H:.0f}']
+                f'{cw:.0f}×{ch:.0f}', shape_lbl]
         for i, val in enumerate(vals):
             _add_text(msp, val,
                       cx + col_w[i] * 0.5, ry + row_h * 0.35,
                       24, L_ANNOT, halign=1)
             cx += col_w[i]
+
+    if any_curved:
+        _add_text(msp, '* Curved edge on frame side — envelope size shown; cut to curved template.',
+                  ox, top_y - total_h - 30, 22, L_ANNOT, halign=0)
 
 
 def _dimensions(msp, W, H, cells, plan_y0, plan_y1, sect_x, dep):
