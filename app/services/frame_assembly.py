@@ -89,8 +89,14 @@ _EPS = 1e-4
 # the embed depth is always proportionate to that member's actual solid
 # cross-section: never less than 6mm, and at least half the bar width so a
 # skinny cross-section still buries a meaningful fraction of itself.
-def _ring_embed_overlap(bar_width: float) -> float:
-    return max(6.0, float(bar_width) * 0.5)
+def _ring_embed_overlap(bar_width: float, ring_bar_width: float = None) -> float:
+    embed = max(6.0, float(bar_width) * 0.5)
+    if ring_bar_width is not None:
+        # Never bury deeper than the ring's own material — otherwise the
+        # end punches straight through the outer face and pokes out past
+        # the circle (visible tab at the touch-point).
+        embed = min(embed, max(ring_bar_width - 1.0, 1.0))
+    return embed
 
 
 # ── data structures ────────────────────────────────────────────────────────
@@ -708,14 +714,22 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             profile_code=p_jamb['code']))
 
     # ── 2. INTERNAL DIVIDERS (mullions + transoms) ──────────────────
-    # For a circular frame the ellipse's INNER face (radius reduced by half
-    # the ring's own bar width) is the real boundary — dividers and glass
-    # must stop at the arc instead of running out to the square W x H
-    # bounding box, otherwise they poke out past the round frame.
+    # For a circular frame the ellipse's INNER face is the real boundary —
+    # dividers and glass must stop at the arc instead of running out to the
+    # square W x H bounding box, otherwise they poke out past the round
+    # frame. The ring's profile PATH (its centreline) runs at radius
+    # W/2 - bar_h/2 (see _add_circular_frame_ring) with the bar straddling
+    # that line, so the ring's solid material spans from centreline - bar/2
+    # (the true inner face) out to centreline + bar/2 (= W/2, the outer
+    # face). The inner face is therefore a FULL bar width in from the outer
+    # envelope, not half — using half here (the centreline) starts the
+    # divider's touch-point already inside the ring's own material, and the
+    # embed added below then pushes it straight through the remaining
+    # half-bar-width of material and out past the ring's outer face.
     cx, cy = W / 2.0, H / 2.0
     if shape == 'circular':
-        rx_in = max(W / 2.0 - bar_h / 2.0, 1.0)
-        ry_in = max(H / 2.0 - bar_h / 2.0, 1.0)
+        rx_in = max(W / 2.0 - bar_h, 1.0)
+        ry_in = max(H / 2.0 - bar_h, 1.0)
         ellipse_poly = _ellipse_points(cx, cy, rx_in, ry_in, segments=96)
     else:
         rx_in = ry_in = None
@@ -809,7 +823,7 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
                 # stopping exactly on the (facetted/approximated) inner
                 # boundary, which leaves a sliver gap at the join. Depth of
                 # the embed scales with this member's OWN bar width.
-                embed = _ring_embed_overlap(mb)
+                embed = _ring_embed_overlap(mb, bar_h)
                 if y_lo <= span[0]:
                     y_lo = span[0] - embed
                 if y_hi >= span[1]:
@@ -838,7 +852,7 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
                 span = _ellipse_span_x(y, cx, cy, rx_in, ry_in)
                 if span is None:
                     continue
-                embed = _ring_embed_overlap(tb)
+                embed = _ring_embed_overlap(tb, bar_h)
                 if x_lo <= span[0]:
                     x_lo = span[0] - embed
                 if x_hi >= span[1]:
