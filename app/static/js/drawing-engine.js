@@ -1829,90 +1829,264 @@ class DrawingCanvas {
      strokes drawn on top of the frame. Persists while the Profiles tab
      is active (this.showProfileHighlights) and pulses on sidebar hover
      (this._pulseRole). ── */
+  // Role → distinct theme color. Every individual CAD component keeps
+  // its own unique, theme-harmonized color (never a shared/global bucket):
+  //   Head (arch/curved)          → Royal Indigo
+  //   Cill / Threshold            → Warm Bronze/Gold
+  //   Mullion (vertical dividers) → Emerald Teal
+  //   Transom/Coupler (horizontal)→ Soft Rose
+  //   Jamb / Outer Frame          → Deep Slate Blue
+  //   Glazing Bead                → Subtle Mint
   static PROFILE_HL_COLORS = {
-    head:'#3B82F6', outer_frame:'#3B82F6',
-    jamb:'#F59E0B',
-    cill:'#EF4444', threshold:'#EF4444',
-    coupler:'#10B981', transom:'#10B981', mullion:'#10B981'
+    head:'#818CF8',
+    outer_frame:'#38BDF8', jamb:'#38BDF8',
+    cill:'#D97706', threshold:'#D97706',
+    mullion:'#10B981',
+    transom:'#FB7185', coupler:'#FB7185',
+    glazing_bead:'#34D399'
+  };
+  static PROFILE_HL_FILLS = {
+    head:'rgba(129, 140, 248, 0.08)',
+    outer_frame:'rgba(56, 189, 248, 0.08)', jamb:'rgba(56, 189, 248, 0.08)',
+    cill:'rgba(217, 119, 6, 0.08)', threshold:'rgba(217, 119, 6, 0.08)',
+    mullion:'rgba(16, 185, 129, 0.08)',
+    transom:'rgba(251, 113, 133, 0.08)', coupler:'rgba(251, 113, 133, 0.08)',
+    glazing_bead:'rgba(52, 211, 153, 0.08)'
   };
 
   pulseProfileHighlight(role){ this._pulseRole = role; this.render(); }
   clearProfilePulse(){ this._pulseRole = null; this.render(); }
 
+  /* ── exact geometry getters (mirrors _shapePath's math) ──────────────── */
+
+  // Curved/arch head silhouette (annular band between outer & inner head
+  // curve) for arched/gothic frames, or the full curved ring for circular
+  // frames, or the straight top rail polygon for plain rectangles.
+  _profileHeadGeometry(o, W, H, shape, barPx){
+    if (shape === 'rectangle'){
+      const pxW = this.mmToPx(W);
+      return { d:`M ${o.x} ${o.y} L ${o.x+pxW} ${o.y} L ${o.x+pxW} ${o.y+barPx} L ${o.x} ${o.y+barPx} Z` };
+    }
+    if (shape === 'circular'){
+      // fully curved perimeter — the entire ring is "head" geometry
+      const outerD = this._shapePath(o, W, H, shape, 0);
+      const innerD = this._shapePath(o, W, H, shape, this.model.frame.thickness);
+      return { d:`${outerD} ${innerD}`, fillRule:'evenodd' };
+    }
+    // arched / gothic: rebuild the exact spring-line/arc math used by
+    // _shapePath, but scoped to only the curved head region (outer arc
+    // minus inner arc), i.e. the true head-profile band.
+    const barMm = this.model.frame.thickness;
+    const buildHead = (insetMm) => {
+      const x0 = o.x + this.mmToPx(insetMm);
+      const x1 = o.x + this.mmToPx(W - insetMm);
+      const y0 = o.y + this.mmToPx(insetMm);
+      const w  = x1 - x0, cx = x0 + w/2;
+      const rise = Math.max(0, this.model.archRise != null
+        ? this.model.archRise : Math.min(W * 0.25, 400));
+      const risePx = this.mmToPx(rise);
+      const springY = y0 + risePx;
+      if (shape === 'arched'){
+        const archRx = w/2, archRy = risePx;
+        return `M ${x0} ${springY} A ${archRx} ${archRy} 0 0 1 ${x1} ${springY} L ${x1} ${springY} L ${x0} ${springY} Z`;
+      }
+      // gothic
+      const riseF = 0.6, apexY = y0, ctrlY = apexY*riseF + springY*(1-riseF);
+      return `M ${x0} ${springY} Q ${x0} ${ctrlY} ${cx} ${apexY} Q ${x1} ${ctrlY} ${x1} ${springY} L ${x1} ${springY} L ${x0} ${springY} Z`;
+    };
+    return { d:`${buildHead(0)} ${buildHead(barMm)}`, fillRule:'evenodd' };
+  }
+
+  // Cill footprint: the exact stepped/projecting polygon (nose, lip,
+  // projection, height) when a physical cill exists, else the flush
+  // bottom rail polygon (rect for straight sills, straight rail for
+  // curved-head frames, quarter-band for circular frames).
+  _profileCillGeometry(o, W, H, shape, barPx){
+    const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
+    if (this.model.frame.cill){
+      const cillH = this.mmToPx(30), lip = this.mmToPx(40), cy = o.y + pxH;
+      return { points:[
+        [o.x,            cy],
+        [o.x+pxW,        cy],
+        [o.x+pxW+lip,    cy+cillH*0.35],
+        [o.x+pxW+lip,    cy+cillH],
+        [o.x-lip,        cy+cillH],
+        [o.x-lip,        cy+cillH*0.35]
+      ]};
+    }
+    if (shape === 'circular'){
+      const ry = pxH/2, cy = o.y+ry;
+      const bottom = cy+ry;
+      return { points:[[o.x, bottom-barPx],[o.x+pxW, bottom-barPx],[o.x+pxW, bottom],[o.x, bottom]] };
+    }
+    // straight bottom rail (rectangle, arched, gothic all share this edge)
+    return { points:[[o.x, o.y+pxH-barPx],[o.x+pxW, o.y+pxH-barPx],[o.x+pxW, o.y+pxH],[o.x, o.y+pxH]] };
+  }
+
+  // Glazing bead / inner frame perimeter: the exact polygon or curved
+  // path bounding the total glazed aperture (all panes combined).
+  _profileGlazingPerimeterGeometry(o, W, H, shape, barPx){
+    if (shape === 'rectangle'){
+      const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
+      return { points:[
+        [o.x+barPx,      o.y+barPx],
+        [o.x+pxW-barPx,  o.y+barPx],
+        [o.x+pxW-barPx,  o.y+pxH-barPx],
+        [o.x+barPx,      o.y+pxH-barPx]
+      ]};
+    }
+    // curved frames: reuse the exact inner clip path already used to
+    // clip the glass/mullions/openers — this IS the true glazing bead line.
+    return { d:this._shapePath(o, W, H, shape, this.model.frame.thickness) };
+  }
+
+  // Full outer frame band (outer edge minus inner edge) — used for the
+  // generic "outer_frame" role and for jamb/coupler/transom rectangles.
+  _profileFrameBandGeometry(o, W, H, shape, barPx){
+    if (shape === 'rectangle'){
+      const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
+      const outer = `M ${o.x} ${o.y} L ${o.x+pxW} ${o.y} L ${o.x+pxW} ${o.y+pxH} L ${o.x} ${o.y+pxH} Z`;
+      const inner = `M ${o.x+barPx} ${o.y+barPx} L ${o.x+pxW-barPx} ${o.y+barPx} L ${o.x+pxW-barPx} ${o.y+pxH-barPx} L ${o.x+barPx} ${o.y+pxH-barPx} Z`;
+      return { d:`${outer} ${inner}`, fillRule:'evenodd' };
+    }
+    const outerD = this._shapePath(o, W, H, shape, 0);
+    const innerD = this._shapePath(o, W, H, shape, this.model.frame.thickness);
+    return { d:`${outerD} ${innerD}`, fillRule:'evenodd' };
+  }
+
+  // Paint one exact-geometry overlay (path d-string, or polygon points)
+  // as a precision, theme-integrated outline — crisp 1.5px stroke, a soft
+  // non-blooming edge glow, and an ultra-translucent surface fill so the
+  // underlying CAD geometry, dimensions and glass textures stay visible.
+  _paintProfileGeometry(g, geom, role){
+    const strokeColor = DrawingCanvas.PROFILE_HL_COLORS[role] || '#38BDF8';
+    const fillColor    = DrawingCanvas.PROFILE_HL_FILLS[role]  || 'rgba(56, 189, 248, 0.08)';
+    const pulsing = this._pulseRole === role;
+
+    let el;
+    if (geom.points){
+      el = document.createElementNS(SVGNS,'polygon');
+      el.setAttribute('points', geom.points.map(p => p.join(',')).join(' '));
+    } else {
+      el = document.createElementNS(SVGNS,'path');
+      el.setAttribute('d', geom.d);
+      if (geom.fillRule) el.setAttribute('fill-rule', geom.fillRule);
+    }
+    el.setAttribute('fill', fillColor);
+    el.setAttribute('stroke', strokeColor);
+    el.setAttribute('stroke-width', pulsing ? 2.25 : 1.5);
+    el.setAttribute('stroke-linecap', 'round');
+    el.setAttribute('stroke-linejoin', 'round');
+    el.setAttribute('stroke-opacity', pulsing ? 1 : 0.95);
+    el.setAttribute('class', `qs-profile-hl qs-profile-hl--${role}`);
+    // Soft, non-blooming edge glow — the SVG/DOM equivalent of
+    // ctx.shadowBlur = 6 / ctx.shadowColor = strokeColor. A single tight
+    // drop-shadow (no wide halo) so the line lights up without blooming
+    // and the ultra-translucent fill stays the dominant surface cue.
+    el.style.filter = `drop-shadow(0 0 ${pulsing ? 4 : 3}px ${strokeColor})`;
+    if (pulsing){
+      const anim = document.createElementNS(SVGNS,'animate');
+      anim.setAttribute('attributeName','stroke-opacity');
+      anim.setAttribute('values','1;0.4;1');
+      anim.setAttribute('dur','1s');
+      anim.setAttribute('repeatCount','indefinite');
+      el.appendChild(anim);
+    }
+    g.appendChild(el);
+  }
+
+  // Re-evaluated on every dc.render() call (rectangle, arched, gothic and
+  // circular frames all supported) and on sidebar profile card hover/
+  // focus (via pulseProfileHighlight/clearProfilePulse → render()).
+  // Draws EXACT component geometry — curved SVG paths for arch/circular
+  // heads, stepped polygons for projecting cills, and true inner-aperture
+  // paths for glazing beads/frame — never a generic bounding grid.
   _renderProfileHighlights(o, W, H, bar){
-    console.log('[profileHighlights] showProfileHighlights =', this.showProfileHighlights,
-      ' profileRoles =', this.model.profileRoles);
     if (!this.showProfileHighlights) return;
-    if (this.model.shape !== 'rectangle') return; // precise edges only for rect frames
     const roles = this.model.profileRoles || {};
     if (!Object.keys(roles).length) return;
-    const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
+
+    const shape = this.model.shape || 'rectangle';
     const g = document.createElementNS(SVGNS,'g');
     g.setAttribute('pointer-events','none');
     g.setAttribute('class','qs-profile-highlight-layer');
 
-    // NOTE: perfectly axis-aligned <line> elements have a zero-width or
-    // zero-height geometry bounding box, and SVG filters default to
-    // objectBoundingBox-percentage regions — Chrome/Firefox silently drop
-    // the whole filtered element in that case. So instead of an SVG
-    // <filter> blur (which was invisible for this exact reason), the glow
-    // is faked manually: a wide, soft, low-opacity "halo" stroke behind a
-    // crisp, bright core stroke on top. No filter, no bbox dependency.
-    const stroke = (x1,y1,x2,y2,color,role)=>{
-      const pulsing = this._pulseRole === role;
-      console.log('[profileHighlights] drawing', role, {x1,y1,x2,y2,color,pulsing});
-
-      const halo = document.createElementNS(SVGNS,'line');
-      halo.setAttribute('x1',x1); halo.setAttribute('y1',y1);
-      halo.setAttribute('x2',x2); halo.setAttribute('y2',y2);
-      halo.setAttribute('stroke',color);
-      halo.setAttribute('stroke-width', pulsing ? 16 : 12);
-      halo.setAttribute('stroke-linecap','round');
-      halo.setAttribute('stroke-opacity', pulsing ? 0.55 : 0.35);
-      halo.setAttribute('style','mix-blend-mode:screen;');
-      g.appendChild(halo);
-
-      const core = document.createElementNS(SVGNS,'line');
-      core.setAttribute('x1',x1); core.setAttribute('y1',y1);
-      core.setAttribute('x2',x2); core.setAttribute('y2',y2);
-      core.setAttribute('stroke',color);
-      core.setAttribute('stroke-width', pulsing ? 8 : 6);
-      core.setAttribute('stroke-linecap','round');
-      core.setAttribute('stroke-opacity', 0.9);
-      core.setAttribute('style','mix-blend-mode:screen;');
-      if (pulsing){
-        const anim = document.createElementNS(SVGNS,'animate');
-        anim.setAttribute('attributeName','stroke-opacity');
-        anim.setAttribute('values','0.9;0.35;0.9');
-        anim.setAttribute('dur','1s');
-        anim.setAttribute('repeatCount','indefinite');
-        core.appendChild(anim);
-      }
-      g.appendChild(core);
-    };
-
-    const C = DrawingCanvas.PROFILE_HL_COLORS;
-    if (roles.head)       stroke(o.x, o.y, o.x+pxW, o.y, C.head, 'head');
-    if (roles.outer_frame && !roles.head) stroke(o.x, o.y, o.x+pxW, o.y, C.outer_frame, 'outer_frame');
-    if (roles.cill)       stroke(o.x, o.y+pxH, o.x+pxW, o.y+pxH, C.cill, 'cill');
-    if (roles.threshold)  stroke(o.x, o.y+pxH, o.x+pxW, o.y+pxH, C.threshold, 'threshold');
-    if (roles.jamb){
-      stroke(o.x, o.y, o.x, o.y+pxH, C.jamb, 'jamb');
-      stroke(o.x+pxW, o.y, o.x+pxW, o.y+pxH, C.jamb, 'jamb');
+    // Outer frame perimeter (skip when 'head' will already cover the
+    // curved portion on top, painted next, so the head's indigo wins).
+    if (roles.outer_frame){
+      this._paintProfileGeometry(g, this._profileFrameBandGeometry(o, W, H, shape, bar), 'outer_frame');
     }
-    // internal horizontal members = coupler / transom
-    if (roles.coupler || roles.transom || roles.mullion){
-      const role = roles.coupler ? 'coupler' : (roles.transom ? 'transom' : 'mullion');
-      const color = C[role];
+
+    // Arch / curved head profile — dynamic geometry (arcs for arched,
+    // bezier for gothic, full ellipse ring for circular, straight rail
+    // rectangle for plain rectangles).
+    if (roles.head){
+      this._paintProfileGeometry(g, this._profileHeadGeometry(o, W, H, shape, bar), 'head');
+    }
+
+    // Cill — exact stepped/projecting polygon (or flush bottom rail).
+    if (roles.cill){
+      this._paintProfileGeometry(g, this._profileCillGeometry(o, W, H, shape, bar), 'cill');
+    }
+    // Threshold — always the flush bottom rail (never a projecting cill).
+    if (roles.threshold){
+      const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
+      this._paintProfileGeometry(g, { points:[
+        [o.x, o.y+pxH-bar],[o.x+pxW, o.y+pxH-bar],[o.x+pxW, o.y+pxH],[o.x, o.y+pxH]
+      ]}, 'threshold');
+    }
+
+    // Jamb — straight vertical bar polygons (both sides). Not meaningful
+    // on fully-curved circular frames.
+    if (roles.jamb && shape !== 'circular'){
+      const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
+      this._paintProfileGeometry(g, { points:[
+        [o.x, o.y],[o.x+bar, o.y],[o.x+bar, o.y+pxH],[o.x, o.y+pxH]
+      ]}, 'jamb');
+      this._paintProfileGeometry(g, { points:[
+        [o.x+pxW-bar, o.y],[o.x+pxW, o.y],[o.x+pxW, o.y+pxH],[o.x+pxW-bar, o.y+pxH]
+      ]}, 'jamb');
+    }
+
+    // Glazing bead / frame perimeter — exact inner-aperture path bounding
+    // all glass panes combined (curved for arched/gothic/circular).
+    if (roles.glazing_bead){
+      this._paintProfileGeometry(g, this._profileGlazingPerimeterGeometry(o, W, H, shape, bar), 'glazing_bead');
+    }
+
+    // Internal members — horizontal dividers are transom/coupler (rose),
+    // vertical dividers are mullion (emerald teal). Resolved independently
+    // per axis so each component keeps its own distinct theme color
+    // rather than collapsing to one shared role/color.
+    const mb = bar * 0.6; // matches _renderMullions' member width
+    if (roles.transom || roles.coupler){
+      const hRole = roles.transom ? 'transom' : 'coupler';
       const hEdges = _collectEdgeSpans(this.model.panes, 'h', W, H);
       for (const [ty, spans] of hEdges){
         if (ty <= 0.001 || ty >= 0.999) continue; // skip outer top/bottom (head/cill)
         const my = o.y + this.mmToPx(ty * H);
         for (const [x1, x2] of _mergeRanges(spans)){
-          stroke(o.x + this.mmToPx(x1), my, o.x + this.mmToPx(x2), my, color, role);
+          const bx1 = o.x + this.mmToPx(x1), bx2 = o.x + this.mmToPx(x2);
+          this._paintProfileGeometry(g, { points:[
+            [bx1, my-mb/2],[bx2, my-mb/2],[bx2, my+mb/2],[bx1, my+mb/2]
+          ]}, hRole);
         }
       }
     }
+    if (roles.mullion){
+      const vEdges = _collectEdgeSpans(this.model.panes, 'v', W, H);
+      for (const [rx, spans] of vEdges){
+        if (rx <= 0.001 || rx >= 0.999) continue; // skip outer left/right (jambs)
+        const mx = o.x + this.mmToPx(rx * W);
+        for (const [y1, y2] of _mergeRanges(spans)){
+          const by1 = o.y + this.mmToPx(y1), by2 = o.y + this.mmToPx(y2);
+          this._paintProfileGeometry(g, { points:[
+            [mx-mb/2, by1],[mx+mb/2, by1],[mx+mb/2, by2],[mx-mb/2, by2]
+          ]}, 'mullion');
+        }
+      }
+    }
+
     // Appended last within render() and re-appended here at the very end
     // of the stack (see render()) so it always paints above every other
     // element — grid, frame bars, panes, glass, dims, everything.
