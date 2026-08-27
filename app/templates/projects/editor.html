@@ -43,6 +43,35 @@ body { overflow:hidden; }
 .dz-tool:hover .tip{ opacity:1; }
 .dz-sep{ width:26px;height:1px;background:#2A3445;margin:5px 0; }
 
+/* 3D Tools trigger — prominent top-of-rail card */
+.dz-body{ position:relative; }
+.dz-3dtrigger{ position:relative;width:40px;height:40px;border-radius:8px;
+  background:#1E222A;border:1px solid #343B48;display:flex;align-items:center;
+  justify-content:center;cursor:pointer;color:#E8EAED;font-size:18px;margin-bottom:8px; }
+.dz-3dtrigger:hover{ border-color:var(--copper); }
+.dz-3dtrigger.on{ border-color:var(--copper);
+  box-shadow:0 0 0 2px rgba(201,123,61,.30),0 0 12px rgba(201,123,61,.45);color:var(--copper); }
+.dz-3dtrigger .badge{ position:absolute;right:-8px;top:-7px;background:var(--copper);color:#fff;
+  font-size:7px;font-weight:700;letter-spacing:.03em;padding:2px 4px;border-radius:4px; }
+.dz-3dtrigger .tip{ position:absolute;left:46px;top:8px;background:var(--navy);color:var(--paper);
+  font-family:var(--font-mono);font-size:10px;padding:4px 8px;border-radius:3px;
+  white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s;z-index:50; }
+.dz-3dtrigger:hover .tip{ opacity:1; }
+
+/* 3D options drawer */
+.dz-3dpanel{ position:absolute;left:52px;top:0;bottom:0;width:250px;background:#FCFBF8;
+  border-right:1px solid var(--line);box-shadow:2px 0 14px rgba(0,0,0,.10);z-index:150;
+  display:none;padding:10px 0; }
+.dz-3dpanel.show{ display:block; }
+.dz-3dpanel-hd{ padding:8px 16px 10px;font-size:11px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--steel);border-bottom:1px solid var(--line);margin-bottom:8px; }
+.dz-3dopt{ display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;
+  font-size:13px;color:var(--navy);border-radius:7px;margin:6px 8px;
+  background:white;border:1px solid var(--line);transition:background .12s,color .12s,border-color .12s; }
+.dz-3dopt:hover{ background:#1E222A;color:#fff;border-color:#343B48; }
+.dz-3dopt.primary{ border-left:3px solid var(--copper);font-weight:600; }
+.dz-3dopt .ic{ width:20px;text-align:center;flex-shrink:0;font-size:15px; }
+
 /* canvas */
 .dz-canvas-wrap { flex:1;position:relative;overflow:hidden;
   background:#FCFBF8;min-width:0; }
@@ -322,8 +351,8 @@ body { overflow:hidden; }
 .qs-applybtn{ font-size:10px;font-weight:700;padding:3px 9px;border-radius:4px;border:1px solid var(--copper);
   background:white;color:var(--copper);cursor:pointer;flex-shrink:0; }
 .qs-applybtn:hover{ background:var(--copper);color:white; }
-.qs-activebadge{ font-size:9px;background:#DCFCE7;color:#166534;border-radius:3px;padding:1px 6px;
-  margin-left:4px;font-weight:700;white-space:nowrap; }
+.qs-activebadge{ font-size:9px;background:#16A34A;color:#fff;border-radius:4px;padding:2px 7px;
+  margin-left:4px;font-weight:700;white-space:nowrap;letter-spacing:.02em; }
 /* Thumbnail inside card */
 .qs-thumb{ width:38px;height:38px;flex-shrink:0;border-radius:4px;overflow:hidden;background:#FAFAFA;
   border:1px solid #E2E8F0; }
@@ -367,17 +396,6 @@ body { overflow:hidden; }
       <input type="file" id="importJson" accept=".json" style="display:none" onchange="importJSON(event)">
       <button class="btn btn-ghost btn-sm" onclick="exportDxf()">DXF</button>
       <button class="btn btn-ghost btn-sm" id="btnDwg" onclick="exportDwg()" title="DWG export (requires ODA)">DWG</button>
-      <div style="position:relative;display:inline-block;" id="btn3dWrap">
-        <button class="btn btn-ghost btn-sm" onclick="toggle3DMenu()" style="background:#2D5445;color:#D8DEE6;">3D ⬢ ▾</button>
-        <div id="menu3d" style="display:none;position:absolute;top:100%;right:0;background:white;
-          border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.18);
-          z-index:200;min-width:130px;padding:4px 0;">
-          <div onclick="export3d('glb')" style="padding:9px 16px;cursor:pointer;font-size:13px;" onmouseover="this.style.background='#f5f3ef'" onmouseout="this.style.background=''">GLB (viewer)</div>
-          <div onclick="export3d('stl')" style="padding:9px 16px;cursor:pointer;font-size:13px;" onmouseover="this.style.background='#f5f3ef'" onmouseout="this.style.background=''">STL (print)</div>
-          <div onclick="export3d('step')" style="padding:9px 16px;cursor:pointer;font-size:13px;" onmouseover="this.style.background='#f5f3ef'" onmouseout="this.style.background=''">STEP (CAD)</div>
-          <div onclick="view3D()" style="padding:9px 16px;cursor:pointer;font-size:13px;border-top:1px solid var(--line);" onmouseover="this.style.background='#f5f3ef'" onmouseout="this.style.background=''">3D Viewer →</div>
-        </div>
-      </div>
       <button class="btn btn-primary btn-sm" onclick="saveNow()">Save</button>
       {% if next_window %}
       <a href="{{ url_for('editor.edit', project_id=project.id, window_id=next_window.id) }}"
@@ -405,6 +423,10 @@ body { overflow:hidden; }
   <div class="dz-body">
     <!-- tool rail -->
     <div class="dz-rail">
+      <button class="dz-3dtrigger" id="tl3D" onclick="toggle3DPanel()" title="3D Tools & Exports">
+        🧊<span class="badge" id="badge3d">OPEN</span><span class="tip">3D Tools &amp; Exports</span>
+      </button>
+      <div class="dz-sep"></div>
       <button class="dz-tool on" id="tlSelect" onclick="setTool('select')">▭<span class="tip">Select pane</span></button>
       <button class="dz-tool" id="tlVSplit" onclick="setTool('vsplit')">┃<span class="tip">Mullion — click pane for exact mm</span></button>
       <button class="dz-tool" id="tlHSplit" onclick="setTool('hsplit')">━<span class="tip">Transom — click pane for exact mm</span></button>
@@ -412,6 +434,21 @@ body { overflow:hidden; }
       <div class="dz-sep"></div>
       <button class="dz-tool" id="tlEasy" onclick="setTool('easydraw')">✎<span class="tip">Easy Draw bars</span></button>
       <button class="dz-tool" id="tlPan" onclick="setTool('pan')">✥<span class="tip">Pan (or Alt+drag)</span></button>
+    </div>
+
+    <!-- 3D options drawer -->
+    <div class="dz-3dpanel" id="panel3d">
+      <div class="dz-3dpanel-hd">3D Tools</div>
+      <div class="dz-3dopt primary" onclick="view3D()" title="Launch 3D preview &amp; interactive model">
+        <span class="ic">👁️</span> Interactive 3D View</div>
+      <div class="dz-3dopt" onclick="export3d('glb')" title="Download 3D web model (.glb)">
+        <span class="ic">📦</span> Export GLB File</div>
+      <div class="dz-3dopt" onclick="export3d('stl')" title="Download file for 3D printing (.stl)">
+        <span class="ic">🖨️</span> Export STL (Print)</div>
+      <div class="dz-3dopt" onclick="export3d('step')" title="Download CAD file for manufacturing (.step)">
+        <span class="ic">⚙️</span> Export STEP (CAD)</div>
+      <div class="dz-3dopt" onclick="exportOrthographic()" title="Download CAD file for orthographic views (.dxf)">
+        <span class="ic">📐</span> Orthographic Views (DXF)</div>
     </div>
 
     <!-- canvas -->
@@ -728,6 +765,7 @@ function toggleFrameGroup(){
 function setTab(t){
   currentTab=t;
   document.querySelectorAll('.dz-tab').forEach(el=>el.classList.toggle('on',el.dataset.tab===t));
+  if(dc){ dc.showProfileHighlights = (t==='profiles'); dc.render(); }
   const hd=document.getElementById('tabContextHd'); if(hd) hd.textContent=t.toUpperCase();
   const pi=document.getElementById('paneInspector'); if(pi) pi.style.display=(t==='profile')?'none':'block';
   // FINISH tab: render its section at the TOP of the right-side inspector
@@ -1216,10 +1254,36 @@ function importJSON(evt){
 function exportDxf(){ window.location.href=`${API}/windows/${QS_WINDOW_ID}/dxf`; }
 function exportDwg(){ window.location.href=`${API}/windows/${QS_WINDOW_ID}/dwg`; }
 function view3D(){ window.open(`/projects/${QS_PROJECT_ID}/windows/${QS_WINDOW_ID}/3d`,'_blank'); }
-function toggle3DMenu(){ const m=document.getElementById('menu3d'); m.style.display=m.style.display==='none'?'block':'none'; }
-document.addEventListener('click',(e)=>{ if(!document.getElementById('btn3dWrap')?.contains(e.target)) document.getElementById('menu3d')&&(document.getElementById('menu3d').style.display='none'); });
+function exportOrthographic(){
+  document.getElementById('panel3d')?.classList.remove('show');
+  document.getElementById('tl3D')?.classList.remove('on');
+  set3DBadge(false);
+  window.location.href=`${API}/windows/${QS_WINDOW_ID}/orthographic.dxf`;
+}
+function set3DBadge(open){
+  const b=document.getElementById('badge3d');
+  if(b) b.textContent = open ? 'CLOSE' : 'OPEN';
+}
+function toggle3DPanel(){
+  const p=document.getElementById('panel3d');
+  const btn=document.getElementById('tl3D');
+  const show=!p.classList.contains('show');
+  p.classList.toggle('show',show);
+  btn.classList.toggle('on',show);
+  set3DBadge(show);
+}
+document.addEventListener('click',(e)=>{
+  const p=document.getElementById('panel3d');
+  if(p && p.classList.contains('show') && !p.contains(e.target) && !document.getElementById('tl3D')?.contains(e.target)){
+    p.classList.remove('show');
+    document.getElementById('tl3D')?.classList.remove('on');
+    set3DBadge(false);
+  }
+});
 async function export3d(fmt){
-  document.getElementById('menu3d').style.display='none';
+  document.getElementById('panel3d')?.classList.remove('show');
+  document.getElementById('tl3D')?.classList.remove('on');
+  set3DBadge(false);
   showToast('Generating '+fmt.toUpperCase()+'… (this may take a few seconds)','info');
   try{
     const r=await fetch(`${API}/windows/${QS_WINDOW_ID}/3d/${fmt}`);
@@ -1534,10 +1598,12 @@ function qsBuildProfs(){
       const windowRoles = model.profileRoles || {};
       const isActive = p.role && windowRoles[p.role] === p.code;
       const activeBadge = isActive
-        ? '<span class="qs-activebadge">✓ Active in this design</span>' : '';
+        ? '<span class="qs-activebadge">✓ APPLIED</span>' : '';
       const applyBtn = (!isActive && p.role)
         ? `<button class="qs-applybtn" onclick="event.stopPropagation();setWindowProfile('${p.role}','${p.code}')">Apply</button>` : '';
-      html += `<div class="qs-prc ${isActive?'qs-active':''}" onclick="qsOpenPModal(${JSON.stringify(p).replace(/"/g,'&quot;')})"
+      const hoverAttrs = isActive
+        ? `onmouseenter="dc.pulseProfileHighlight('${p.role}')" onmouseleave="dc.clearProfilePulse()"` : '';
+      html += `<div class="qs-prc ${isActive?'qs-active':''}" ${hoverAttrs} onclick="qsOpenPModal(${JSON.stringify(p).replace(/"/g,'&quot;')})"
                  style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;">
         ${thumb.svg}
         <div style="flex:1;min-width:0;">
@@ -1644,6 +1710,7 @@ function setWindowProfile(role, code){
   }
   scheduleSave();
   qsClosePModal();
+  if(dc){ requestAnimationFrame(()=>dc.render()); }   // force canvas redraw so the new highlight shows instantly
   if(currentTab==='profiles') qsBuildProfs();
 }
 
