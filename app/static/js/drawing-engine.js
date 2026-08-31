@@ -688,12 +688,33 @@ class DrawingCanvas {
           this._hoverGhost = null; this._updateGhostOnly();
         }
       }
+      
+      // ── Tooltip Safety Guard ──
+      // If tooltip is visible but mouse is far from last known position, hide it
+      if (this._tooltipVisible && this._lastTooltipPosition) {
+        const dx = e.clientX - this._lastTooltipPosition.x;
+        const dy = e.clientY - this._lastTooltipPosition.y;
+        const distance = Math.sqrt(dx*dx + dy*dy);
+        // Hide if distance exceeds 60px (threshold for "moved away")
+        if (distance > 60) {
+          this._hideProfileTooltip();
+        }
+      }
     });
 
     window.addEventListener('mouseup', () => {
       if (isPanning) { isPanning = false;
         this.svg.style.cursor = this.tool==='pan'?'grab':'default'; }
       if (this.easyDrawState) { this._commitEasyDraw(); this.easyDrawState = null; this.render(); }
+    });
+
+    // ── SVG Canvas mouseleave: hide tooltip when mouse leaves canvas ──
+    this.svg.addEventListener('mouseleave', () => {
+      if (this._tooltipVisible) {
+        this._hideProfileTooltip();
+      }
+      this._hoverRole = null;
+      this._activeHighlightElement = null;
     });
   }
 
@@ -1864,13 +1885,96 @@ class DrawingCanvas {
   // host page (toast/save/sidebar refresh) via onProfileDeselect + onChange.
   _deselectProfile(role){
     if (!this.model.profileRoles || !(role in this.model.profileRoles)) return;
+    const code = this.model.profileRoles[role];
     delete this.model.profileRoles[role];
     this._pulseRole = null;
     this._hoverRole = null;
     this._hideProfileTooltip();
+    
+    // Sync with sidebar: auto-scroll to card & flash highlight
+    this._syncSidebarProfile(role, code);
+    
     if (this.onProfileDeselect) this.onProfileDeselect(role);
     this.render();
     if (this.onChange) this.onChange();
+  }
+
+  // ── Sidebar Synchronization ──────────────────────────────────────
+  // Auto-scroll the right sidebar to show the profile card and flash it
+  _syncSidebarProfile(role, code){
+    const sidebarPanel = document.querySelector('.dz-scroll');
+    if (!sidebarPanel) return;
+
+    // Find the profile card for this role+code
+    const cards = sidebarPanel.querySelectorAll('.qs-prc');
+    let targetCard = null;
+    for (const card of cards) {
+      const cardText = card.textContent || '';
+      // Match by code and role proximity in the DOM
+      if (cardText.includes(code)) {
+        targetCard = card;
+        break;
+      }
+    }
+
+    if (targetCard) {
+      // Scroll the sidebar to show this card
+      targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Flash the card with a brief red glow
+      this._flashProfileCard(targetCard);
+    }
+  }
+
+  // Flash a profile card with animated red glow & pulse
+  _flashProfileCard(card){
+    if (!card) return;
+    const origBg = card.style.background || '';
+    const origBorder = card.style.borderColor || '';
+    
+    // Apply flash styling
+    card.style.transition = 'all 0.3s ease';
+    card.style.background = 'rgba(220, 38, 38, 0.15)';
+    card.style.borderColor = '#DC2626';
+    card.style.boxShadow = '0 0 12px rgba(220, 38, 38, 0.4)';
+
+    // Remove button highlight (if exists)
+    const removeBtn = card.querySelector('.qs-removebtn');
+    if (removeBtn) {
+      removeBtn.style.background = '#DC2626';
+      removeBtn.style.color = 'white';
+      removeBtn.style.transform = 'scale(1.05)';
+    }
+
+    // Revert after 1.2s
+    setTimeout(() => {
+      card.style.background = origBg;
+      card.style.borderColor = origBorder;
+      card.style.boxShadow = '';
+      card.style.transition = '';
+      if (removeBtn) {
+        removeBtn.style.background = '';
+        removeBtn.style.color = '';
+        removeBtn.style.transform = '';
+      }
+    }, 1200);
+  }
+
+  // When hovering canvas highlight, scroll sidebar to that profile card
+  _scrollSidebarToRole(role){
+    const sidebarPanel = document.querySelector('.dz-scroll');
+    if (!sidebarPanel) return;
+
+    const cards = sidebarPanel.querySelectorAll('.qs-prc');
+    for (const card of cards) {
+      const cardText = card.textContent || '';
+      // Heuristic: active cards have the role applied
+      const windowRoles = this.model.profileRoles || {};
+      const activeCode = windowRoles[role];
+      if (activeCode && cardText.includes(activeCode)) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+    }
   }
 
   // Floating "Click to Deselect" badge, positioned next to the cursor.
@@ -1879,30 +1983,61 @@ class DrawingCanvas {
   _showProfileTooltip(evt){
     const wrap = this.svg.parentElement;
     if (!wrap) return;
+    
+    // Clear any pending hide timeout
+    this._tooltipTimeout && clearTimeout(this._tooltipTimeout);
+    
     let tip = document.getElementById('qsProfileDeselectTip');
     if (!tip){
       tip = document.createElement('div');
       tip.id = 'qsProfileDeselectTip';
       tip.className = 'qs-profile-deselect-tip';
-      tip.textContent = '✕ Click to Deselect';
+      tip.innerHTML = '<strong>✕ Click to Remove</strong><br><small>Removes profile immediately</small>';
+      tip.style.fontSize = '11px';
+      tip.style.lineHeight = '1.3';
+      tip.style.textAlign = 'center';
+      tip.style.transition = 'opacity 0.15s ease';
       if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
       wrap.appendChild(tip);
     }
     tip.style.display = 'block';
+    tip.style.visibility = 'visible';
+    tip.style.opacity = '1';
+    tip.setAttribute('data-visible', 'true');
+    this._tooltipVisible = true;
     this._moveProfileTooltip(evt);
+    
+    // Safety timeout: auto-hide after 8 seconds if not interacted
+    this._tooltipTimeout = setTimeout(() => {
+      if (this._tooltipVisible) {
+        this._hideProfileTooltip();
+      }
+    }, 8000);
   }
+  
   _moveProfileTooltip(evt){
     const tip = document.getElementById('qsProfileDeselectTip');
-    if (!tip || tip.style.display === 'none') return;
+    if (!tip || tip.getAttribute('data-visible') !== 'true') return;
     const wrap = this.svg.parentElement;
     if (!wrap) return;
     const wr = wrap.getBoundingClientRect();
-    tip.style.left = (evt.clientX - wr.left + 14) + 'px';
-    tip.style.top  = (evt.clientY - wr.top  - 32) + 'px';
+    const x = evt.clientX - wr.left + 14;
+    const y = evt.clientY - wr.top - 32;
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+    // Store position for safety distance check
+    this._lastTooltipPosition = { x: evt.clientX, y: evt.clientY };
   }
   _hideProfileTooltip(){
     const tip = document.getElementById('qsProfileDeselectTip');
-    if (tip) tip.style.display = 'none';
+    if (tip) {
+      tip.style.display = 'none';
+      tip.style.visibility = 'hidden';
+      tip.style.opacity = '0';
+      tip.setAttribute('data-visible', 'false');
+    }
+    this._lastTooltipPosition = null;
+    this._tooltipTimeout && clearTimeout(this._tooltipTimeout);
   }
 
   /* ── exact geometry getters (mirrors _shapePath's math) ──────────────── */
@@ -2048,17 +2183,24 @@ class DrawingCanvas {
     el.style.cursor = 'pointer';
     el.addEventListener('mouseenter', (evt) => {
       this._hoverRole = role;
+      this._activeHighlightElement = el;
       this._showProfileTooltip(evt);
+      // Auto-scroll sidebar to show this profile's card
+      this._scrollSidebarToRole(role);
       this.render();
     });
-    el.addEventListener('mousemove', (evt) => { this._moveProfileTooltip(evt); });
-    el.addEventListener('mouseleave', () => {
+    el.addEventListener('mousemove', (evt) => { 
+      this._moveProfileTooltip(evt);
+    });
+    el.addEventListener('mouseleave', (evt) => {
       this._hoverRole = null;
+      this._activeHighlightElement = null;
       this._hideProfileTooltip();
       this.render();
     });
     el.addEventListener('click', (evt) => {
       evt.stopPropagation();
+      // Immediate one-click removal: no sidebar interaction needed
       this._deselectProfile(role);
     });
 

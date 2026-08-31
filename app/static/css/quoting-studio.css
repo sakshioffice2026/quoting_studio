@@ -438,3 +438,133 @@ textarea.form-control { resize: vertical; min-height: 80px; }
   margin-bottom: 20px;
 }
 
+/* ======================================================
+   PROFILE DESELECTION UX ENHANCEMENTS
+   Canvas-to-Sidebar Bi-Directional Sync
+   ====================================================== */
+
+/* Enhanced profile deselect tooltip styling */
+#qsProfileDeselectTip {
+  position: absolute;
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.95) 0%, rgba(185, 28, 28, 0.95) 100%);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3), 0 0 1px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  letter-spacing: 0.02em;
+  animation: profileTipPulse 0.3s ease-out;
+}
+
+#qsProfileDeselectTip small {
+  display: block;
+  font-size: 9px;
+  font-weight: 400;
+  opacity: 0.9;
+  margin-top: 2px;
+}
+
+@keyframes profileTipPulse {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Profile card flash animation on deselection */
+.qs-prc {
+  transition: all 0.2s ease;
+}
+
+/* Active profile card styling (green highlight) */
+.qs-prc.qs-prc-active {
+  background: #F0FDF4;
+  border: 2px solid #22C55E;
+  border-radius: 6px;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.15);
+}
+
+.qs-prc.qs-prc-active:hover {
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.25);
+}
+
+/* Remove button styling */
+.qs-removebtn {
+  background: #EF4444;
+  color: white;
+  border: 1px solid #DC2626;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  letter-spacing: 0.02em;
+}
+
+.qs-removebtn:hover {
+  background: #DC2626;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+  transform: scale(1.05);
+}
+
+.qs-removebtn:active {
+  transform: scale(0.95);
+}
+
+/* Flash effect styling during deselection feedback */
+@keyframes cardFlashGlow {
+  0% {
+    box-shadow: 0 0 0 rgba(220, 38, 38, 0);
+    background-color: inherit;
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(220, 38, 38, 0.4), inset 0 0 8px rgba(220, 38, 38, 0.1);
+    background-color: rgba(220, 38, 38, 0.08);
+  }
+  100% {
+    box-shadow: 0 0 0 rgba(220, 38, 38, 0);
+    background-color: inherit;
+  }
+}
+
+/* Smooth scroll behavior for sidebar */
+.dz-scroll {
+  scroll-behavior: smooth;
+}
+
+/* Canvas highlight enhanced visual feedback */
+.qs-profile-hl {
+  transition: stroke-width 0.15s ease, stroke-opacity 0.15s ease;
+}
+
+/* Tooltip positioning improvements */
+@media (max-width: 1200px) {
+  #qsProfileDeselectTip {
+    font-size: 10px;
+    padding: 6px 10px;
+  }
+
+  #qsProfileDeselectTip small {
+    font-size: 8px;
+  }
+}
+
+/* Dark mode support (if using dark theme) */
+@media (prefers-color-scheme: dark) {
+  #qsProfileDeselectTip {
+    background: linear-gradient(135deg, rgba(220, 38, 38, 0.9) 0%, rgba(185, 28, 28, 0.9) 100%);
+    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4), 0 0 1px rgba(255, 255, 255, 0.1);
+  }
+}
