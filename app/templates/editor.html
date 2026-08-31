@@ -3,6 +3,7 @@
 
 {% block head %}
 <meta name="csrf-token" content="{{ csrf_token() }}">
+<script src="{{ url_for('static', filename='js/utils.js') }}"></script>
 <script src="{{ url_for('static', filename='js/drawing-engine.js') }}"></script>
 <script src="{{ url_for('static', filename='js/drawing-phase2.js') }}"></script>
 <script src="{{ url_for('static', filename='js/drawing-phase3.js') }}"></script>
@@ -353,6 +354,21 @@ body { overflow:hidden; }
 .qs-modal-box{ background:white;border-radius:10px;padding:24px;max-width:440px;width:90%;box-shadow:0 24px 60px rgba(0,0,0,.3); }
 .qs-modal-box h3{ margin:0 0 4px;font-family:var(--font-display);font-weight:500;font-size:18px;color:var(--navy); }
 .qs-modal-box p{ font-size:12px;color:var(--steel);margin-bottom:14px; }
+
+/* ── Applied-profile deselect UI ── */
+.qs-removebtn{ font-size:9px;font-weight:700;padding:3px 8px;border-radius:4px;
+  border:1px solid #DC2626;background:#fff;color:#DC2626;cursor:pointer;flex-shrink:0; }
+.qs-removebtn:hover{ background:#DC2626;color:#fff; }
+.qs-profile-deselect-tip{
+  display:none;position:absolute;z-index:60;pointer-events:none;
+  background:#1B2430;color:#fff;font-size:10px;font-weight:600;
+  padding:4px 9px;border-radius:5px;white-space:nowrap;
+  box-shadow:0 4px 10px rgba(0,0,0,.25);letter-spacing:.01em;
+}
+.qs-profile-deselect-tip::after{
+  content:'';position:absolute;left:14px;bottom:-4px;width:8px;height:8px;
+  background:#1B2430;transform:rotate(45deg);
+}
 </style>
 {% endblock %}
 
@@ -719,6 +735,13 @@ function boot() {
     },
     onHistoryChange: () => { updateHud(); updateUndoButtons(); },
     onMemberPlace: (info) => openMemberPop(info),
+    onProfileDeselect: (role) => {
+      showToast(`Cleared ${ROLE_LABELS[role]||role} override — using library default`, 'info');
+      if(currentTab==='profiles'){
+        qsBuildProfs();
+        scrollActiveIntoView(document.querySelector('.qs-prc'));
+      }
+    },
   });
 
   // Expose to Phase 2 / Phase 3 modules (they reference window.model / window.dc etc.)
@@ -762,7 +785,10 @@ function setTab(t){
   if(t==='finish' && scroll && tabBlock) scroll.insertBefore(tabBlock, scroll.firstElementChild);
   else if(anchor && tabBlock) anchor.insertAdjacentElement('afterend', tabBlock);
   if(t==='easydraw'){ setTool('easydraw'); }
+  if(scroll) scroll.scrollTop = 0;   // new tab's content starts at the top
   renderTab();
+  const activeTabEl = document.querySelector('.dz-tab.on');
+  if(activeTabEl) scrollActiveIntoView(activeTabEl);
 }
 
 function renderTab(){
@@ -841,9 +867,9 @@ function renderTab(){
       ${pane ? `<div style="margin-bottom:12px;">
         <div style="font-size:11px;color:#566;margin-bottom:5px;font-weight:500;">Pane infill</div>
         <div class="split-btns" style="margin-bottom:0;">
-          <button class="split-btn ${pane.infill!=='panel'?'':''}" style="${pane.infill!=='panel'?'background:var(--copper);color:white;border-color:var(--copper);':''}"
+          <button class="split-btn${pane.infill!=='panel'?' on':''}" style="${pane.infill!=='panel'?'background:var(--copper);color:white;border-color:var(--copper);':''}"
                   onclick="setInfill('glass')">▨ Glass</button>
-          <button class="split-btn" style="${pane.infill==='panel'?'background:var(--copper);color:white;border-color:var(--copper);':''}"
+          <button class="split-btn${pane.infill==='panel'?' on':''}" style="${pane.infill==='panel'?'background:var(--copper);color:white;border-color:var(--copper);':''}"
                   onclick="setInfill('panel')">▬ Solid panel</button>
         </div>
         <div style="font-size:10px;color:var(--steel);margin-top:4px;">
@@ -992,6 +1018,8 @@ function quickPlaceMember(){
 }
 function setQuickAxis(a){ window._quickAxis=a;
   document.querySelectorAll('.quick-axis-btn').forEach(b=>b.classList.toggle('on',b.dataset.a===a));
+  const activeBtn=document.querySelector('.quick-axis-btn.on');
+  if(activeBtn) scrollActiveIntoView(activeBtn);
 }
 function setSize(){
   model.width=+document.getElementById('fW').value||1200;
@@ -1021,7 +1049,9 @@ function setLeaded(v){ const p=model.panes.find(x=>x.id===dc.selectedPaneId);
 function setShape(s){
   model.shape=s;
   document.querySelectorAll('.shape-card').forEach(c=>c.classList.remove('on'));
-  document.getElementById('shp-'+s).classList.add('on');
+  const shapeEl=document.getElementById('shp-'+s);
+  shapeEl.classList.add('on');
+  scrollActiveIntoView(shapeEl);
   document.getElementById('riseRow').style.display=(s==='arched'||s==='gothic')?'block':'none';
   dc._pushHistory();dc.fitView();scheduleSave();fetchPricing();
   if(typeof qsBuildProfs==='function') qsBuildProfs();
@@ -1050,7 +1080,9 @@ function applyUnitTabs(){
 function setDoorType(t){
   model.door.dtype=t;
   document.querySelectorAll('.door-card').forEach(c=>c.classList.remove('on'));
-  document.getElementById('door-'+t).classList.add('on');
+  const doorEl=document.getElementById('door-'+t);
+  doorEl.classList.add('on');
+  scrollActiveIntoView(doorEl);
   if(t==='single'){model.door.slL=model.door.slR=model.door.flH=0;model.door.leafCount=1;}
   else if(t==='double'){model.door.leafCount=2;model.door.slL=model.door.slR=model.door.flH=0;}
   else if(t==='sl'){model.door.slL=300;model.door.slR=0;}
@@ -1501,7 +1533,10 @@ function qsProfileBadges(role){
   if(cat==='door')   return dBadge;
   return wBadge+dBadge;
 }
-function qsSetProfileFilter(f){ qsProfileFilter=f; qsBuildProfs(); }
+function qsSetProfileFilter(f){ qsProfileFilter=f; qsBuildProfs();
+  const activeFilter=document.querySelector('.qs-fbtn.on');
+  if(activeFilter) scrollActiveIntoView(activeFilter);
+}
 
 // Shared 2D cross-section thumbnail — real DXF contour if traced, else a
 // grey generic-fallback box. Used by both the library cards and the
@@ -1596,7 +1631,7 @@ function qsBuildProfs(){
   html += '<div style="display:flex;gap:4px;margin-bottom:12px;">';
   [['all','All'],['window','Window Profiles'],['door','Door Profiles']].forEach(([key,lbl])=>{
     const on = qsProfileFilter===key;
-    html += `<button onclick="qsSetProfileFilter('${key}')"
+    html += `<button class="qs-fbtn ${on?'on':''}" onclick="qsSetProfileFilter('${key}')"
       style="flex:1;font-size:10px;padding:5px 6px;border-radius:5px;cursor:pointer;
              border:1px solid ${on?'var(--copper)':'var(--line)'};
              background:${on?'var(--copper)':'#fff'};color:${on?'#fff':'var(--steel)'};font-weight:${on?'700':'400'};">${lbl}</button>`;
@@ -1622,14 +1657,14 @@ function qsBuildProfs(){
       const activeBadge = isActive
         ? '<span style="font-size:9px;background:#16A34A;color:#fff;border-radius:4px;padding:2px 7px;margin-left:4px;font-weight:700;letter-spacing:.02em;">✓ APPLIED</span>'
         : '';
-      const applyBtn = (!isActive && p.role)
-        ? `<button onclick="event.stopPropagation();setWindowProfile('${p.role}','${p.code}')"
+      const applyBtn = !p.role ? '' : isActive
+        ? `<button class="qs-removebtn" onclick="event.stopPropagation();setWindowProfile('${p.role}','${p.code}')">✕ Remove</button>`
+        : `<button onclick="event.stopPropagation();setWindowProfile('${p.role}','${p.code}')"
              style="font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid var(--copper);
-                    background:#fff;color:var(--copper);cursor:pointer;flex-shrink:0;">Apply</button>`
-        : '';
+                    background:#fff;color:var(--copper);cursor:pointer;flex-shrink:0;">Apply</button>`;
       const hoverAttrs = isActive
         ? `onmouseenter="dc.pulseProfileHighlight('${p.role}')" onmouseleave="dc.clearProfilePulse()"` : '';
-      html += `<div class="qs-prc" ${hoverAttrs} onclick="qsOpenPModal(${JSON.stringify(p).replace(/"/g,'&quot;')})"
+      html += `<div class="qs-prc ${isActive?'qs-prc-active':''}" ${hoverAttrs} onclick="qsOpenPModal(${JSON.stringify(p).replace(/"/g,'&quot;')})"
                  style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;${isActive?'background:#F0FDF4;border:2px solid #22C55E;border-radius:6px;':''}">
         ${qsProfileThumbSVG(p, 40)}
         <div style="flex:1;min-width:0;">
@@ -1733,7 +1768,11 @@ function setWindowProfile(role, code){
   scheduleSave();
   qsClosePModal();
   if(dc){ requestAnimationFrame(()=>dc.render()); }   // force canvas redraw so the new highlight shows instantly
-  if(currentTab==='profiles') qsBuildProfs();
+  if(currentTab==='profiles'){
+    qsBuildProfs();
+    const activeCard=document.querySelector('.qs-prc-active');
+    scrollActiveIntoView(activeCard || document.querySelector('.qs-prc'));
+  }
 }
 
 function qsClosePModal(){document.getElementById('qsPModal').classList.remove('on');}

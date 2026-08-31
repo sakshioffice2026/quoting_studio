@@ -500,9 +500,11 @@ class DrawingCanvas {
     this.onChange        = opts.onChange || (()=>{});
     this.onHistoryChange = opts.onHistoryChange || null;
     this.onMemberPlace   = opts.onMemberPlace || null;
+    this.onProfileDeselect = opts.onProfileDeselect || null;  // fired when a canvas highlight is clicked to deselect
     this.easyDrawState = null;
     this.showProfileHighlights = false;   // ON while the Profiles tab is active
     this._pulseRole = null;               // role glowing from sidebar hover
+    this._hoverRole = null;               // role currently hovered directly on the canvas
 
     // undo/redo history
     this._history = [];
@@ -1857,6 +1859,52 @@ class DrawingCanvas {
   pulseProfileHighlight(role){ this._pulseRole = role; this.render(); }
   clearProfilePulse(){ this._pulseRole = null; this.render(); }
 
+  // ── Interactive canvas deselection ──────────────────────────────────
+  // Unassigns a CAD profile role from the current window and notifies the
+  // host page (toast/save/sidebar refresh) via onProfileDeselect + onChange.
+  _deselectProfile(role){
+    if (!this.model.profileRoles || !(role in this.model.profileRoles)) return;
+    delete this.model.profileRoles[role];
+    this._pulseRole = null;
+    this._hoverRole = null;
+    this._hideProfileTooltip();
+    if (this.onProfileDeselect) this.onProfileDeselect(role);
+    this.render();
+    if (this.onChange) this.onChange();
+  }
+
+  // Floating "Click to Deselect" badge, positioned next to the cursor.
+  // Lives in the SVG's parent wrapper (not the SVG itself) so it survives
+  // render() calls untouched.
+  _showProfileTooltip(evt){
+    const wrap = this.svg.parentElement;
+    if (!wrap) return;
+    let tip = document.getElementById('qsProfileDeselectTip');
+    if (!tip){
+      tip = document.createElement('div');
+      tip.id = 'qsProfileDeselectTip';
+      tip.className = 'qs-profile-deselect-tip';
+      tip.textContent = '✕ Click to Deselect';
+      if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+      wrap.appendChild(tip);
+    }
+    tip.style.display = 'block';
+    this._moveProfileTooltip(evt);
+  }
+  _moveProfileTooltip(evt){
+    const tip = document.getElementById('qsProfileDeselectTip');
+    if (!tip || tip.style.display === 'none') return;
+    const wrap = this.svg.parentElement;
+    if (!wrap) return;
+    const wr = wrap.getBoundingClientRect();
+    tip.style.left = (evt.clientX - wr.left + 14) + 'px';
+    tip.style.top  = (evt.clientY - wr.top  - 32) + 'px';
+  }
+  _hideProfileTooltip(){
+    const tip = document.getElementById('qsProfileDeselectTip');
+    if (tip) tip.style.display = 'none';
+  }
+
   /* ── exact geometry getters (mirrors _shapePath's math) ──────────────── */
 
   // Curved/arch head silhouette (annular band between outer & inner head
@@ -1961,7 +2009,7 @@ class DrawingCanvas {
   _paintProfileGeometry(g, geom, role){
     const strokeColor = DrawingCanvas.PROFILE_HL_COLORS[role] || '#38BDF8';
     const fillColor    = DrawingCanvas.PROFILE_HL_FILLS[role]  || 'rgba(56, 189, 248, 0.08)';
-    const pulsing = this._pulseRole === role;
+    const pulsing = this._pulseRole === role || this._hoverRole === role;
 
     let el;
     if (geom.points){
@@ -1992,6 +2040,28 @@ class DrawingCanvas {
       anim.setAttribute('repeatCount','indefinite');
       el.appendChild(anim);
     }
+
+    // Clickable deselect target — the group above carries pointer-events:none
+    // so gaps between shapes still pass clicks through to panes underneath,
+    // but each painted highlight explicitly re-enables events on itself.
+    el.setAttribute('pointer-events', 'visiblePainted');
+    el.style.cursor = 'pointer';
+    el.addEventListener('mouseenter', (evt) => {
+      this._hoverRole = role;
+      this._showProfileTooltip(evt);
+      this.render();
+    });
+    el.addEventListener('mousemove', (evt) => { this._moveProfileTooltip(evt); });
+    el.addEventListener('mouseleave', () => {
+      this._hoverRole = null;
+      this._hideProfileTooltip();
+      this.render();
+    });
+    el.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      this._deselectProfile(role);
+    });
+
     g.appendChild(el);
   }
 
