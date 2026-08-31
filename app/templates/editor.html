@@ -346,6 +346,12 @@ body { overflow:hidden; }
 .qs-prc .lbl{ font-size:9px;font-family:var(--font-mono);color:var(--copper); }
 .qs-prc .nm{ font-size:12px;font-weight:600;margin:2px 0;color:var(--navy); }
 .qs-prc .dm{ font-size:10px;color:var(--steel);font-family:var(--font-mono); }
+.qs-prc-just-applied{ animation: qsGlowPulse 1.6s ease-out; }
+@keyframes qsGlowPulse{
+  0%   { box-shadow:0 0 0 2px #22C55E, 0 0 22px rgba(34,197,94,0.9); }
+  70%  { box-shadow:0 0 0 2px #22C55E, 0 0 14px rgba(34,197,94,0.65); }
+  100% { box-shadow:none; }
+}
 /* ── JSON tab: code box ── */
 .qs-jb{ font-family:var(--font-mono);font-size:9px;background:var(--navy);color:#9AE6C7;padding:10px;border-radius:6px;max-height:280px;overflow:auto;white-space:pre;line-height:1.55; }
 /* ── Profile cross-section modal ── */
@@ -1774,6 +1780,34 @@ function setWindowProfile(role, code){
     scrollActiveIntoView(activeCard || document.querySelector('.qs-prc'));
   }
 }
+
+// Reverse workflow: called by drawing-engine.js when a structural section
+// (Head/Jamb/Outer Frame/Mullion/Transom/Sash/Cill/Glazing Bead) is
+// clicked directly on the canvas. Applies that role's default/active CAD
+// profile to the window model, pushes undo history, saves, and refreshes
+// pricing — mirroring setWindowProfile's side-effects so canvas-click and
+// sidebar-click stay perfectly in sync.
+function qsApplyDefaultProfileForRole(role){
+  if(!role || !model) return;
+  const candidates = (CAD_PROFILES||[]).filter(p=>p.role===role);
+  if(!candidates.length){
+    showToast(`No profiles in the library for ${ROLE_LABELS[role]||role}`, 'info');
+    return;
+  }
+  const target = candidates.find(p=>p.is_role_default) || candidates[0];
+
+  if(!model.profileRoles) model.profileRoles = {};
+  if(model.profileRoles[role] === target.code) return; // already applied — no-op
+
+  if(dc && typeof dc._pushHistory === 'function') dc._pushHistory();
+  model.profileRoles[role] = target.code;
+  showToast(`✓ ${ROLE_LABELS[role]||role} → ${target.code} (applied from canvas)`, 'ok');
+
+  scheduleSave();
+  if(typeof fetchPricing === 'function') fetchPricing();
+  if(currentTab==='profiles') qsBuildProfs();
+}
+window.qsApplyDefaultProfileForRole = qsApplyDefaultProfileForRole;
 
 function qsClosePModal(){document.getElementById('qsPModal').classList.remove('on');}
 

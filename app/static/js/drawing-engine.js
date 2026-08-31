@@ -847,6 +847,17 @@ class DrawingCanvas {
     // ensure gradient/filter defs exist for realistic frame
     this._ensureDefs();
 
+    // Real DXF CAD-profile cross-section paths, embedded per member as
+    // they're drawn (see _embedDxfCrossSection/_frameBar). Invisible in
+    // the base render (fill:none/stroke:none) — these are the exact
+    // geometry source that _renderProfileHighlights() clones, never a
+    // generic bounding box.
+    this._profileGeomEls = {};
+    this._dxfGeomLayer = document.createElementNS(SVGNS,'g');
+    this._dxfGeomLayer.setAttribute('class','qs-dxf-geometry-layer');
+    this._dxfGeomLayer.setAttribute('pointer-events','none');
+    svg.appendChild(this._dxfGeomLayer);
+
     // drop shadow under the whole window
     const shadow = this._rect(o.x+4, o.y+6, pxW, pxH,
       { fill:'rgba(0,0,0,0.18)', stroke:'none', sw:0 });
@@ -858,13 +869,23 @@ class DrawingCanvas {
 
     if (shape === 'rectangle') {
       // ---- realistic beveled frame (4 mitred bars) ----
-      this._frameBar(o.x,        o.y,        pxW, bar,  col, 'top');
-      this._frameBar(o.x,        o.y+pxH-bar,pxW, bar,  col, 'bottom');
-      this._frameBar(o.x,        o.y,        bar, pxH,  col, 'left');
-      this._frameBar(o.x+pxW-bar,o.y,        bar, pxH,  col, 'right');
+      this._frameBar(o.x,        o.y,        pxW, bar,  col, 'top',    this._effectiveMemberRole('head'), 'head');
+      this._frameBar(o.x,        o.y+pxH-bar,pxW, bar,  col, 'bottom', this._effectiveMemberRole('cill'), 'cill');
+      this._frameBar(o.x,        o.y,        bar, pxH,  col, 'left',   this._effectiveMemberRole('jamb'), 'jamb');
+      this._frameBar(o.x+pxW-bar,o.y,        bar, pxH,  col, 'right',  this._effectiveMemberRole('jamb'), 'jamb');
       const inner = this._rect(o.x+bar, o.y+bar, pxW-2*bar, pxH-2*bar,
         { fill:'none', stroke:'rgba(0,0,0,0.25)', sw:1 });
       svg.appendChild(inner);
+
+      // invisible wider hit-target along the inner aperture line so the
+      // glazing bead is directly clickable (its true bar is thin).
+      const gbHit = this._rect(o.x+bar, o.y+bar, pxW-2*bar, pxH-2*bar,
+        { fill:'none', stroke:'transparent', sw: Math.max(10, bar*0.6) });
+      gbHit.setAttribute('pointer-events','stroke');
+      gbHit.setAttribute('data-qs-clickable-part','glazing_bead');
+      gbHit.style.cursor = 'pointer';
+      gbHit.addEventListener('click', (evt) => this._handleSectionClick('glazing_bead', evt));
+      svg.appendChild(gbHit);
 
       // staff bead: a second inner moulding line just inside the frame
       if (this.model.frame.staffBead) {
@@ -1014,10 +1035,11 @@ class DrawingCanvas {
       // sash bars (mitred, bevelled, woodgrained like the frame)
       // Framepoint-style: sash can carry its own finish, separate from the frame
       const col = this.model.frame.sashColor || this.model.frame.color;
-      this._frameBar(gx,            gy,             gw,      sashPx, col, 'top');
-      this._frameBar(gx,            gy+gh-sashPx,   gw,      sashPx, col, 'bottom');
-      this._frameBar(gx,            gy,             sashPx,  gh,     col, 'left');
-      this._frameBar(gx+gw-sashPx,  gy,             sashPx,  gh,     col, 'right');
+      const sashRole = (this.model.profileRoles || {}).sash ? 'sash' : null;
+      this._frameBar(gx,            gy,             gw,      sashPx, col, 'top',    sashRole, 'sash');
+      this._frameBar(gx,            gy+gh-sashPx,   gw,      sashPx, col, 'bottom', sashRole, 'sash');
+      this._frameBar(gx,            gy,             sashPx,  gh,     col, 'left',   sashRole, 'sash');
+      this._frameBar(gx+gw-sashPx,  gy,             sashPx,  gh,     col, 'right',  sashRole, 'sash');
       gx += sashPx; gy += sashPx; gw -= 2*sashPx; gh -= 2*sashPx;
       if (gw <= 0 || gh <= 0) { this._renderOpener(p, x, y, w, h); return; }
     }
@@ -1282,16 +1304,18 @@ class DrawingCanvas {
     const mb = bar * (this.model.frame.slimMullionClip ? 0.32 : 0.6);
     const vEdges = _collectEdgeSpans(this.model.panes, 'v', W, H);
     const hEdges = _collectEdgeSpans(this.model.panes, 'h', W, H);
+    const roles = this.model.profileRoles || {};
+    const hRole = roles.transom ? 'transom' : (roles.coupler ? 'coupler' : null);
     for (const [rx, spans] of vEdges) {
       const mx = o.x + this.mmToPx(rx * W);
       for (const [y1, y2] of _mergeRanges(spans)) {
-        this._frameBar(mx - mb/2, o.y + this.mmToPx(y1), mb, this.mmToPx(y2 - y1), col, 'left');
+        this._frameBar(mx - mb/2, o.y + this.mmToPx(y1), mb, this.mmToPx(y2 - y1), col, 'left', roles.mullion ? 'mullion' : null, 'mullion');
       }
     }
     for (const [ty, spans] of hEdges) {
       const my = o.y + this.mmToPx(ty * H);
       for (const [x1, x2] of _mergeRanges(spans)) {
-        this._frameBar(o.x + this.mmToPx(x1), my - mb/2, this.mmToPx(x2 - x1), mb, col, 'top');
+        this._frameBar(o.x + this.mmToPx(x1), my - mb/2, this.mmToPx(x2 - x1), mb, col, 'top', hRole, 'transom');
       }
     }
   }
@@ -1959,22 +1983,46 @@ class DrawingCanvas {
     }, 1200);
   }
 
-  // When hovering canvas highlight, scroll sidebar to that profile card
+  // When hovering canvas highlight — or after a canvas section click
+  // (reverse workflow) — switch to the Profiles tab if needed, scroll the
+  // right sidebar to the matching applied profile card, and mark it as
+  // the active '✓ APPLIED' card with a glowing border.
   _scrollSidebarToRole(role){
+    // Ensure the Profiles tab (where profile cards live) is showing.
+    if (typeof window !== 'undefined' && window.currentTab !== 'profiles' && typeof window.setTab === 'function') {
+      window.setTab('profiles');
+    } else if (typeof window !== 'undefined' && typeof window.qsBuildProfs === 'function') {
+      // Already on the profiles tab — just rebuild so the just-applied
+      // profile's '✓ APPLIED' badge/card is present before we scroll.
+      window.qsBuildProfs();
+    }
+
     const sidebarPanel = document.querySelector('.dz-scroll');
     if (!sidebarPanel) return;
 
     const cards = sidebarPanel.querySelectorAll('.qs-prc');
+    const windowRoles = this.model.profileRoles || {};
+    const activeCode = windowRoles[role];
+
+    let matchedCard = null;
     for (const card of cards) {
       const cardText = card.textContent || '';
-      // Heuristic: active cards have the role applied
-      const windowRoles = this.model.profileRoles || {};
-      const activeCode = windowRoles[role];
-      if (activeCode && cardText.includes(activeCode)) {
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return;
-      }
+      if (activeCode && cardText.includes(activeCode)) { matchedCard = card; break; }
     }
+    if (!matchedCard) return;
+
+    matchedCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Glowing '✓ APPLIED' emphasis on the matched card (in addition to
+    // whatever static "APPLIED" styling qsBuildProfs already renders).
+    matchedCard.classList.add('qs-prc-active', 'qs-prc-just-applied');
+    matchedCard.style.boxShadow = '0 0 0 2px #22C55E, 0 0 14px rgba(34,197,94,0.65)';
+    matchedCard.style.transition = 'box-shadow 0.2s ease';
+    clearTimeout(this._sidebarGlowTimeout);
+    this._sidebarGlowTimeout = setTimeout(() => {
+      matchedCard.classList.remove('qs-prc-just-applied');
+      matchedCard.style.boxShadow = '';
+    }, 1600);
   }
 
   // Floating "Click to Deselect" badge, positioned next to the cursor.
@@ -2040,124 +2088,29 @@ class DrawingCanvas {
     this._tooltipTimeout && clearTimeout(this._tooltipTimeout);
   }
 
-  /* ── exact geometry getters (mirrors _shapePath's math) ──────────────── */
+  /* ── NOTE ──────────────────────────────────────────────────────────────
+     The bounding-box/rect/polygon geometry calculators that used to live
+     here (_profileHeadGeometry, _profileCillGeometry,
+     _profileGlazingPerimeterGeometry, _profileFrameBandGeometry) have been
+     removed. _renderProfileHighlights() now exclusively clones the real
+     embedded DXF cross-section paths produced by _embedDxfCrossSection()
+     — see _frameBar() — instead of computing generic bounding shapes. */
 
-  // Curved/arch head silhouette (annular band between outer & inner head
-  // curve) for arched/gothic frames, or the full curved ring for circular
-  // frames, or the straight top rail polygon for plain rectangles.
-  _profileHeadGeometry(o, W, H, shape, barPx){
-    if (shape === 'rectangle'){
-      const pxW = this.mmToPx(W);
-      return { d:`M ${o.x} ${o.y} L ${o.x+pxW} ${o.y} L ${o.x+pxW} ${o.y+barPx} L ${o.x} ${o.y+barPx} Z` };
-    }
-    if (shape === 'circular'){
-      // fully curved perimeter — the entire ring is "head" geometry
-      const outerD = this._shapePath(o, W, H, shape, 0);
-      const innerD = this._shapePath(o, W, H, shape, this.model.frame.thickness);
-      return { d:`${outerD} ${innerD}`, fillRule:'evenodd' };
-    }
-    // arched / gothic: rebuild the exact spring-line/arc math used by
-    // _shapePath, but scoped to only the curved head region (outer arc
-    // minus inner arc), i.e. the true head-profile band.
-    const barMm = this.model.frame.thickness;
-    const buildHead = (insetMm) => {
-      const x0 = o.x + this.mmToPx(insetMm);
-      const x1 = o.x + this.mmToPx(W - insetMm);
-      const y0 = o.y + this.mmToPx(insetMm);
-      const w  = x1 - x0, cx = x0 + w/2;
-      const rise = Math.max(0, this.model.archRise != null
-        ? this.model.archRise : Math.min(W * 0.25, 400));
-      const risePx = this.mmToPx(rise);
-      const springY = y0 + risePx;
-      if (shape === 'arched'){
-        const archRx = w/2, archRy = risePx;
-        return `M ${x0} ${springY} A ${archRx} ${archRy} 0 0 1 ${x1} ${springY} L ${x1} ${springY} L ${x0} ${springY} Z`;
-      }
-      // gothic
-      const riseF = 0.6, apexY = y0, ctrlY = apexY*riseF + springY*(1-riseF);
-      return `M ${x0} ${springY} Q ${x0} ${ctrlY} ${cx} ${apexY} Q ${x1} ${ctrlY} ${x1} ${springY} L ${x1} ${springY} L ${x0} ${springY} Z`;
-    };
-    return { d:`${buildHead(0)} ${buildHead(barMm)}`, fillRule:'evenodd' };
-  }
-
-  // Cill footprint: the exact stepped/projecting polygon (nose, lip,
-  // projection, height) when a physical cill exists, else the flush
-  // bottom rail polygon (rect for straight sills, straight rail for
-  // curved-head frames, quarter-band for circular frames).
-  _profileCillGeometry(o, W, H, shape, barPx){
-    const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
-    if (this.model.frame.cill){
-      const cillH = this.mmToPx(30), lip = this.mmToPx(40), cy = o.y + pxH;
-      return { points:[
-        [o.x,            cy],
-        [o.x+pxW,        cy],
-        [o.x+pxW+lip,    cy+cillH*0.35],
-        [o.x+pxW+lip,    cy+cillH],
-        [o.x-lip,        cy+cillH],
-        [o.x-lip,        cy+cillH*0.35]
-      ]};
-    }
-    if (shape === 'circular'){
-      const ry = pxH/2, cy = o.y+ry;
-      const bottom = cy+ry;
-      return { points:[[o.x, bottom-barPx],[o.x+pxW, bottom-barPx],[o.x+pxW, bottom],[o.x, bottom]] };
-    }
-    // straight bottom rail (rectangle, arched, gothic all share this edge)
-    return { points:[[o.x, o.y+pxH-barPx],[o.x+pxW, o.y+pxH-barPx],[o.x+pxW, o.y+pxH],[o.x, o.y+pxH]] };
-  }
-
-  // Glazing bead / inner frame perimeter: the exact polygon or curved
-  // path bounding the total glazed aperture (all panes combined).
-  _profileGlazingPerimeterGeometry(o, W, H, shape, barPx){
-    if (shape === 'rectangle'){
-      const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
-      return { points:[
-        [o.x+barPx,      o.y+barPx],
-        [o.x+pxW-barPx,  o.y+barPx],
-        [o.x+pxW-barPx,  o.y+pxH-barPx],
-        [o.x+barPx,      o.y+pxH-barPx]
-      ]};
-    }
-    // curved frames: reuse the exact inner clip path already used to
-    // clip the glass/mullions/openers — this IS the true glazing bead line.
-    return { d:this._shapePath(o, W, H, shape, this.model.frame.thickness) };
-  }
-
-  // Full outer frame band (outer edge minus inner edge) — used for the
-  // generic "outer_frame" role and for jamb/coupler/transom rectangles.
-  _profileFrameBandGeometry(o, W, H, shape, barPx){
-    if (shape === 'rectangle'){
-      const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
-      const outer = `M ${o.x} ${o.y} L ${o.x+pxW} ${o.y} L ${o.x+pxW} ${o.y+pxH} L ${o.x} ${o.y+pxH} Z`;
-      const inner = `M ${o.x+barPx} ${o.y+barPx} L ${o.x+pxW-barPx} ${o.y+barPx} L ${o.x+pxW-barPx} ${o.y+pxH-barPx} L ${o.x+barPx} ${o.y+pxH-barPx} Z`;
-      return { d:`${outer} ${inner}`, fillRule:'evenodd' };
-    }
-    const outerD = this._shapePath(o, W, H, shape, 0);
-    const innerD = this._shapePath(o, W, H, shape, this.model.frame.thickness);
-    return { d:`${outerD} ${innerD}`, fillRule:'evenodd' };
-  }
-
-  // Paint one exact-geometry overlay (path d-string, or polygon points)
-  // as a precision, theme-integrated outline — crisp 1.5px stroke, a soft
-  // non-blooming edge glow, and an ultra-translucent surface fill so the
-  // underlying CAD geometry, dimensions and glass textures stay visible.
+  // Paint one profile highlight by cloning the ACTUAL embedded DXF CAD
+  // cross-section path element for this member (geom.el — see
+  // _embedDxfCrossSection) — the exact stepped contour shown in the
+  // sidebar profile card thumbnails, never a generic bounding box/rect/
+  // line. Applies the required stroke-width:4px + fill-opacity:0.35.
   _paintProfileGeometry(g, geom, role){
+    if (!geom || !geom.el) return; // no real DXF geometry embedded for this member — nothing to clone, no fallback shape drawn
     const strokeColor = DrawingCanvas.PROFILE_HL_COLORS[role] || '#38BDF8';
-    const fillColor    = DrawingCanvas.PROFILE_HL_FILLS[role]  || 'rgba(56, 189, 248, 0.08)';
     const pulsing = this._pulseRole === role || this._hoverRole === role;
 
-    let el;
-    if (geom.points){
-      el = document.createElementNS(SVGNS,'polygon');
-      el.setAttribute('points', geom.points.map(p => p.join(',')).join(' '));
-    } else {
-      el = document.createElementNS(SVGNS,'path');
-      el.setAttribute('d', geom.d);
-      if (geom.fillRule) el.setAttribute('fill-rule', geom.fillRule);
-    }
-    el.setAttribute('fill', fillColor);
+    const el = geom.el.cloneNode(true);
+    el.setAttribute('fill', strokeColor);
+    el.setAttribute('fill-opacity', 0.35);
     el.setAttribute('stroke', strokeColor);
-    el.setAttribute('stroke-width', pulsing ? 2.25 : 1.5);
+    el.setAttribute('stroke-width', 4);
     el.setAttribute('stroke-linecap', 'round');
     el.setAttribute('stroke-linejoin', 'round');
     el.setAttribute('stroke-opacity', pulsing ? 1 : 0.95);
@@ -2207,97 +2160,53 @@ class DrawingCanvas {
     g.appendChild(el);
   }
 
-  // Re-evaluated on every dc.render() call (rectangle, arched, gothic and
-  // circular frames all supported) and on sidebar profile card hover/
-  // focus (via pulseProfileHighlight/clearProfilePulse → render()).
-  // Draws EXACT component geometry — curved SVG paths for arch/circular
-  // heads, stepped polygons for projecting cills, and true inner-aperture
-  // paths for glazing beads/frame — never a generic bounding grid.
+  // Re-evaluated on every dc.render() call and on sidebar profile card
+  // hover/focus (via pulseProfileHighlight/clearProfilePulse → render()).
+  // STRICT DXF-ONLY MODE: every highlight is a clone of the actual traced
+  // CAD profile cross-section path embedded into the canvas for that
+  // member by _embedDxfCrossSection() during _frameBar() — the exact
+  // stepped contour shown in the sidebar profile card thumbnails. There
+  // is no bounding-box / rect / line fallback: a role only lights up
+  // once real DXF geometry has been embedded for at least one of its
+  // member bars.
   _renderProfileHighlights(o, W, H, bar){
     if (!this.showProfileHighlights) return;
     const roles = this.model.profileRoles || {};
     if (!Object.keys(roles).length) return;
 
-    const shape = this.model.shape || 'rectangle';
     const g = document.createElementNS(SVGNS,'g');
     g.setAttribute('pointer-events','none');
     g.setAttribute('class','qs-profile-highlight-layer');
 
-    // Outer frame perimeter (skip when 'head' will already cover the
-    // curved portion on top, painted next, so the head's indigo wins).
-    if (roles.outer_frame){
-      this._paintProfileGeometry(g, this._profileFrameBandGeometry(o, W, H, shape, bar), 'outer_frame');
-    }
-
-    // Arch / curved head profile — dynamic geometry (arcs for arched,
-    // bezier for gothic, full ellipse ring for circular, straight rail
-    // rectangle for plain rectangles).
-    if (roles.head){
-      this._paintProfileGeometry(g, this._profileHeadGeometry(o, W, H, shape, bar), 'head');
-    }
-
-    // Cill — exact stepped/projecting polygon (or flush bottom rail).
-    if (roles.cill){
-      this._paintProfileGeometry(g, this._profileCillGeometry(o, W, H, shape, bar), 'cill');
-    }
-    // Threshold — always the flush bottom rail (never a projecting cill).
-    if (roles.threshold){
-      const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
-      this._paintProfileGeometry(g, { points:[
-        [o.x, o.y+pxH-bar],[o.x+pxW, o.y+pxH-bar],[o.x+pxW, o.y+pxH],[o.x, o.y+pxH]
-      ]}, 'threshold');
-    }
-
-    // Jamb — straight vertical bar polygons (both sides). Not meaningful
-    // on fully-curved circular frames.
-    if (roles.jamb && shape !== 'circular'){
-      const pxW = this.mmToPx(W), pxH = this.mmToPx(H);
-      this._paintProfileGeometry(g, { points:[
-        [o.x, o.y],[o.x+bar, o.y],[o.x+bar, o.y+pxH],[o.x, o.y+pxH]
-      ]}, 'jamb');
-      this._paintProfileGeometry(g, { points:[
-        [o.x+pxW-bar, o.y],[o.x+pxW, o.y],[o.x+pxW, o.y+pxH],[o.x+pxW-bar, o.y+pxH]
-      ]}, 'jamb');
-    }
-
-    // Glazing bead / frame perimeter — exact inner-aperture path bounding
-    // all glass panes combined (curved for arched/gothic/circular).
-    if (roles.glazing_bead){
-      this._paintProfileGeometry(g, this._profileGlazingPerimeterGeometry(o, W, H, shape, bar), 'glazing_bead');
-    }
-
-    // Internal members — horizontal dividers are transom/coupler (rose),
-    // vertical dividers are mullion (emerald teal). Resolved independently
-    // per axis so each component keeps its own distinct theme color
-    // rather than collapsing to one shared role/color.
-    const mb = bar * 0.6; // matches _renderMullions' member width
-    if (roles.transom || roles.coupler){
-      const hRole = roles.transom ? 'transom' : 'coupler';
-      const hEdges = _collectEdgeSpans(this.model.panes, 'h', W, H);
-      for (const [ty, spans] of hEdges){
-        if (ty <= 0.001 || ty >= 0.999) continue; // skip outer top/bottom (head/cill)
-        const my = o.y + this.mmToPx(ty * H);
-        for (const [x1, x2] of _mergeRanges(spans)){
-          const bx1 = o.x + this.mmToPx(x1), bx2 = o.x + this.mmToPx(x2);
-          this._paintProfileGeometry(g, { points:[
-            [bx1, my-mb/2],[bx2, my-mb/2],[bx2, my+mb/2],[bx1, my+mb/2]
-          ]}, hRole);
-        }
+    const paintEmbeddedRole = (role) => {
+      const els = this.svg.querySelectorAll(`[data-qs-part="${role}"]`);
+      if (!els || !els.length) return;
+      for (const el of els){
+        this._paintProfileGeometry(g, { el }, role);
       }
-    }
-    if (roles.mullion){
-      const vEdges = _collectEdgeSpans(this.model.panes, 'v', W, H);
-      for (const [rx, spans] of vEdges){
-        if (rx <= 0.001 || rx >= 0.999) continue; // skip outer left/right (jambs)
-        const mx = o.x + this.mmToPx(rx * W);
-        for (const [y1, y2] of _mergeRanges(spans)){
-          const by1 = o.y + this.mmToPx(y1), by2 = o.y + this.mmToPx(y2);
-          this._paintProfileGeometry(g, { points:[
-            [mx-mb/2, by1],[mx+mb/2, by1],[mx+mb/2, by2],[mx-mb/2, by2]
-          ]}, 'mullion');
-        }
-      }
-    }
+    };
+
+    // Outer frame perimeter — clones the actual embedded DXF cross-section
+    // path for each outer-frame bar (top/bottom/left/right) that wasn't
+    // overridden by a more specific head/cill/jamb assignment.
+    if (roles.outer_frame) paintEmbeddedRole('outer_frame');
+
+    // Head — clones the real traced head-bar DXF cross-section.
+    if (roles.head) paintEmbeddedRole('head');
+
+    // Cill — clones the real traced cill-bar DXF cross-section.
+    if (roles.cill) paintEmbeddedRole('cill');
+
+    // Jamb — clones the real traced jamb-bar DXF cross-section (both
+    // left and right bars were embedded under this role).
+    if (roles.jamb) paintEmbeddedRole('jamb');
+
+    // Internal members — horizontal dividers are transom/coupler,
+    // vertical dividers are mullion. Each clones its own embedded DXF
+    // cross-section geometry, keeping its distinct theme colour.
+    if (roles.transom) paintEmbeddedRole('transom');
+    if (roles.coupler) paintEmbeddedRole('coupler');
+    if (roles.mullion) paintEmbeddedRole('mullion');
 
     // Appended last within render() and re-appended here at the very end
     // of the stack (see render()) so it always paints above every other
@@ -2305,27 +2214,147 @@ class DrawingCanvas {
     this.svg.appendChild(g);
   }
 
-  // Draw a single frame bar with base colour + bevel gradient overlay
-  _frameBar(x, y, w, h, col, side){
+  // Resolve which profileRoles key actually governs a given member:
+  // a specific role (head/cill/jamb) wins when assigned, otherwise the
+  // generic 'outer_frame' role is used as the fallback. Returns null
+  // when neither is assigned (no DXF geometry to embed for this member).
+  _effectiveMemberRole(specific){
+    const roles = this.model.profileRoles || {};
+    if (roles[specific]) return specific;
+    if (roles.outer_frame) return 'outer_frame';
+    return null;
+  }
+
+  // Look up the CAD profile (with its traced DXF svg_path) currently
+  // assigned to a given member role.
+  _lookupCadProfile(role){
+    if (!role) return null;
+    const roles = this.model.profileRoles || {};
+    const code = roles[role];
+    if (!code) return null;
+    const list = (typeof CAD_PROFILES !== 'undefined' && Array.isArray(CAD_PROFILES))
+      ? CAD_PROFILES
+      : (this.cadProfiles || (typeof window !== 'undefined' ? window.CAD_PROFILES : null) || []);
+    return list.find(p => p.code === code) || null;
+  }
+
+  // Embed the actual traced DXF cross-section path (profile.svg_path,
+  // 200x200 viewBox) for this member into the SVG canvas, scaled to fit
+  // the member's real on-screen footprint. Tagged with data-qs-part so
+  // it can be identified/inspected, and kept invisible in the base render
+  // (fill:none / stroke:none) — it exists purely as the geometry source
+  // that _renderProfileHighlights() clones for the glowing highlight.
+  // No embedding happens (and nothing is stored) when the assigned
+  // profile has no traced geometry — callers must not fall back to a
+  // bounding-box shape in that case.
+  _embedDxfCrossSection(x, y, w, h, side, role){
+    if (!role) return;
+    const profile = this._lookupCadProfile(role);
+    if (!profile || !profile.svg_path) return;
+
+    const path = document.createElementNS(SVGNS, 'path');
+    path.setAttribute('d', profile.svg_path);
+    path.setAttribute('data-qs-part', role);
+    path.setAttribute('data-qs-profile-code', profile.code || '');
+    path.setAttribute('data-qs-side', side || '');
+    // Map the profile's normalized 200x200 cross-section viewBox onto
+    // this member's actual rendered rectangle (x, y, w, h).
+    path.setAttribute('transform', `translate(${x},${y}) scale(${w/200},${h/200})`);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'none');
+    path.setAttribute('pointer-events', 'none');
+
+    if (this._dxfGeomLayer) this._dxfGeomLayer.appendChild(path);
+    if (!this._profileGeomEls) this._profileGeomEls = {};
+    if (!this._profileGeomEls[role]) this._profileGeomEls[role] = [];
+    this._profileGeomEls[role].push(path);
+  }
+
+  // Draw a single frame bar with base colour + bevel gradient overlay.
+  // When clickRole is given, the whole bar becomes clickable: a click
+  // applies that role's default/active CAD profile and syncs the sidebar.
+  _frameBar(x, y, w, h, col, side, role, clickRole){
+    const bg = document.createElementNS(SVGNS,'g');
+    bg.setAttribute('class','qs-frame-bar');
+    if (clickRole){
+      bg.setAttribute('data-qs-clickable-part', clickRole);
+      bg.style.cursor = 'pointer';
+      bg.addEventListener('click', (evt) => this._handleSectionClick(clickRole, evt));
+    }
+
     // base colour
     const base = this._rect(x, y, w, h, { fill: col, stroke:'none', sw:0 });
-    this.svg.appendChild(base);
+    bg.appendChild(base);
     // procedural woodgrain for timber frames (feTurbulence — no images needed)
     if ((this.model.frame.material||'') === 'Timber') {
       const grain = this._rect(x, y, w, h, { fill:'#000', stroke:'none', sw:0 });
       grain.setAttribute('filter', (side==='left'||side==='right') ? 'url(#qsWoodV)' : 'url(#qsWoodH)');
       grain.setAttribute('pointer-events','none');
-      this.svg.appendChild(grain);
+      bg.appendChild(grain);
     }
     // bevel gradient overlay (vertical bars use V gradient, horizontal use H)
     const grad = (side==='left'||side==='right') ? 'url(#qsFrameV)' : 'url(#qsFrameH)';
     const bevel = this._rect(x, y, w, h, { fill: grad, stroke:'none', sw:0 });
     bevel.setAttribute('pointer-events','none');
-    this.svg.appendChild(bevel);
+    bg.appendChild(bevel);
     // thin outline
     const line = this._rect(x, y, w, h, { fill:'none', stroke:'rgba(0,0,0,0.3)', sw:0.5 });
     line.setAttribute('pointer-events','none');
-    this.svg.appendChild(line);
+    bg.appendChild(line);
+
+    this.svg.appendChild(bg);
+
+    // Embed the real traced DXF cross-section geometry for this member
+    // (if a CAD profile with geometry is assigned to its role) so the
+    // profile highlight system has actual CAD geometry to clone instead
+    // of falling back to this bar's bounding rectangle.
+    this._embedDxfCrossSection(x, y, w, h, side, role);
+  }
+
+  // Canvas → sidebar reverse workflow: clicking a structural section
+  // (Head/Jamb/Outer Frame/Mullion/Transom/Sash/Cill/Glazing Bead)
+  // applies that role's default/active CAD profile, highlights it on the
+  // canvas, and auto-scrolls + marks the matching sidebar card as applied.
+  _handleSectionClick(clickRole, evt){
+    if (!clickRole) return;
+    if (evt){ evt.stopPropagation(); }
+
+    if (typeof window !== 'undefined' && typeof window.qsApplyDefaultProfileForRole === 'function') {
+      window.qsApplyDefaultProfileForRole(clickRole);
+    } else {
+      this._applyDefaultProfileForRole(clickRole);
+    }
+
+    // highlight the section on the canvas
+    this.showProfileHighlights = true;
+    this._pulseRole = clickRole;
+    this._hoverRole = clickRole;
+    this.render();
+
+    // auto-scroll + sync the right sidebar to the applied profile card
+    this._scrollSidebarToRole(clickRole);
+  }
+
+  // Fallback default-profile applier used when the host page hasn't
+  // provided window.qsApplyDefaultProfileForRole. Applies the role's
+  // is_role_default profile (or its first matching profile) directly to
+  // the window model, keeping undo/redo + canvas sync intact via
+  // this.onChange().
+  _applyDefaultProfileForRole(role){
+    const list = (typeof CAD_PROFILES !== 'undefined' && Array.isArray(CAD_PROFILES))
+      ? CAD_PROFILES
+      : (this.cadProfiles || (typeof window !== 'undefined' ? window.CAD_PROFILES : null) || []);
+    if (!list || !list.length) return;
+
+    const target = list.find(p => p.role === role && p.is_role_default)
+                || list.find(p => p.role === role);
+    if (!target) return;
+
+    if (!this.model.profileRoles) this.model.profileRoles = {};
+    if (this.model.profileRoles[role] === target.code) return; // already applied
+
+    this.model.profileRoles[role] = target.code;
+    if (typeof this.onChange === 'function') this.onChange();
   }
 
   _rect(x,y,w,h,s){
