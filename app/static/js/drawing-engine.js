@@ -505,6 +505,10 @@ class DrawingCanvas {
     this.showProfileHighlights = false;   // ON while the Profiles tab is active
     this._pulseRole = null;               // role glowing from sidebar hover
     this._hoverRole = null;               // role currently hovered directly on the canvas
+    this._sectionFocusRole = null;        // role temporarily focused by a canvas click (preview only, not applied)
+    this._sectionFocusTimeout = null;
+    this._sidebarPreviewGlowTimeout = null;
+    this._appliedPulseTimeout = null;
 
     // undo/redo history
     this._history = [];
@@ -948,6 +952,7 @@ class DrawingCanvas {
     // LAST so it paints above every other layer: grid, frame bars, panes,
     // glass, dims, everything.
     this._renderProfileHighlights(o, W, H, bar);
+    this._renderSectionFocusPreview();
   }
 
   _renderGrid(rect) {
@@ -2311,50 +2316,160 @@ class DrawingCanvas {
     this._embedDxfCrossSection(x, y, w, h, side, role);
   }
 
-  // Canvas → sidebar reverse workflow: clicking a structural section
-  // (Head/Jamb/Outer Frame/Mullion/Transom/Sash/Cill/Glazing Bead)
-  // applies that role's default/active CAD profile, highlights it on the
-  // canvas, and auto-scrolls + marks the matching sidebar card as applied.
+  // Canvas → sidebar reverse workflow (PREVIEW ONLY): clicking a
+  // structural section (Head/Jamb/Outer Frame/Mullion/Transom/Sash/Cill/
+  // Glazing Bead) NEVER auto-assigns or auto-saves a CAD profile. It only:
+  //   a) temporarily highlights that clicked section's geometry, and
+  //   b) smooth-scrolls the sidebar to the matching CAD Profile card and
+  //      flashes its 'Apply' button.
+  // The profile is only assigned/saved when the user explicitly clicks
+  // 'Apply' on the sidebar card (see setWindowProfile in editor.js).
   _handleSectionClick(clickRole, evt){
     if (!clickRole) return;
     if (evt){ evt.stopPropagation(); }
 
-    if (typeof window !== 'undefined' && typeof window.qsApplyDefaultProfileForRole === 'function') {
-      window.qsApplyDefaultProfileForRole(clickRole);
-    } else {
-      this._applyDefaultProfileForRole(clickRole);
-    }
-
-    // highlight the section on the canvas
-    this.showProfileHighlights = true;
-    this._pulseRole = clickRole;
+    // a) temporary canvas highlight of the clicked section only
+    this._sectionFocusRole = clickRole;
     this._hoverRole = clickRole;
     this.render();
 
-    // auto-scroll + sync the right sidebar to the applied profile card
-    this._scrollSidebarToRole(clickRole);
+    // b) scroll sidebar to the applicable CAD Profile card + flash Apply
+    this._scrollSidebarToRoleCandidate(clickRole);
+
+    clearTimeout(this._sectionFocusTimeout);
+    this._sectionFocusTimeout = setTimeout(() => {
+      if (this._sectionFocusRole === clickRole){
+        this._sectionFocusRole = null;
+        this._hoverRole = null;
+        this.render();
+      }
+    }, 4000);
   }
 
-  // Fallback default-profile applier used when the host page hasn't
-  // provided window.qsApplyDefaultProfileForRole. Applies the role's
-  // is_role_default profile (or its first matching profile) directly to
-  // the window model, keeping undo/redo + canvas sync intact via
-  // this.onChange().
-  _applyDefaultProfileForRole(role){
-    const list = (typeof CAD_PROFILES !== 'undefined' && Array.isArray(CAD_PROFILES))
-      ? CAD_PROFILES
-      : (this.cadProfiles || (typeof window !== 'undefined' ? window.CAD_PROFILES : null) || []);
-    if (!list || !list.length) return;
+  // Clears the temporary preview focus (called when the user applies a
+  // profile, clicks elsewhere, or the preview times out).
+  _clearSectionFocus(role){
+    if (!role || this._sectionFocusRole === role){
+      this._sectionFocusRole = null;
+    }
+    clearTimeout(this._sectionFocusTimeout);
+  }
 
-    const target = list.find(p => p.role === role && p.is_role_default)
-                || list.find(p => p.role === role);
-    if (!target) return;
+  // Called by editor.js after the user explicitly clicks 'Apply' on a
+  // sidebar profile card. Converts the temporary preview highlight into
+  // the real 'applied profile' highlight (green DXF-geometry glow).
+  onProfileApplied(role){
+    this._clearSectionFocus(role);
+    this.showProfileHighlights = true;
+    this._pulseRole = role;
+    this.render();
+    clearTimeout(this._appliedPulseTimeout);
+    this._appliedPulseTimeout = setTimeout(() => {
+      if (this._pulseRole === role) this._pulseRole = null;
+      this.render();
+    }, 1600);
+  }
 
-    if (!this.model.profileRoles) this.model.profileRoles = {};
-    if (this.model.profileRoles[role] === target.code) return; // already applied
+  // Called by editor.js after the user removes/unapplies a profile for a
+  // role (toggled off via the sidebar). Clears any lingering preview and
+  // refreshes highlights so the canvas stays in sync.
+  onProfileCleared(role){
+    this._clearSectionFocus(role);
+    if (typeof window !== 'undefined'){
+      this.showProfileHighlights = (window.currentTab === 'profiles');
+    }
+    this.render();
+  }
 
-    this.model.profileRoles[role] = target.code;
-    if (typeof this.onChange === 'function') this.onChange();
+  // Draws the temporary amber, dashed "focus preview" outline around the
+  // clicked section's rendered bar(s) — independent of whether a DXF
+  // profile has been embedded yet, since nothing has been applied.
+  _renderSectionFocusPreview(){
+    const role = this._sectionFocusRole;
+    if (!role) return;
+    const bars = this.svg.querySelectorAll(`[data-qs-clickable-part="${role}"]`);
+    if (!bars || !bars.length) return;
+
+    const g = document.createElementNS(SVGNS,'g');
+    g.setAttribute('pointer-events','none');
+    g.setAttribute('class','qs-section-focus-preview-layer');
+
+    bars.forEach(barEl => {
+      let box;
+      try { box = barEl.getBBox(); } catch(e){ return; }
+      if (!box || !box.width || !box.height) return;
+      const pad = 3;
+      const r = this._rect(box.x - pad, box.y - pad, box.width + pad*2, box.height + pad*2, {
+        fill: 'rgba(245, 158, 11, 0.14)', stroke: '#F59E0B', sw: 2
+      });
+      r.setAttribute('stroke-dasharray', '6 4');
+      r.setAttribute('rx', 2);
+      r.style.filter = 'drop-shadow(0 0 4px rgba(245,158,11,0.6))';
+      const anim = document.createElementNS(SVGNS,'animate');
+      anim.setAttribute('attributeName','stroke-opacity');
+      anim.setAttribute('values','1;0.35;1');
+      anim.setAttribute('dur','1.1s');
+      anim.setAttribute('repeatCount','indefinite');
+      r.appendChild(anim);
+      g.appendChild(r);
+    });
+
+    this.svg.appendChild(g);
+  }
+
+  // Scrolls the sidebar to the CAD Profile card the user CAN apply for
+  // this role (preferring the role-default ★ card) and flashes its
+  // 'Apply' button, WITHOUT assigning/saving anything. Matches the
+  // button via its setWindowProfile(role, code) onclick signature rather
+  // than requiring the profile to already be applied.
+  _scrollSidebarToRoleCandidate(role){
+    if (typeof window !== 'undefined' && window.currentTab !== 'profiles' && typeof window.setTab === 'function') {
+      window.setTab('profiles');
+    } else if (typeof window !== 'undefined' && typeof window.qsBuildProfs === 'function') {
+      window.qsBuildProfs();
+    }
+
+    const sidebarPanel = document.querySelector('.dz-scroll');
+    if (!sidebarPanel) return null;
+
+    const escRole = String(role).replace(/'/g, "\\'");
+    let applyBtns = [];
+    try {
+      applyBtns = Array.from(
+        sidebarPanel.querySelectorAll(`button[onclick*="setWindowProfile('${escRole}','"]`)
+      ).filter(b => !b.classList.contains('qs-removebtn'));
+    } catch(e){ applyBtns = []; }
+    if (!applyBtns.length) return null;
+
+    const btn = applyBtns.find(b => {
+      const card = b.closest('.qs-prc');
+      return card && card.textContent && card.textContent.includes('★');
+    }) || applyBtns[0];
+
+    const card = btn.closest('.qs-prc');
+    if (!card) return null;
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    card.classList.add('qs-prc-focus-preview');
+    card.style.transition = 'box-shadow 0.2s ease';
+    card.style.boxShadow = '0 0 0 2px #F59E0B, 0 0 14px rgba(245,158,11,0.55)';
+
+    btn.classList.add('qs-apply-btn-flash');
+    btn.style.transition = 'transform 0.15s ease, box-shadow 0.15s ease';
+    btn.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.35)';
+    btn.style.transform = 'scale(1.06)';
+
+    clearTimeout(this._sidebarPreviewGlowTimeout);
+    this._sidebarPreviewGlowTimeout = setTimeout(() => {
+      card.classList.remove('qs-prc-focus-preview');
+      card.style.boxShadow = '';
+      btn.classList.remove('qs-apply-btn-flash');
+      btn.style.boxShadow = '';
+      btn.style.transform = '';
+    }, 2200);
+
+    return { card, btn };
   }
 
   _rect(x,y,w,h,s){
@@ -2549,3 +2664,126 @@ function renderUnitSVG(model, opts = {}) {
 
 /* export to window */
 window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templateToModel, templatesByCategory, renderUnitSVG };
+
+/* ------------------------------------------------------------------
+   Preview-only selection workflow bridge (formerly editor.js, now
+   merged directly into drawing-engine.js — no separate file needed).
+
+   Rules enforced here:
+   1. A canvas section click never assigns/saves a profile — that is
+      already true in DrawingCanvas._handleSectionClick above.
+   2. A CAD profile is only assigned/saved when the user explicitly
+      clicks 'Apply' on a sidebar card. This wraps the host page's
+      existing setWindowProfile(role, code) so, once it actually
+      applies (or removes) a profile, the canvas converts the
+      temporary preview highlight into the real applied/cleared
+      highlight.
+   3. Any legacy caller of qsApplyDefaultProfileForRole (the old
+      auto-apply reverse workflow) is redirected into the preview-only
+      flow instead of assigning anything.
+   ------------------------------------------------------------------ */
+(function(){
+  if (typeof document === 'undefined') return;
+
+  function whenReady(fn){
+    if (document.readyState === 'loading'){
+      document.addEventListener('DOMContentLoaded', fn);
+    } else {
+      fn();
+    }
+  }
+
+  function getDc(){
+    return (typeof window !== 'undefined') ? window.dc : null;
+  }
+
+  function currentRoleCode(role){
+    const m = (typeof window !== 'undefined') ? window.model : null;
+    return (m && m.profileRoles) ? m.profileRoles[role] : undefined;
+  }
+
+  function wireSetWindowProfile(){
+    if (typeof window.setWindowProfile !== 'function') return;
+    if (window.setWindowProfile.__qsPreviewWrapped) return;
+
+    const original = window.setWindowProfile;
+
+    const wrapped = function(role, code){
+      const before = currentRoleCode(role);
+      const result = original(role, code);
+      const after = currentRoleCode(role);
+      const dc = getDc();
+
+      if (dc){
+        if (after === code){
+          // User explicitly applied this profile — promote preview to applied.
+          if (typeof dc.onProfileApplied === 'function') dc.onProfileApplied(role);
+        } else if (before === code && after === undefined){
+          // User explicitly removed the applied profile (toggle-off).
+          if (typeof dc.onProfileCleared === 'function') dc.onProfileCleared(role);
+        }
+      }
+
+      return result;
+    };
+
+    wrapped.__qsPreviewWrapped = true;
+    window.setWindowProfile = wrapped;
+  }
+
+  function wireLegacyAutoApplyGuard(){
+    // Redirect any remaining calls to the old auto-apply entry point into
+    // the new preview-only canvas workflow — it must never assign a
+    // profile by itself.
+    window.qsApplyDefaultProfileForRole = function(role){
+      const dc = getDc();
+      if (dc && typeof dc._handleSectionClick === 'function'){
+        dc._handleSectionClick(role, null);
+      }
+    };
+  }
+
+  function injectPreviewStyles(){
+    if (document.getElementById('qsSectionPreviewStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'qsSectionPreviewStyles';
+    style.textContent = `
+      .qs-prc-focus-preview { animation: qsPrcFocusPulse 1.1s ease-in-out infinite; }
+      @keyframes qsPrcFocusPulse {
+        0%   { box-shadow: 0 0 0 2px #F59E0B, 0 0 8px rgba(245,158,11,0.35); }
+        50%  { box-shadow: 0 0 0 2px #F59E0B, 0 0 18px rgba(245,158,11,0.75); }
+        100% { box-shadow: 0 0 0 2px #F59E0B, 0 0 8px rgba(245,158,11,0.35); }
+      }
+      .qs-apply-btn-flash {
+        background: #F59E0B !important;
+        border-color: #F59E0B !important;
+        color: #fff !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function init(){
+    injectPreviewStyles();
+    wireLegacyAutoApplyGuard();
+
+    if (typeof window.setWindowProfile === 'function'){
+      wireSetWindowProfile();
+    } else {
+      // setWindowProfile may be declared later in the page's own inline
+      // script relative to load order — retry briefly.
+      let tries = 0;
+      const iv = setInterval(() => {
+        tries++;
+        if (typeof window.setWindowProfile === 'function'){
+          wireSetWindowProfile();
+          clearInterval(iv);
+        } else if (tries > 40){
+          clearInterval(iv);
+        }
+      }, 100);
+    }
+  }
+
+  whenReady(init);
+})();
