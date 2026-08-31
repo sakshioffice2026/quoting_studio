@@ -1664,13 +1664,13 @@ function qsBuildProfs(){
         ? '<span style="font-size:9px;background:#16A34A;color:#fff;border-radius:4px;padding:2px 7px;margin-left:4px;font-weight:700;letter-spacing:.02em;">✓ APPLIED</span>'
         : '';
       const applyBtn = !p.role ? '' : isActive
-        ? `<button class="qs-removebtn" onclick="event.stopPropagation();setWindowProfile('${p.role}','${p.code}')">✕ Remove</button>`
+        ? `<button class="qs-removebtn" onclick="event.stopPropagation();removeWindowProfile('${p.role}')">✕ Remove</button>`
         : `<button onclick="event.stopPropagation();setWindowProfile('${p.role}','${p.code}')"
              style="font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid var(--copper);
                     background:#fff;color:var(--copper);cursor:pointer;flex-shrink:0;">Apply</button>`;
       const hoverAttrs = isActive
         ? `onmouseenter="dc.pulseProfileHighlight('${p.role}')" onmouseleave="dc.clearProfilePulse()"` : '';
-      html += `<div class="qs-prc ${isActive?'qs-prc-active':''}" ${hoverAttrs} onclick="qsOpenPModal(${JSON.stringify(p).replace(/"/g,'&quot;')})"
+      html += `<div class="qs-prc ${isActive?'qs-prc-active':''}" data-qs-profile-role="${p.role||''}" data-qs-profile-code="${(p.code||'').replace(/"/g,'&quot;')}" ${hoverAttrs} onclick="qsOpenPModal(${JSON.stringify(p).replace(/"/g,'&quot;')})"
                  style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;${isActive?'background:#F0FDF4;border:2px solid #22C55E;border-radius:6px;':''}">
         ${qsProfileThumbSVG(p, 40)}
         <div style="flex:1;min-width:0;">
@@ -1748,7 +1748,7 @@ function qsOpenPModal(p){
     btnEl.style.display='';
     btnEl.textContent = isActive ? '✓ Active for this window' : `Use as ${ROLE_LABELS[p.role]||p.role} for this window`;
     btnEl.style.background = isActive ? '#3D6B5C' : '';
-    btnEl.onclick = () => setWindowProfile(p.role, p.code);
+    btnEl.onclick = () => isActive ? removeWindowProfile(p.role) : setWindowProfile(p.role, p.code);
   } else {
     btnEl.style.display='none';
   }
@@ -1765,7 +1765,7 @@ function setWindowSystem(id){
 function setWindowProfile(role, code){
   if(!model.profileRoles) model.profileRoles = {};
   if(model.profileRoles[role] === code){
-    delete model.profileRoles[role];  // toggle off
+    delete model.profileRoles[role];
     showToast(`Cleared ${ROLE_LABELS[role]||role} override — using library default`, 'info');
   } else {
     model.profileRoles[role] = code;
@@ -1773,7 +1773,7 @@ function setWindowProfile(role, code){
   }
   scheduleSave();
   qsClosePModal();
-  if(dc){ requestAnimationFrame(()=>dc.render()); }   // force canvas redraw so the new highlight shows instantly
+  if(dc){ requestAnimationFrame(()=>dc.render()); }
   if(currentTab==='profiles'){
     qsBuildProfs();
     const activeCard=document.querySelector('.qs-prc-active');
@@ -1781,12 +1781,27 @@ function setWindowProfile(role, code){
   }
 }
 
-// Reverse workflow: called by drawing-engine.js when a structural section
-// (Head/Jamb/Outer Frame/Mullion/Transom/Sash/Cill/Glazing Bead) is
-// clicked directly on the canvas. Applies that role's default/active CAD
-// profile to the window model, pushes undo history, saves, and refreshes
-// pricing — mirroring setWindowProfile's side-effects so canvas-click and
-// sidebar-click stay perfectly in sync.
+// Remove exactly one role's per-window CAD profile override — other
+// roles (head, jamb, cill, etc.) are left untouched.
+function removeWindowProfile(role){
+  if(!role || !model || !model.profileRoles || !(role in model.profileRoles)) return;
+  delete model.profileRoles[role];
+  showToast(`Cleared ${ROLE_LABELS[role]||role} override — using library default`, 'info');
+  scheduleSave();
+  qsClosePModal();
+  if(dc){ requestAnimationFrame(()=>dc.render()); }
+  if(currentTab==='profiles'){
+    qsBuildProfs();
+    const activeCard=document.querySelector('.qs-prc-active');
+    scrollActiveIntoView(activeCard || document.querySelector('.qs-prc'));
+  }
+  if(typeof fetchPricing === 'function') fetchPricing();
+}
+window.removeWindowProfile = removeWindowProfile;
+
+// Reverse workflow: legacy entry point — redirected by drawing-engine.js
+// into the preview-only canvas workflow (scroll + modal confirm). Does
+// NOT auto-apply profiles.
 function qsApplyDefaultProfileForRole(role){
   if(!role || !model) return;
   const candidates = (CAD_PROFILES||[]).filter(p=>p.role===role);

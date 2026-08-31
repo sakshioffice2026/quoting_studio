@@ -509,6 +509,10 @@ class DrawingCanvas {
     this._sectionFocusTimeout = null;
     this._sidebarPreviewGlowTimeout = null;
     this._appliedPulseTimeout = null;
+    this._previewGlowCard = null;
+    this._previewGlowBtn = null;
+    this._profileSuggestModalOpen = false;
+    this._profileSuggestRole = null;
 
     // undo/redo history
     this._history = [];
@@ -609,6 +613,13 @@ class DrawingCanvas {
     this.svg.addEventListener('mousedown', (e) => {
       const rect = this.svg.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+      // Frame-section clicks are handled by per-bar listeners — skip pane
+      // selection here so render() doesn't destroy the click target first.
+      const framePart = e.target && e.target.closest
+        ? e.target.closest('[data-qs-clickable-part]')
+        : null;
+      if (framePart) return;
 
       // middle mouse or space/pan tool => pan
       if (e.button === 1 || this.tool === 'pan' || e.altKey) {
@@ -888,6 +899,7 @@ class DrawingCanvas {
       gbHit.setAttribute('pointer-events','stroke');
       gbHit.setAttribute('data-qs-clickable-part','glazing_bead');
       gbHit.style.cursor = 'pointer';
+      gbHit.addEventListener('mousedown', (evt) => evt.stopPropagation());
       gbHit.addEventListener('click', (evt) => this._handleSectionClick('glazing_bead', evt));
       svg.appendChild(gbHit);
 
@@ -1913,8 +1925,13 @@ class DrawingCanvas {
   // Unassigns a CAD profile role from the current window and notifies the
   // host page (toast/save/sidebar refresh) via onProfileDeselect + onChange.
   _deselectProfile(role){
+    if (!role) return;
     if (!this.model.profileRoles || !(role in this.model.profileRoles)) return;
     const code = this.model.profileRoles[role];
+    if (typeof window !== 'undefined' && typeof window.removeWindowProfile === 'function'){
+      window.removeWindowProfile(role);
+      return;
+    }
     delete this.model.profileRoles[role];
     this._pulseRole = null;
     this._hoverRole = null;
@@ -1950,12 +1967,12 @@ class DrawingCanvas {
       // Scroll the sidebar to show this card
       targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
       // Flash the card with a brief red glow
-      this._flashProfileCard(targetCard);
+      this._flashDeselectProfileCard(targetCard);
     }
   }
 
-  // Flash a profile card with animated red glow & pulse
-  _flashProfileCard(card){
+  // Brief red flash on a sidebar card after canvas deselect.
+  _flashDeselectProfileCard(card){
     if (!card) return;
     const origBg = card.style.background || '';
     const origBorder = card.style.borderColor || '';
@@ -2002,21 +2019,22 @@ class DrawingCanvas {
       window.qsBuildProfs();
     }
 
-    const sidebarPanel = document.querySelector('.dz-scroll');
+    const sidebarPanel = this._getProfilesSidebar();
     if (!sidebarPanel) return;
-
-    const cards = sidebarPanel.querySelectorAll('.qs-prc');
     const windowRoles = this.model.profileRoles || {};
     const activeCode = windowRoles[role];
 
-    let matchedCard = null;
-    for (const card of cards) {
-      const cardText = card.textContent || '';
-      if (activeCode && cardText.includes(activeCode)) { matchedCard = card; break; }
+    let matchedCard = this._findProfileCard(role, activeCode);
+    if (!matchedCard){
+      const cards = sidebarPanel.querySelectorAll('.qs-prc');
+      for (const card of cards) {
+        const cardText = card.textContent || '';
+        if (activeCode && cardText.includes(activeCode)) { matchedCard = card; break; }
+      }
     }
     if (!matchedCard) return;
 
-    matchedCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    this._scrollCardToTop(sidebarPanel, matchedCard);
 
     // Glowing '✓ APPLIED' emphasis on the matched card (in addition to
     // whatever static "APPLIED" styling qsBuildProfs already renders).
@@ -2284,6 +2302,9 @@ class DrawingCanvas {
     if (clickRole){
       bg.setAttribute('data-qs-clickable-part', clickRole);
       bg.style.cursor = 'pointer';
+      // Stop mousedown from reaching the SVG pane-select handler — it
+      // calls render() and destroys this <g> before the click fires.
+      bg.addEventListener('mousedown', (evt) => evt.stopPropagation());
       bg.addEventListener('click', (evt) => this._handleSectionClick(clickRole, evt));
     }
 
@@ -2316,19 +2337,41 @@ class DrawingCanvas {
     this._embedDxfCrossSection(x, y, w, h, side, role);
   }
 
-  // Canvas → sidebar reverse workflow (PREVIEW ONLY): clicking a
-  // structural section (Head/Jamb/Outer Frame/Mullion/Transom/Sash/Cill/
-  // Glazing Bead) NEVER auto-assigns or auto-saves a CAD profile. It only:
+  // Canvas → sidebar reverse workflow (PREVIEW ONLY): clicking an
+  // unassigned structural section (Head/Jamb/Outer Frame/Mullion/Transom/
+  // Sash/Cill/Glazing Bead) NEVER auto-assigns or auto-saves a CAD profile.
+  // It only:
   //   a) temporarily highlights that clicked section's geometry, and
-  //   b) smooth-scrolls the sidebar to the matching CAD Profile card and
-  //      flashes its 'Apply' button.
-  // The profile is only assigned/saved when the user explicitly clicks
-  // 'Apply' on the sidebar card (see setWindowProfile in editor.js).
+  //   b) smooth-scrolls the sidebar so the recommended CAD Profile card is
+  //      at the top of the viewport, flashes its 'Apply' button, and opens
+  //      a confirmation modal: "Do you want to apply [Profile Name]?"
+  // If the section already has a profile applied, we scroll to that card
+  // instead. The profile is only assigned/saved when the user clicks Yes
+  // in the modal (or Apply on the sidebar card).
+  _isRoleUnassigned(role){
+    const roles = (this.model && this.model.profileRoles) || {};
+    return !roles[role];
+  }
+
   _handleSectionClick(clickRole, evt){
     if (!clickRole) return;
     if (evt){ evt.stopPropagation(); }
 
+    // Already applied — scroll to the active profile card instead of suggesting.
+    if (!this._isRoleUnassigned(clickRole)){
+      this.showProfileHighlights = true;
+      this._pulseRole = clickRole;
+      this._scrollSidebarToRole(clickRole);
+      clearTimeout(this._appliedPulseTimeout);
+      this._appliedPulseTimeout = setTimeout(() => {
+        if (this._pulseRole === clickRole) this._pulseRole = null;
+        this.render();
+      }, 1600);
+      return;
+    }
+
     // a) temporary canvas highlight of the clicked section only
+    this.showProfileHighlights = true;
     this._sectionFocusRole = clickRole;
     this._hoverRole = clickRole;
     this.render();
@@ -2338,21 +2381,45 @@ class DrawingCanvas {
 
     clearTimeout(this._sectionFocusTimeout);
     this._sectionFocusTimeout = setTimeout(() => {
-      if (this._sectionFocusRole === clickRole){
-        this._sectionFocusRole = null;
-        this._hoverRole = null;
-        this.render();
+      if (this._sectionFocusRole === clickRole && !this._profileSuggestModalOpen){
+        this._dismissProfileSuggest(clickRole);
       }
-    }, 4000);
+    }, 12000);
   }
 
   // Clears the temporary preview focus (called when the user applies a
   // profile, clicks elsewhere, or the preview times out).
   _clearSectionFocus(role){
-    if (!role || this._sectionFocusRole === role){
-      this._sectionFocusRole = null;
-    }
+    if (!role) return;
+    if (this._sectionFocusRole === role) this._sectionFocusRole = null;
+    if (this._hoverRole === role) this._hoverRole = null;
     clearTimeout(this._sectionFocusTimeout);
+    if (this._profileSuggestRole === role) this._hideProfileSuggestModal();
+    this._clearSidebarPreviewGlow();
+  }
+
+  _dismissProfileSuggest(role){
+    if (!role) return;
+    this._hideProfileSuggestModal();
+    this._clearSidebarPreviewGlow();
+    if (this._sectionFocusRole === role) this._sectionFocusRole = null;
+    if (this._hoverRole === role) this._hoverRole = null;
+    this.render();
+  }
+
+  _clearSidebarPreviewGlow(){
+    clearTimeout(this._sidebarPreviewGlowTimeout);
+    if (this._previewGlowCard){
+      this._previewGlowCard.classList.remove('qs-prc-focus-preview');
+      this._previewGlowCard.style.boxShadow = '';
+      this._previewGlowCard = null;
+    }
+    if (this._previewGlowBtn){
+      this._previewGlowBtn.classList.remove('qs-apply-btn-flash');
+      this._previewGlowBtn.style.boxShadow = '';
+      this._previewGlowBtn.style.transform = '';
+      this._previewGlowBtn = null;
+    }
   }
 
   // Called by editor.js after the user explicitly clicks 'Apply' on a
@@ -2417,59 +2484,217 @@ class DrawingCanvas {
     this.svg.appendChild(g);
   }
 
-  // Scrolls the sidebar to the CAD Profile card the user CAN apply for
-  // this role (preferring the role-default ★ card) and flashes its
-  // 'Apply' button, WITHOUT assigning/saving anything. Matches the
-  // button via its setWindowProfile(role, code) onclick signature rather
-  // than requiring the profile to already be applied.
+  _getCadProfileList(){
+    return (typeof CAD_PROFILES !== 'undefined' && Array.isArray(CAD_PROFILES))
+      ? CAD_PROFILES
+      : (this.cadProfiles || (typeof window !== 'undefined' ? window.CAD_PROFILES : null) || []);
+  }
+
+  _findSuggestedProfile(role){
+    const curShape = (this.model && this.model.shape) || 'rectangle';
+    const candidates = this._getCadProfileList().filter((p) => {
+      if (p.role !== role) return false;
+      if (!p.compatible_shapes || !p.compatible_shapes.length) return true;
+      return p.compatible_shapes.includes(curShape);
+    });
+    return candidates.find((p) => p.is_role_default) || candidates[0] || null;
+  }
+
+  _getProfilesSidebar(){
+    return document.querySelector('.dz-panel .dz-scroll') || document.querySelector('.dz-scroll');
+  }
+
+  _findProfileCard(role, code){
+    if (!code) return null;
+    const sidebarPanel = this._getProfilesSidebar();
+    if (!sidebarPanel) return null;
+
+    const esc = (typeof CSS !== 'undefined' && CSS.escape)
+      ? CSS.escape(code)
+      : String(code).replace(/["\\]/g, '\\$&');
+    const byData = sidebarPanel.querySelector(
+      `.qs-prc[data-qs-profile-role="${role}"][data-qs-profile-code="${esc}"]`
+    );
+    if (byData) return byData;
+
+    const needle = `setWindowProfile('${role}'`;
+    const cards = Array.from(sidebarPanel.querySelectorAll('.qs-prc'));
+    for (const card of cards){
+      const buttons = Array.from(card.querySelectorAll('button'));
+      for (const btn of buttons){
+        if (btn.classList.contains('qs-removebtn')) continue;
+        const oc = btn.getAttribute('onclick') || '';
+        if (oc.indexOf(needle) === -1) continue;
+        if (oc.indexOf(`'${code}'`) !== -1 || oc.indexOf(`"${code}"`) !== -1) return card;
+        if (!code) return card;
+      }
+    }
+    return null;
+  }
+
+  _scrollCardToTop(container, card){
+    if (!container || !card) return;
+    const containerRect = container.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const top = container.scrollTop + (cardRect.top - containerRect.top);
+    container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }
+
+  _flashSuggestProfileCard(card){
+    if (!card) return null;
+    const btn = Array.from(card.querySelectorAll('button')).find((b) => !b.classList.contains('qs-removebtn'));
+    this._clearSidebarPreviewGlow();
+    this._previewGlowCard = card;
+    this._previewGlowBtn = btn || null;
+
+    card.classList.add('qs-prc-focus-preview');
+    card.style.transition = 'box-shadow 0.2s ease';
+    card.style.boxShadow = '0 0 0 2px #F59E0B, 0 0 14px rgba(245,158,11,0.55)';
+
+    if (btn){
+      btn.classList.add('qs-apply-btn-flash');
+      btn.style.transition = 'transform 0.15s ease, box-shadow 0.15s ease';
+      btn.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.35)';
+      btn.style.transform = 'scale(1.06)';
+    }
+
+    clearTimeout(this._sidebarPreviewGlowTimeout);
+    this._sidebarPreviewGlowTimeout = setTimeout(() => {
+      this._clearSidebarPreviewGlow();
+    }, 2200);
+
+    return btn;
+  }
+
+  _runAfterProfilesTabReady(fn){
+    const run = () => {
+      try { fn(); } catch (err) {
+        if (typeof console !== 'undefined') console.error('[QS] profile suggest failed', err);
+      }
+    };
+    if (typeof requestAnimationFrame === 'function'){
+      requestAnimationFrame(() => requestAnimationFrame(run));
+    } else {
+      setTimeout(run, 0);
+    }
+  }
+  // Scrolls the sidebar to the recommended CAD Profile card for this
+  // role (preferring the role-default ★ profile) and opens the confirm
+  // modal — without assigning/saving anything.
   _scrollSidebarToRoleCandidate(role){
+    this.showProfileHighlights = true;
+
     if (typeof window !== 'undefined' && window.currentTab !== 'profiles' && typeof window.setTab === 'function') {
       window.setTab('profiles');
     } else if (typeof window !== 'undefined' && typeof window.qsBuildProfs === 'function') {
       window.qsBuildProfs();
     }
 
-    const sidebarPanel = document.querySelector('.dz-scroll');
-    if (!sidebarPanel) return null;
+    this._runAfterProfilesTabReady(() => this._presentProfileSuggestion(role));
+  }
 
-    const escRole = String(role).replace(/'/g, "\\'");
-    let applyBtns = [];
-    try {
-      applyBtns = Array.from(
-        sidebarPanel.querySelectorAll(`button[onclick*="setWindowProfile('${escRole}','"]`)
-      ).filter(b => !b.classList.contains('qs-removebtn'));
-    } catch(e){ applyBtns = []; }
-    if (!applyBtns.length) return null;
+  _presentProfileSuggestion(role){
+    const suggested = this._findSuggestedProfile(role);
+    if (!suggested || !suggested.code){
+      this._showNoProfileHint(role);
+      return null;
+    }
 
-    const btn = applyBtns.find(b => {
-      const card = b.closest('.qs-prc');
-      return card && card.textContent && card.textContent.includes('★');
-    }) || applyBtns[0];
+    const sidebarPanel = this._getProfilesSidebar();
+    if (!sidebarPanel){
+      if (typeof console !== 'undefined') console.warn('[QS] sidebar panel (.dz-scroll) not found — cannot scroll to CAD profile card');
+      this._showProfileSuggestModal(role, suggested.code, suggested.name || suggested.code);
+      return null;
+    }
 
-    const card = btn.closest('.qs-prc');
-    if (!card) return null;
+    const card = this._findProfileCard(role, suggested.code);
+    if (card){
+      this._scrollCardToTop(sidebarPanel, card);
+      this._flashSuggestProfileCard(card);
+    }
 
-    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    this._showProfileSuggestModal(role, suggested.code, suggested.name || suggested.code);
+    return card;
+  }
 
-    card.classList.add('qs-prc-focus-preview');
-    card.style.transition = 'box-shadow 0.2s ease';
-    card.style.boxShadow = '0 0 0 2px #F59E0B, 0 0 14px rgba(245,158,11,0.55)';
+  // Guaranteed visible fallback when no CAD profile exists in the
+  // library for the clicked role — shown at the top of the sidebar so
+  // clicking a section NEVER appears to do nothing.
+  _showNoProfileHint(role){
+    this._hideProfileSuggestModal();
+    const sidebarPanel = this._getProfilesSidebar();
+    if (!sidebarPanel) return;
 
-    btn.classList.add('qs-apply-btn-flash');
-    btn.style.transition = 'transform 0.15s ease, box-shadow 0.15s ease';
-    btn.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.35)';
-    btn.style.transform = 'scale(1.06)';
+    const sectionLabel = (typeof ROLE_LABELS !== 'undefined' && ROLE_LABELS[role]) || role;
+    const hint = document.createElement('div');
+    hint.id = 'qsQuickApplyBadge';
+    hint.style.cssText = 'margin:0 0 10px;padding:8px 10px;border-radius:6px;'
+      + 'background:#FEF2F2;border:1px solid #FCA5A5;font-size:11px;'
+      + 'color:#991B1B;font-weight:600;animation:qsQuickApplyPop .18s ease;';
+    hint.textContent = `No CAD Profile found in the library for ${sectionLabel}.`;
 
+    sidebarPanel.insertBefore(hint, sidebarPanel.firstChild);
+    hint.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    this._quickApplyBadgeEl = hint;
     clearTimeout(this._sidebarPreviewGlowTimeout);
-    this._sidebarPreviewGlowTimeout = setTimeout(() => {
-      card.classList.remove('qs-prc-focus-preview');
-      card.style.boxShadow = '';
-      btn.classList.remove('qs-apply-btn-flash');
-      btn.style.boxShadow = '';
-      btn.style.transform = '';
-    }, 2200);
+    this._sidebarPreviewGlowTimeout = setTimeout(() => this._hideQuickApplyBadge(), 3500);
+  }
 
-    return { card, btn };
+  _showProfileSuggestModal(role, code, profileName){
+    if (typeof window !== 'undefined' && typeof window.qsEnsureProfileSuggestModal === 'function'){
+      window.qsEnsureProfileSuggestModal();
+    }
+
+    const modal = document.getElementById('qsProfileSuggestModal');
+    const textEl = document.getElementById('qsProfileSuggestText');
+    const yesBtn = document.getElementById('qsProfileSuggestYes');
+    const noBtn = document.getElementById('qsProfileSuggestNo');
+    if (!modal || !textEl || !yesBtn || !noBtn) return;
+
+    const label = profileName || code || role;
+    if (!code){
+      if (typeof console !== 'undefined') console.warn('[QS] profile suggest modal missing profile code for role', role);
+      return;
+    }
+
+    this._hideQuickApplyBadge();
+    textEl.textContent = `Do you want to apply ${label}?`;
+
+    yesBtn.onclick = (evt) => {
+      evt.stopPropagation();
+      this._hideProfileSuggestModal();
+      if (typeof window !== 'undefined' && typeof window.setWindowProfile === 'function'){
+        window.setWindowProfile(role, code);
+      }
+    };
+
+    noBtn.onclick = (evt) => {
+      evt.stopPropagation();
+      evt.preventDefault();
+      // Cancel only dismisses the preview for this role — never removes
+      // applied profiles (including other roles on the same window).
+      this._dismissProfileSuggest(role);
+    };
+
+    clearTimeout(this._sectionFocusTimeout);
+    this._profileSuggestModalOpen = true;
+    this._profileSuggestRole = role;
+    modal.classList.add('on');
+  }
+
+  _hideProfileSuggestModal(){
+    const modal = document.getElementById('qsProfileSuggestModal');
+    if (modal) modal.classList.remove('on');
+    this._profileSuggestModalOpen = false;
+    this._profileSuggestRole = null;
+  }
+
+  _hideQuickApplyBadge(){
+    if (this._quickApplyBadgeEl && this._quickApplyBadgeEl.parentNode){
+      this._quickApplyBadgeEl.parentNode.removeChild(this._quickApplyBadgeEl);
+    }
+    this._quickApplyBadgeEl = null;
   }
 
   _rect(x,y,w,h,s){
@@ -2702,6 +2927,24 @@ window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templa
     return (m && m.profileRoles) ? m.profileRoles[role] : undefined;
   }
 
+  function wireRemoveWindowProfile(){
+    if (typeof window.removeWindowProfile !== 'function') return;
+    if (window.removeWindowProfile.__qsPreviewWrapped) return;
+
+    const original = window.removeWindowProfile;
+    const wrapped = function(role){
+      const before = currentRoleCode(role);
+      if (before === undefined) return;
+      const dc = getDc();
+      if (dc && typeof dc._pushHistory === 'function') dc._pushHistory();
+      const result = original(role);
+      if (dc && typeof dc.onProfileCleared === 'function') dc.onProfileCleared(role);
+      return result;
+    };
+    wrapped.__qsPreviewWrapped = true;
+    window.removeWindowProfile = wrapped;
+  }
+
   function wireSetWindowProfile(){
     if (typeof window.setWindowProfile !== 'function') return;
     if (window.setWindowProfile.__qsPreviewWrapped) return;
@@ -2710,18 +2953,28 @@ window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templa
 
     const wrapped = function(role, code){
       const before = currentRoleCode(role);
+      const dc = getDc();
+      const willApply = before !== code;
+
+      // Push undo history BEFORE the model mutation, only on user-confirmed apply.
+      if (willApply && dc && typeof dc._pushHistory === 'function') dc._pushHistory();
+
       const result = original(role, code);
       const after = currentRoleCode(role);
-      const dc = getDc();
 
       if (dc){
         if (after === code){
-          // User explicitly applied this profile — promote preview to applied.
+          // User explicitly applied this profile — lock preview as applied.
           if (typeof dc.onProfileApplied === 'function') dc.onProfileApplied(role);
         } else if (before === code && after === undefined){
           // User explicitly removed the applied profile (toggle-off).
           if (typeof dc.onProfileCleared === 'function') dc.onProfileCleared(role);
         }
+      }
+
+      // Refresh pricing after a confirmed apply/remove.
+      if (typeof window !== 'undefined' && typeof window.fetchPricing === 'function'){
+        window.fetchPricing();
       }
 
       return result;
@@ -2759,13 +3012,46 @@ window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templa
         border-color: #F59E0B !important;
         color: #fff !important;
       }
+      @keyframes qsQuickApplyPop {
+        0%   { opacity: 0; transform: translateY(-4px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
     `;
     document.head.appendChild(style);
   }
 
+  function ensureProfileSuggestModal(){
+    if (document.getElementById('qsProfileSuggestModal')) return;
+
+    const modal = document.createElement('div');
+    modal.className = 'qs-modal';
+    modal.id = 'qsProfileSuggestModal';
+    modal.innerHTML = ''
+      + '<div class="qs-modal-box" onclick="event.stopPropagation()">'
+      + '  <h3>Apply CAD Profile</h3>'
+      + '  <p id="qsProfileSuggestText">Do you want to apply —?</p>'
+      + '  <div style="display:flex;gap:8px;margin-top:14px;">'
+      + '    <button type="button" id="qsProfileSuggestYes" class="btn btn-primary btn-sm" style="flex:1;">Yes</button>'
+      + '    <button type="button" id="qsProfileSuggestNo" class="btn btn-ghost btn-sm" style="flex:1;">Cancel</button>'
+      + '  </div>'
+      + '</div>';
+    modal.addEventListener('click', (evt) => {
+      if (evt.target !== modal) return;
+      const dc = getDc();
+      const role = dc && dc._profileSuggestRole;
+      if (role && typeof dc._dismissProfileSuggest === 'function'){
+        dc._dismissProfileSuggest(role);
+      }
+    });
+    document.body.appendChild(modal);
+  }
+  window.qsEnsureProfileSuggestModal = ensureProfileSuggestModal;
+
   function init(){
     injectPreviewStyles();
+    ensureProfileSuggestModal();
     wireLegacyAutoApplyGuard();
+    wireRemoveWindowProfile();
 
     if (typeof window.setWindowProfile === 'function'){
       wireSetWindowProfile();
@@ -2777,6 +3063,19 @@ window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templa
         tries++;
         if (typeof window.setWindowProfile === 'function'){
           wireSetWindowProfile();
+          wireRemoveWindowProfile();
+          clearInterval(iv);
+        } else if (tries > 40){
+          clearInterval(iv);
+        }
+      }, 100);
+    }
+    if (typeof window.removeWindowProfile !== 'function'){
+      let tries = 0;
+      const iv = setInterval(() => {
+        tries++;
+        if (typeof window.removeWindowProfile === 'function'){
+          wireRemoveWindowProfile();
           clearInterval(iv);
         } else if (tries > 40){
           clearInterval(iv);
