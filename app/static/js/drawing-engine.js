@@ -2400,6 +2400,12 @@ class DrawingCanvas {
 
   _dismissProfileSuggest(role){
     if (!role) return;
+    // Only clear the modal/preview state that belongs to THIS role. If a
+    // newer click already moved focus to a different section, leave that
+    // section's live preview/modal alone — do not clobber it, and never
+    // touch this.model.profileRoles (no other section's applied profile
+    // is affected by declining this one).
+    if (this._profileSuggestRole && this._profileSuggestRole !== role) return;
     this._hideProfileSuggestModal();
     this._clearSidebarPreviewGlow();
     if (this._sectionFocusRole === role) this._sectionFocusRole = null;
@@ -2442,9 +2448,11 @@ class DrawingCanvas {
   // refreshes highlights so the canvas stays in sync.
   onProfileCleared(role){
     this._clearSectionFocus(role);
-    if (typeof window !== 'undefined'){
-      this.showProfileHighlights = (window.currentTab === 'profiles');
-    }
+    // NOTE: host pages keep "current tab" as a local variable, not
+    // window.currentTab, so that check was always false and was
+    // force-hiding EVERY other section's profile highlight whenever
+    // just one profile got removed. Leave showProfileHighlights as-is
+    // so any remaining applied profiles (other roles) stay visible.
     this.render();
   }
 
@@ -2672,8 +2680,9 @@ class DrawingCanvas {
     noBtn.onclick = (evt) => {
       evt.stopPropagation();
       evt.preventDefault();
-      // Cancel only dismisses the preview for this role — never removes
-      // applied profiles (including other roles on the same window).
+      // Cancel/Decline only dismisses the preview for THIS role — it must
+      // never touch this.model.profileRoles, so every other section's
+      // already-applied profile is guaranteed to survive untouched.
       this._dismissProfileSuggest(role);
     };
 
@@ -2927,6 +2936,31 @@ window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templa
     return (m && m.profileRoles) ? m.profileRoles[role] : undefined;
   }
 
+  // Snapshot every role→code assignment except the one being touched, so
+  // a cancel/decline/apply/remove action can be verified (and repaired)
+  // to have affected ONLY the target role — never any other section's
+  // already-applied profile.
+  function snapshotOtherRoles(excludeRole){
+    const m = (typeof window !== 'undefined') ? window.model : null;
+    const roles = (m && m.profileRoles) || {};
+    const snap = {};
+    Object.keys(roles).forEach(r => { if (r !== excludeRole) snap[r] = roles[r]; });
+    return snap;
+  }
+
+  // Restores any role (other than excludeRole) that was unexpectedly
+  // dropped or changed by the wrapped call — guarantees all other
+  // sections' assignments survive a single-section cancel/apply/remove.
+  function restoreOtherRoles(excludeRole, snap){
+    const m = (typeof window !== 'undefined') ? window.model : null;
+    if (!m) return;
+    if (!m.profileRoles) m.profileRoles = {};
+    Object.keys(snap).forEach(r => {
+      if (r === excludeRole) return;
+      if (m.profileRoles[r] !== snap[r]) m.profileRoles[r] = snap[r];
+    });
+  }
+
   function wireRemoveWindowProfile(){
     if (typeof window.removeWindowProfile !== 'function') return;
     if (window.removeWindowProfile.__qsPreviewWrapped) return;
@@ -2936,8 +2970,12 @@ window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templa
       const before = currentRoleCode(role);
       if (before === undefined) return;
       const dc = getDc();
+      const otherRolesBefore = snapshotOtherRoles(role);
       if (dc && typeof dc._pushHistory === 'function') dc._pushHistory();
       const result = original(role);
+      // Only this role's assignment may have changed — every other
+      // section's applied profile must be untouched.
+      restoreOtherRoles(role, otherRolesBefore);
       if (dc && typeof dc.onProfileCleared === 'function') dc.onProfileCleared(role);
       return result;
     };
@@ -2955,11 +2993,15 @@ window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templa
       const before = currentRoleCode(role);
       const dc = getDc();
       const willApply = before !== code;
+      const otherRolesBefore = snapshotOtherRoles(role);
 
       // Push undo history BEFORE the model mutation, only on user-confirmed apply.
       if (willApply && dc && typeof dc._pushHistory === 'function') dc._pushHistory();
 
       const result = original(role, code);
+      // Never let applying/removing this role's profile disturb any
+      // other section's already-applied profile.
+      restoreOtherRoles(role, otherRolesBefore);
       const after = currentRoleCode(role);
 
       if (dc){
