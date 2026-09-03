@@ -3,17 +3,18 @@ Run from project root:
     python head_extrude_test.py [width_mm] [H_mm]
 
 Standalone check ONLY — NOT wired into frame_assembly.py / model3d.py /
-model3d_freecad.py. Placeholder profile (see app/services/head_geometry.py
-— reuses the threshold section points, real head DXF not supplied yet).
+model3d_freecad.py.
 
-Geometry, per notebook sketch — CORRECTED (see chat: original ZX-plane
-mapping produced a degenerate zero-volume extrude, since extrude
-direction must be perpendicular to the profile plane):
+Geometry, per notebook sketch:
   - Profile lies in the YZ plane at X=0 (points -> V(0.0, x, z)),
     same convention as threshold_geometry.py.
-  - Extrude along +X for `width_mm` (window/door width, lambda1).
-  - Translate the whole solid by +H on Y (offset Y -> H) so it sits at
-    the TOP of the window/door, mirroring threshold at Y=0.
+  - Extrude along +X for `width_mm` (window/door width).
+  - Translate the solid by +(H - head_y_extent) on Y, so the head's OWN
+    Y-extent (90mm, from its bbox) nests flush inside the jamb's Y=0..H
+    range at the top — mirroring how threshold nests flush at Y=0..165
+    at the bottom. Previous version translated by +H only, which pushed
+    the head entirely above Y=H (floating above the frame, gap visible
+    in FreeCAD render).
 
 Output: output/head_test.step
 """
@@ -42,12 +43,16 @@ def export_step(width_mm: float, H_mm: float, step_path: str):
               "Set FREECAD_CMD env var or install FreeCAD.")
         return False
 
+    minx, miny, maxx, maxy = get_head_bbox()
+    head_y_extent = maxx - minx  # local-x extent -> global Y extent
+
     params_path = os.path.join(tempfile.gettempdir(), "head_test_params.json")
     with open(params_path, "w", encoding="utf-8") as f:
         json.dump({
             "points": HEAD_PROFILE_POINTS,
             "width_mm": width_mm,
             "H_mm": H_mm,
+            "head_y_extent": head_y_extent,
             "step_path": step_path,
         }, f)
 
@@ -60,6 +65,7 @@ try:
     pts_2d = data["points"]
     L = float(data["width_mm"])
     H = float(data["H_mm"])
+    head_y_extent = float(data["head_y_extent"])
     step_path = data["step_path"]
 
     # Plane YZ at X=0 — profile must be perpendicular to the extrude
@@ -79,8 +85,9 @@ try:
     if not solid.isValid() or solid.Volume <= 1.0:
         raise RuntimeError(f"invalid/empty extrude, volume={{solid.Volume}}")
 
-    # Offset Y -> H: move the whole solid up to the window height.
-    solid.translate(V(0.0, H, 0.0))
+    # Nest head's own Y-extent (90mm) into the top of the frame's Y=0..H
+    # span, instead of floating above Y=H.
+    solid.translate(V(0.0, H - head_y_extent, 0.0))
 
     doc = App.newDocument("HeadTest")
     obj = doc.addObject("Part::Feature", "Head")
@@ -117,14 +124,16 @@ def export_dxf(dxf_path: str, H_mm: float):
     import ezdxf
     from app.services.dxf_layers import setup_layers, setup_dimstyle
 
+    minx, miny, maxx, maxy = get_head_bbox()
+    head_y_extent = maxx - minx
+
     doc = ezdxf.new("R2010", setup=True)
     setup_layers(doc)
     setup_dimstyle(doc, bar_width=40.0)
     msp = doc.modelspace()
 
-    # Drawn at Y-offset H so the 2D drawing also reflects the head's
-    # top-of-window position, same offset Y -> H as the 3D solid.
-    draw_head_section(msp, origin=(0.0, H_mm), layer="WINDOW_CILL")
+    # Drawn at Y-offset (H - head_y_extent) to match the 3D nested position.
+    draw_head_section(msp, origin=(0.0, H_mm - head_y_extent), layer="WINDOW_CILL")
     doc.saveas(dxf_path)
     return os.path.isfile(dxf_path)
 
@@ -135,9 +144,8 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     minx, miny, maxx, maxy = get_head_bbox()
-    print(f"Profile bbox: {maxx - minx:.2f} x {maxy - miny:.2f} mm "
-          f"(placeholder — reused threshold section)")
-    print(f"Extrude width (X): {width_mm} mm, offset (Y): {H_mm} mm")
+    print(f"Profile bbox: {maxx - minx:.2f} x {maxy - miny:.2f} mm")
+    print(f"Extrude width (X): {width_mm} mm, top offset (Y): {H_mm} mm")
 
     step_path = os.path.join(OUTPUT_DIR, "head_test.step")
     dxf_path = os.path.join(OUTPUT_DIR, "head_section.dxf")
