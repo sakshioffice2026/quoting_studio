@@ -23,6 +23,12 @@ Conventions:
                frame opening.
                Right jamb (sign=+1): depth extends in +X, then
                translate +X by width_mm.
+  - after all four members are built, apply ONE rigid-body +90 degree
+    rotation about world X to the COMPLETE assembly:
+        X -> X, Y -> Z, Z -> -Y
+    so the final frame lies in the vertical XZ plane:
+        X = width, Z = height, Y = profile depth.
+    Member geometry and relative placement are unchanged.
 
 Output: output/frame_assembly_test.step
 """
@@ -74,7 +80,7 @@ def export_assembly_step(width_mm: float, height_mm: float, step_path: str):
             "step_path": step_path,
         }, f)
 
-    script = f'''
+    script = """
 import FreeCAD as App, Part, json, traceback, sys
 V = App.Vector
 
@@ -120,7 +126,7 @@ def _extrude_vertical(pts_2d, length, flip_x=False):
     return solid
 
 try:
-    data = json.load(open(r"{params_path}", encoding="utf-8"))
+    data = json.load(open(r"__PARAMS_PATH__", encoding="utf-8"))
     threshold_pts   = data["threshold_pts"]
     head_pts        = data["head_pts"]
     jamb_pts        = data["jamb_pts"]
@@ -138,6 +144,35 @@ try:
 
     jamb_right = _extrude_vertical(jamb_pts, H, flip_x=False)
     jamb_right.translate(V(W, 0.0, 0.0))
+
+    # -------------------------------------------------------------
+    # ONE rigid-body transform for the COMPLETE ASSEMBLY.
+    #
+    # The four solids above are already generated with their actual
+    # traced profiles and their intended relative positions.
+    # Do NOT rotate/rebuild individual members here.
+    #
+    # +90 degrees about X:
+    #     X' = X
+    #     Y' = Z
+    #     Z' = -Y
+    #
+    # Final CAD convention:
+    #     X = frame width
+    #     Y = profile depth
+    #     Z = frame height
+    # -------------------------------------------------------------
+    for solid in (
+        threshold,
+        head,
+        jamb_left,
+        jamb_right,
+    ):
+        solid.rotate(
+            V(0.0, 0.0, 0.0),
+            V(1.0, 0.0, 0.0),
+            90.0,
+        )
 
     doc = App.newDocument("FrameAssemblyTest")
     o1 = doc.addObject("Part::Feature", "Threshold"); o1.Shape = threshold
@@ -161,15 +196,22 @@ try:
 except Exception:
     print("SCRIPT_ERROR")
     traceback.print_exc(file=sys.stdout)
-'''
+"""
+    script = script.replace("__PARAMS_PATH__", params_path.replace("\\", "/"))
+
     script_path = os.path.join(tempfile.gettempdir(), "frame_assembly_script.py")
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(script)
 
     env = os.environ.copy()
     env["LIBGL_ALWAYS_SOFTWARE"] = "1"
-    result = subprocess.run([freecad, script_path], capture_output=True, text=True,
-                             timeout=120, env=env)
+    result = subprocess.run(
+        [freecad, script_path],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
     print("--- FreeCAD stdout ---")
     print(result.stdout)
     if result.stderr.strip():
@@ -185,7 +227,7 @@ def main():
     height_mm = float(sys.argv[2]) if len(sys.argv) > 2 else 1200.0
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    print(f"Assembly: width(X)={width_mm} mm, height(Y)={height_mm} mm")
+    print(f"Assembly: width(X)={width_mm} mm, height(Z)={height_mm} mm")
 
     step_path = os.path.join(OUTPUT_DIR, "frame_assembly_test.step")
     step_ok = export_assembly_step(width_mm, height_mm, step_path)

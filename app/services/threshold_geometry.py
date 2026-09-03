@@ -6,20 +6,40 @@ This module exists so door_threshold_extrude_test.py (repo root) can
 export a STEP (3D) and a DXF (2D engineering) check independent of the
 main window/door pipeline.
 
-Profile source (software fact): points below are copied verbatim from
-import_data/Sections/lower base of door frame.dxf (single closed
-LWPOLYLINE, 53 vertices). Bounding box = 165.0 x 60.0 mm, which matches
-the circled dimensions (165, 60, 55) in the reference drawing crop
-supplied earlier. This is the real traced section, not a placeholder.
+Profile source: import_data/Sections/lower base of door frame.dxf
+Single closed LWPOLYLINE, 53 vertices, zero duplicates.
+Bounding box = 165.0 x 60.0 mm as digitised in the source DXF.
 
-Units: mm. Local axes: X = bar (across profile), Y = depth
-(through-wall) — i.e. plain 2D (x, y) as digitised, unrelated to the
-window-pipeline's (u, v)->(Y, Z) convention used in model3d_freecad.py.
+LOCAL AXIS CONVENTION (important — read before using in FreeCAD):
+  local-X (165 mm) = bar face width ACROSS the door opening.
+                     This is the long axis: the flat bottom edge of the
+                     profile runs from x~=0 to x~=162 (floor contact width).
+                     In a 3D build it maps to world-Z (elevation height).
+  local-Y  (60 mm) = depth THROUGH the wall (short axis, the through-wall
+                     dimension). In a 3D build it maps to world-Y (depth).
+
+FreeCAD mapping for a horizontal member (YZ plane, extrude along +X):
+    V(0.0, float(y), float(x))   ← y then x
+    world-Y = local-y =  60 mm  (through-wall depth)
+    world-Z = local-x = 165 mm  (bar face height visible in elevation)
+
+Do NOT use V(0.0, float(x), float(y)) — that puts 165 mm through the
+wall, making the threshold 75 mm deeper than the jambs and head (both
+90 mm through-wall) in the top-view STEP.  That was the bug this file's
+comment clarifies.
+
+The point data below is correct verbatim from the DXF and must not be
+changed to fix the axis issue. The fix belongs in the FreeCAD extrude
+script (door_threshold_extrude_test.py).
+
+Units: mm.
 """
 
 PROFILE_NAME = "DoorThreshold_LowerBase"
 
 # Verbatim (x, y) vertices traced from the source DXF, in order, closed.
+# local-X = across bar face (165 mm), local-Y = through wall (60 mm).
+# See module docstring for FreeCAD axis mapping.
 THRESHOLD_PROFILE_POINTS = [
     (37.73, 15.67),
     (105.73, 15.67),
@@ -96,6 +116,15 @@ def draw_threshold_section(msp, origin=(0.0, 0.0), layer="WINDOW_CILL"):
     msp.add_aligned_dim(...).render() pattern as engineering_dxf.py, so
     output matches this repo's existing engineering-DXF conventions.
 
+    The 2D DXF section is drawn in its natural digitised orientation:
+      horizontal axis = local-X = 165 mm (bar face width)
+      vertical axis   = local-Y =  60 mm (through-wall depth)
+
+    This is intentional — the engineering section view shows the profile
+    as it was traced from the source DXF.  The axis swap for 3D placement
+    (world-Y = local-Y, world-Z = local-X) happens only in the FreeCAD
+    extrude script, not here.
+
     msp: ezdxf modelspace
     origin: (x, y) offset to draw at
     layer: target layer name (must already exist — call
@@ -112,8 +141,9 @@ def draw_threshold_section(msp, origin=(0.0, 0.0), layer="WINDOW_CILL"):
     )
 
     _, _, maxx, maxy = get_bbox()
-    W = maxx - get_bbox()[0]
-    H = maxy - get_bbox()[1]
+    minx, miny, _, _ = get_bbox()
+    W = maxx - minx
+    H = maxy - miny
 
     dim_attribs = {"layer": "DIMENSIONS"}
     dim_override = {
@@ -121,14 +151,14 @@ def draw_threshold_section(msp, origin=(0.0, 0.0), layer="WINDOW_CILL"):
         "dimdec": 1, "dimclrt": 1, "dimclrd": 1, "dimclre": 1,
     }
 
-    # Overall width
+    # Overall width (165 mm — bar face across door opening)
     dim = msp.add_aligned_dim(
         p1=(ox, oy - 10), p2=(ox + W, oy - 10),
         distance=0, dxfattribs=dim_attribs, override=dim_override,
     )
     dim.render()
 
-    # Overall height
+    # Overall height (60 mm — through-wall depth)
     dim = msp.add_aligned_dim(
         p1=(ox - 10, oy), p2=(ox - 10, oy + H),
         distance=0, dxfattribs=dim_attribs, override=dim_override,

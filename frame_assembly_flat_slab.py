@@ -40,7 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
-W_TOTAL = 1160.0
+W_TOTAL = 1165.0
 H_TOTAL = 880.0
 Z_DEPTH = 165.0
 
