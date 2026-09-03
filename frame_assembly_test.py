@@ -84,46 +84,59 @@ def export_assembly_step(width_mm: float, height_mm: float, step_path: str):
 import FreeCAD as App, Part, json, traceback, sys
 V = App.Vector
 
-def _extrude_horizontal(pts_2d, length):
-    # Back face flush at Z=0 (points normalised >=0, so max local-y is
-    # each profile's own depth). Shifting by -depth puts the back face
-    # (y=depth) at Z=0 for both threshold and head, and the front face
-    # (y=0) at Z=-depth — which differs per profile (threshold 60mm,
-    # head 35mm), instead of both front faces sharing Z=0.
-    depth = max(float(y) for _, y in pts_2d)
-    pts = [V(0.0, float(x), float(y) - depth) for x, y in pts_2d]
+def _extrude_horizontal(pts_2d, length, reference_depth):
+    # DEPTH-ALIGNMENT FIX (assumption — not confirmed against a spec,
+    # see chat): exterior/weather face is treated as the shared
+    # reference plane. All members' FRONT face aligns at the same
+    # depth (reference_depth = jamb's 90mm), interior/back face
+    # recesses by each member's own depth difference. Previously every
+    # member's BACK face was flush at Z=0 instead, leaving front faces
+    # staggered (threshold 60mm, head 35mm, jamb 90mm) with no shared
+    # reference at all.
+    pts = [V(0.0, float(x), float(y) - reference_depth) for x, y in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
         raise RuntimeError("horizontal profile wire not closed")
     face = Part.Face(wire)
     if not face.isValid() or face.Area <= 1.0:
-        raise RuntimeError(f"invalid/degenerate horizontal face, area={{face.Area}}")
+        raise RuntimeError(f"invalid/degenerate horizontal face, area={face.Area}")
     solid = face.extrude(V(length, 0.0, 0.0))
     if not solid.isValid() or solid.Volume <= 1.0:
-        raise RuntimeError(f"invalid/empty horizontal extrude, volume={{solid.Volume}}")
+        raise RuntimeError(f"invalid/empty horizontal extrude, volume={solid.Volume}")
     return solid
 
 def _extrude_vertical(pts_2d, length, flip_x=False):
-    # Rotated 90 deg about the Y (extrusion) axis: depth (v) maps to
-    # world X, across (u) maps to world Z. Z is shifted by -z_extent so
-    # its max sits at Z=0 — same back-face-flush convention as
-    # threshold/head's Z=0, instead of jamb's Z floating at raw u
-    # values unrelated to the other two parts' Z range.
-    z_extent = max(float(u) for u, _ in pts_2d)
+    # FIX: previous code mapped v (depth, 90mm) to world-X, which made
+    # each jamb stick out 90mm beyond the frame width on its own side
+    # (matches the +90/-90mm bug seen in the reported bbox: X range
+    # was -90..1090 instead of 0..1000 for width_mm=1000).
+    #
+    # Correct mapping per reference drawing (jambs nest WITHIN the
+    # overall frame width, not beyond it):
+    #   u (across profile, 67mm — the jamb's own face width) -> world-X
+    #   v (depth through wall, 90mm) -> world-Z (becomes final depth
+    #     after the assembly's +90deg rotation), back face flush at
+    #     Z=0 same convention as threshold/head.
+    u_extent = max(float(u) for u, _ in pts_2d)   # 67mm face width
+    v_extent = max(float(v) for _, v in pts_2d)   # 90mm depth
     sign = -1.0 if flip_x else 1.0
-    pts = [V(sign * float(v), 0.0, float(u) - z_extent) for u, v in pts_2d]
+    # flip_x mirrors the profile for handedness (left vs right jamb are
+    # typically mirror-image parts) AND must be re-offset by u_extent so
+    # the mirrored profile still lands in [0, u_extent], not [-u_extent, 0].
+    x_offset = u_extent if flip_x else 0.0
+    pts = [V(sign * float(u) + x_offset, 0.0, float(v) - v_extent) for u, v in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
         raise RuntimeError("vertical profile wire not closed")
     face = Part.Face(wire)
     if not face.isValid() or face.Area <= 1.0:
-        raise RuntimeError(f"invalid/degenerate vertical face, area={{face.Area}}")
+        raise RuntimeError(f"invalid/degenerate vertical face, area={face.Area}")
     solid = face.extrude(V(0.0, length, 0.0))
     if not solid.isValid() or solid.Volume <= 1.0:
-        raise RuntimeError(f"invalid/empty vertical extrude, volume={{solid.Volume}}")
-    return solid
+        raise RuntimeError(f"invalid/empty vertical extrude, volume={solid.Volume}")
+    return solid, u_extent
 
 try:
     data = json.load(open(r"__PARAMS_PATH__", encoding="utf-8"))
@@ -135,15 +148,22 @@ try:
     head_y_extent   = float(data["head_y_extent"])
     step_path       = data["step_path"]
 
-    threshold = _extrude_horizontal(threshold_pts, W)
+    # Jamb depth (90mm) is the shared exterior-face reference for all
+    # three member types — see _extrude_horizontal fix note above.
+    jamb_v_extent = max(float(v) for _, v in jamb_pts)
 
-    head = _extrude_horizontal(head_pts, W)
+    threshold = _extrude_horizontal(threshold_pts, W, jamb_v_extent)
+
+    head = _extrude_horizontal(head_pts, W, jamb_v_extent)
     head.translate(V(0.0, H - head_y_extent, 0.0))
 
-    jamb_left = _extrude_vertical(jamb_pts, H, flip_x=True)
+    # NESTED convention (per reference drawing: overall frame width W
+    # already includes the jambs — jambs sit at the two ends of the
+    # threshold/head span, not beyond it).
+    jamb_left, jamb_w = _extrude_vertical(jamb_pts, H, flip_x=True)
 
-    jamb_right = _extrude_vertical(jamb_pts, H, flip_x=False)
-    jamb_right.translate(V(W, 0.0, 0.0))
+    jamb_right, _ = _extrude_vertical(jamb_pts, H, flip_x=False)
+    jamb_right.translate(V(W - jamb_w, 0.0, 0.0))
 
     # -------------------------------------------------------------
     # ONE rigid-body transform for the COMPLETE ASSEMBLY.
@@ -185,14 +205,14 @@ try:
     compound.exportStep(step_path)
 
     bb = compound.BoundBox
-    print(f"OK compound bbox=({{bb.XLength:.2f}},{{bb.YLength:.2f}},{{bb.ZLength:.2f}}) "
-          f"XMin={{bb.XMin:.2f}} XMax={{bb.XMax:.2f}} "
-          f"YMin={{bb.YMin:.2f}} YMax={{bb.YMax:.2f}} "
-          f"ZMin={{bb.ZMin:.2f}} ZMax={{bb.ZMax:.2f}}")
-    print(f"threshold volume={{threshold.Volume:.1f}} "
-          f"head volume={{head.Volume:.1f}} "
-          f"jamb_left volume={{jamb_left.Volume:.1f}} "
-          f"jamb_right volume={{jamb_right.Volume:.1f}}")
+    print(f"OK compound bbox=({bb.XLength:.2f},{bb.YLength:.2f},{bb.ZLength:.2f}) "
+          f"XMin={bb.XMin:.2f} XMax={bb.XMax:.2f} "
+          f"YMin={bb.YMin:.2f} YMax={bb.YMax:.2f} "
+          f"ZMin={bb.ZMin:.2f} ZMax={bb.ZMax:.2f}")
+    print(f"threshold volume={threshold.Volume:.1f} "
+          f"head volume={head.Volume:.1f} "
+          f"jamb_left volume={jamb_left.Volume:.1f} "
+          f"jamb_right volume={jamb_right.Volume:.1f}")
 except Exception:
     print("SCRIPT_ERROR")
     traceback.print_exc(file=sys.stdout)
