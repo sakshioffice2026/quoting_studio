@@ -14,15 +14,16 @@ Conventions:
                Z=-35) — same Z=0 back-face reference as threshold,
                instead of both sharing a Z=0 front face. Translate
                +(H - head_y_extent) on Y (nests at top).
-  - jamb:      (u,v) -> V(sign*v, 0, u), extrude +Y by height_mm.
-               Rotated 90 deg about Y from the previous u->X, v->Z
-               mapping: depth (v) now runs along world X, across (u)
-               along world Z — matches frame_section_assembly.py's 2D
-               jamb rotation.
-               Left jamb (sign=-1): depth extends in -X, outside the
-               frame opening.
-               Right jamb (sign=+1): depth extends in +X, then
-               translate +X by width_mm.
+  - jamb:      (u,v) -> V(u + x_offset, 0, v - v_extent), extrude +Y
+               by height_mm. Placed directly in the X-Z plane (matches
+               jamb_extrude_test.py's confirmed V(u,0,v) mapping,
+               matching jamb_geometry.py's own stated convention):
+               across-face (u) -> world-X, depth (v) -> world-Z. No
+               sign flip / mirroring — both jambs use the same
+               un-mirrored traced profile.
+               Left jamb: x_offset=0 (X=0 left edge).
+               Right jamb: x_offset = width_mm - u_extent (nests at
+               the right edge of the overall frame width).
   - after all four members are built, apply ONE rigid-body +90 degree
     rotation about world X to the COMPLETE assembly:
         X -> X, Y -> Z, Z -> -Y
@@ -85,15 +86,28 @@ import FreeCAD as App, Part, json, traceback, sys
 V = App.Vector
 
 def _extrude_horizontal(pts_2d, length, reference_depth):
-    # DEPTH-ALIGNMENT FIX (assumption — not confirmed against a spec,
-    # see chat): exterior/weather face is treated as the shared
-    # reference plane. All members' FRONT face aligns at the same
-    # depth (reference_depth = jamb's 90mm), interior/back face
-    # recesses by each member's own depth difference. Previously every
-    # member's BACK face was flush at Z=0 instead, leaving front faces
-    # staggered (threshold 60mm, head 35mm, jamb 90mm) with no shared
-    # reference at all.
-    pts = [V(0.0, float(x), float(y) - reference_depth) for x, y in pts_2d]
+    # DEPTH-ALIGNMENT FIX v2 (assumption — no exterior/interior labels
+    # exist in the source DXFs to confirm this, see chat): local y=0 in
+    # each traced profile is treated as the exterior/front edge.
+    #
+    # Measured from the exported STEP: the previous formula
+    # (y - reference_depth) flushed the BACK/interior face at the
+    # shared reference plane (Y=90, matching jamb) but left the FRONT
+    # face floating at (reference_depth - member_depth) — a 30mm gap
+    # for the threshold, 55mm for the head — instead of at the
+    # documented Y=0 exterior reference. reference_depth is no longer
+    # used here; front face now sits at true Y=0 for every horizontal
+    # member, matching the jamb's own Y=0 end.
+    #
+    # VERTICAL-SEATING FIX: the bottom (exterior) face must sit at the
+    # true Y=0 reference. Previously this relied on pts_2d already being
+    # pre-normalised upstream (get_profile_points_normalised()) with no
+    # guarantee enforced here — if that assumption ever broke, the
+    # profile's bounding box would shift into the upper half of the
+    # frame instead of seating at Y=0. Now measured directly from the
+    # actual incoming points, not assumed.
+    min_y_axis = min(float(x) for x, _ in pts_2d)
+    pts = [V(0.0, float(x) - min_y_axis, -float(y)) for x, y in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -112,20 +126,20 @@ def _extrude_vertical(pts_2d, length, flip_x=False):
     # (matches the +90/-90mm bug seen in the reported bbox: X range
     # was -90..1090 instead of 0..1000 for width_mm=1000).
     #
-    # Correct mapping per reference drawing (jambs nest WITHIN the
-    # overall frame width, not beyond it):
+    # COORDINATE FIX: matches jamb_extrude_test.py's confirmed-working
+    # mapping — (u, v) -> V(u, 0, v), no sign flip, no mirror offset.
+    # The previous sign/x_offset mirroring here was never present in
+    # that verified reference and corrupted the traced profile shape
+    # for the left jamb. Both jambs use the identical un-mirrored
+    # profile; only their X position differs.
     #   u (across profile, 67mm — the jamb's own face width) -> world-X
     #   v (depth through wall, 90mm) -> world-Z (becomes final depth
     #     after the assembly's +90deg rotation), back face flush at
     #     Z=0 same convention as threshold/head.
     u_extent = max(float(u) for u, _ in pts_2d)   # 67mm face width
     v_extent = max(float(v) for _, v in pts_2d)   # 90mm depth
-    sign = -1.0 if flip_x else 1.0
-    # flip_x mirrors the profile for handedness (left vs right jamb are
-    # typically mirror-image parts) AND must be re-offset by u_extent so
-    # the mirrored profile still lands in [0, u_extent], not [-u_extent, 0].
     x_offset = u_extent if flip_x else 0.0
-    pts = [V(sign * float(u) + x_offset, 0.0, float(v) - v_extent) for u, v in pts_2d]
+    pts = [V(float(u) + x_offset, 0.0, float(v) - v_extent) for u, v in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -160,7 +174,7 @@ try:
     # NESTED convention (per reference drawing: overall frame width W
     # already includes the jambs — jambs sit at the two ends of the
     # threshold/head span, not beyond it).
-    jamb_left, jamb_w = _extrude_vertical(jamb_pts, H, flip_x=True)
+    jamb_left, jamb_w = _extrude_vertical(jamb_pts, H, flip_x=False)
 
     jamb_right, _ = _extrude_vertical(jamb_pts, H, flip_x=False)
     jamb_right.translate(V(W - jamb_w, 0.0, 0.0))
