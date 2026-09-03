@@ -6,17 +6,23 @@ Standalone check ONLY — NOT wired into frame_assembly.py / model3d.py /
 model3d_freecad.py.
 
 Conventions:
-  - threshold: (x,y) -> V(0,x,y), extrude +X by width_mm.
-               Front face flush at Z=0. No Y-translate (nests at bottom).
-  - head:      (x,y) -> V(0,x,y), extrude +X by width_mm.
-               Front face flush at Z=0. Translate +(H - head_y_extent)
-               on Y (nests at top).
-  - jamb:      (u,v) -> V(u,0,v), extrude +Y by height_mm. UNCHANGED.
-               Front face flush at Z=0 (v starts at 0, same as
-               threshold/head) — this is what aligns jamb's outer
-               surface with threshold's and head's outer surface.
-               Left jamb: no translate (X=0).
-               Right jamb: translate +X by width_mm.
+  - threshold: (x,y) -> V(0,x,y-depth), extrude +X by width_mm.
+               Back face flush at Z=0 (depth=60mm, so front face at
+               Z=-60). No Y-translate (nests at bottom).
+  - head:      (x,y) -> V(0,x,y-depth), extrude +X by width_mm.
+               Back face flush at Z=0 (depth=35mm, so front face at
+               Z=-35) — same Z=0 back-face reference as threshold,
+               instead of both sharing a Z=0 front face. Translate
+               +(H - head_y_extent) on Y (nests at top).
+  - jamb:      (u,v) -> V(sign*v, 0, u), extrude +Y by height_mm.
+               Rotated 90 deg about Y from the previous u->X, v->Z
+               mapping: depth (v) now runs along world X, across (u)
+               along world Z — matches frame_section_assembly.py's 2D
+               jamb rotation.
+               Left jamb (sign=-1): depth extends in -X, outside the
+               frame opening.
+               Right jamb (sign=+1): depth extends in +X, then
+               translate +X by width_mm.
 
 Output: output/frame_assembly_test.step
 """
@@ -31,8 +37,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app.services.threshold_geometry import (
     get_profile_points_normalised as threshold_pts,
 )
-from app.services.head_geometry import HEAD_PROFILE_POINTS, get_head_bbox
-from app.services.jamb_geometry import JAMB_PROFILE_POINTS
+from app.services.head_geometry import (
+    get_head_bbox, get_profile_points_normalised as head_pts,
+)
+from app.services.jamb_geometry import (
+    get_profile_points_normalised as jamb_pts,
+)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
@@ -56,8 +66,8 @@ def export_assembly_step(width_mm: float, height_mm: float, step_path: str):
     with open(params_path, "w", encoding="utf-8") as f:
         json.dump({
             "threshold_pts": threshold_pts(),
-            "head_pts": HEAD_PROFILE_POINTS,
-            "jamb_pts": JAMB_PROFILE_POINTS,
+            "head_pts": head_pts(),
+            "jamb_pts": jamb_pts(),
             "width_mm": width_mm,
             "height_mm": height_mm,
             "head_y_extent": head_y_extent,
@@ -69,8 +79,13 @@ import FreeCAD as App, Part, json, traceback, sys
 V = App.Vector
 
 def _extrude_horizontal(pts_2d, length):
-    # Front face flush at Z=0 (points as-given, normalised >=0).
-    pts = [V(0.0, float(x), float(y)) for x, y in pts_2d]
+    # Back face flush at Z=0 (points normalised >=0, so max local-y is
+    # each profile's own depth). Shifting by -depth puts the back face
+    # (y=depth) at Z=0 for both threshold and head, and the front face
+    # (y=0) at Z=-depth — which differs per profile (threshold 60mm,
+    # head 35mm), instead of both front faces sharing Z=0.
+    depth = max(float(y) for _, y in pts_2d)
+    pts = [V(0.0, float(x), float(y) - depth) for x, y in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -83,11 +98,15 @@ def _extrude_horizontal(pts_2d, length):
         raise RuntimeError(f"invalid/empty horizontal extrude, volume={{solid.Volume}}")
     return solid
 
-def _extrude_vertical(pts_2d, length):
-    # Front face flush at Z=0 (points as-given, normalised >=0) —
-    # same front-face reference as threshold/head, so jamb's outer
-    # surface lines up with theirs.
-    pts = [V(float(u), 0.0, float(v)) for u, v in pts_2d]
+def _extrude_vertical(pts_2d, length, flip_x=False):
+    # Rotated 90 deg about the Y (extrusion) axis: depth (v) maps to
+    # world X, across (u) maps to world Z. Z is shifted by -z_extent so
+    # its max sits at Z=0 — same back-face-flush convention as
+    # threshold/head's Z=0, instead of jamb's Z floating at raw u
+    # values unrelated to the other two parts' Z range.
+    z_extent = max(float(u) for u, _ in pts_2d)
+    sign = -1.0 if flip_x else 1.0
+    pts = [V(sign * float(v), 0.0, float(u) - z_extent) for u, v in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -115,9 +134,9 @@ try:
     head = _extrude_horizontal(head_pts, W)
     head.translate(V(0.0, H - head_y_extent, 0.0))
 
-    jamb_left = _extrude_vertical(jamb_pts, H)
+    jamb_left = _extrude_vertical(jamb_pts, H, flip_x=True)
 
-    jamb_right = jamb_left.copy()
+    jamb_right = _extrude_vertical(jamb_pts, H, flip_x=False)
     jamb_right.translate(V(W, 0.0, 0.0))
 
     doc = App.newDocument("FrameAssemblyTest")
