@@ -9,8 +9,8 @@
 <script src="{{ url_for('static', filename='js/drawing-phase3.js') }}"></script>
 <style>
 body { overflow:hidden; }
-.app-main { height:calc(100vh - 52px); overflow:hidden; display:block; }
-.dz { display:flex; flex-direction:column; width:100%; height:calc(100vh - 52px); }
+.app-main { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
+.dz { display:flex; flex-direction:column; width:100%; flex:1; min-height:0; position:static; }
 
 /* top framebar */
 .dz-top { display:flex;align-items:center;justify-content:space-between;
@@ -777,6 +777,7 @@ function toggleFrameGroup(){
   c.textContent=hidden?'▾':'▸';
 }
 function setTab(t){
+  window.__qsTabSwitching = true;
   currentTab=t;
   document.querySelectorAll('.dz-tab').forEach(el=>el.classList.toggle('on',el.dataset.tab===t));
   if(dc){ dc.showProfileHighlights = (t==='profiles'); dc.render(); }
@@ -793,8 +794,7 @@ function setTab(t){
   if(t==='easydraw'){ setTool('easydraw'); }
   if(scroll) scroll.scrollTop = 0;   // new tab's content starts at the top
   renderTab();
-  const activeTabEl = document.querySelector('.dz-tab.on');
-  if(activeTabEl) scrollActiveIntoView(activeTabEl);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{window.__qsTabSwitching=false;}));
 }
 
 function renderTab(){

@@ -60,7 +60,7 @@
 
   // ---- GLOBAL auto-scroll engine ------------------------------------
   const ACTIVE_SELECTOR =
-    '.on, .sel, .active, .selected, .qs-active, .qs-prc-active, ' +
+    '.on:not(.dz-tab), .sel, .active, .selected, .qs-active, .qs-prc-active, ' +
     '[aria-selected="true"], [aria-current="true"]';
 
   let _pending = null;   // most recent candidate "just became active" element
@@ -82,6 +82,7 @@
   function _flushPending() {
     const el = _pending;
     _pending = null;
+    if (window.__qsTabSwitching) return;
     if (!el || !el.isConnected) return;
     scrollActiveIntoView(el);
   }

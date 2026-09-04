@@ -70,11 +70,11 @@ a:hover { text-decoration: underline; }
 /* ================================================================
    APP SHELL
    ================================================================ */
-.app-shell { display: flex; flex-direction: column; min-height: 100vh; }
+.app-shell { display: flex; flex-direction: column; height: 100vh; min-height: 100vh; overflow: hidden; }
 
 /* Top bar */
 .topbar {
-  height: 52px;
+  min-height: 52px;
   background: var(--navy);
   color: var(--paper);
   display: flex;
