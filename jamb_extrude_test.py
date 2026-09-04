@@ -5,10 +5,9 @@ Run from project root:
 Standalone check ONLY — NOT wired into frame_assembly.py / model3d.py /
 model3d_freecad.py.
 
-Geometry (plane='V' convention, matching model3d_freecad._mk_face):
-  - Profile in XZ plane at Y=0: (u, v) -> V(u - b2, 0.0, v)
-    where b2 = bar/2 centering offset (omitted here — raw normalised coords used).
-  - Extrude along +Y for height_mm (vertical member length).
+Geometry (plane='XY' convention — ITEM 1 fix):
+  - Profile in XY plane at Z=0: (u, v) -> V(u, v, 0.0)
+  - Extrude along +Z for height_mm (vertical member length).
   - Left jamb: no translation (X=0 left edge).
   - Right jamb: translate solid by V(width_mm, 0, 0).
 
@@ -77,9 +76,9 @@ try:
     step_left  = data["step_left"]
     step_right = data["step_right"]
 
-    # plane='V': XZ plane at Y=0 — (u,v) -> V(u, 0, v)
-    # Extrude along +Y for height_mm (vertical member).
-    pts = [V(float(u), 0.0, float(v)) for u, v in pts_2d]
+    # plane='XY': profile sketched in XY plane at Z=0 — (u,v) -> V(u, v, 0)
+    # Extrude along +Z for height_mm (vertical member).
+    pts = [V(float(u), float(v), 0.0) for u, v in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -89,7 +88,7 @@ try:
         raise RuntimeError(f"invalid/degenerate face, area={{face.Area}}")
 
     # Left jamb at X=0
-    left = face.extrude(V(0.0, H, 0.0))
+    left = face.extrude(V(0.0, 0.0, H))
     if not left.isValid() or left.Volume <= 1.0:
         raise RuntimeError(f"invalid left extrude, volume={{left.Volume}}")
 

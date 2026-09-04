@@ -83,20 +83,52 @@ try:
 
     # Profile lies in the YZ plane at X=0; extrude along +X (door width).
     #
-    # AXIS FIX: source DXF local axes are:
-    #   local-x (165 mm) = bar face width across the door opening
-    #   local-y  (60 mm) = depth through the wall
+    # PITCH FIX (90deg about world-X): the flat base must sit
+    # horizontally on the ground plane, rising UP into the dam — not
+    # standing the profile on its edge. That means:
+    #   world-Z (height, floor to dam top) = local-y (0..60 mm)
+    #   world-Y (exterior<->interior footprint) = local-x (0..165 mm)
+    # This is the opposite pairing from the previous version, which
+    # put the 165 mm span vertical (Z) and stood the profile on edge.
+
+    # ---- ORIENTATION (exterior drainage ramp vs. interior dam) -----
+    # local-y already rises correctly with no mirror needed: ramp
+    # points sit at low y (near the floor), the dam/upstand sits at
+    # high y (rises toward the top) — that ordering IS "up", so
+    # world-Z = local-y directly.
     #
-    # Correct mapping to world axes:
-    #   world-Y = local-y =  60 mm  (through-wall depth)
-    #   world-Z = local-x = 165 mm  (bar face height visible in elevation)
-    #
-    # => V(0.0, float(y), float(x))   NOTE: y then x, not x then y.
-    #
-    # Previous code used V(0.0, float(x), float(y)) which placed 165 mm
-    # through the wall (world-Y), making the threshold 75 mm deeper than
-    # the jambs in the top-view STEP. That was wrong.
-    pts = [V(0.0, float(y), float(x)) for x, y in pts_2d]
+    # The exterior/interior split is now on local-x instead: classify
+    # every point by which side of the x-midpoint it falls on, then
+    # compare each group's average x — computed from the actual data
+    # every run, not a hardcoded index range.
+    x_vals = [float(x) for x, _ in pts_2d]
+    y_vals = [float(y) for _, y in pts_2d]
+    x_mid = (min(x_vals) + max(x_vals)) / 2.0
+    ramp_xs = [x for x in x_vals if x <= x_mid]
+    dam_xs  = [x for x in x_vals if x > x_mid]
+    ramp_avg = sum(ramp_xs) / len(ramp_xs) if ramp_xs else 0.0
+    dam_avg  = sum(dam_xs) / len(dam_xs) if dam_xs else 0.0
+
+    # EXTERIOR_AT_Y_MIN: exterior (ramp) sits at the low-Y end,
+    # interior (dam) sits at the high-Y end — matching the Y-min=0
+    # "back/exterior reference" convention used for the other frame
+    # members. Flip this constant if the exterior face should instead
+    # be at high-Y for this assembly.
+    EXTERIOR_AT_Y_MIN = True
+
+    x_extent = max(x_vals) - min(x_vals)
+    currently_ramp_at_min = ramp_avg <= dam_avg
+    needs_mirror = currently_ramp_at_min != EXTERIOR_AT_Y_MIN
+
+    def _oriented_y(x):
+        x0 = float(x) - min(x_vals)  # normalise to start at 0
+        return (x_extent - x0) if needs_mirror else x0
+
+    def _floor_up_z(y):
+        return float(y) - min(y_vals)  # normalise so base sits at Z=0
+
+    # => V(0.0, oriented_y(x), floor_up_z(y))
+    pts = [V(0.0, _oriented_y(x), _floor_up_z(y)) for x, y in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -117,18 +149,18 @@ try:
     solid.exportStep(step_path)
     bb = solid.BoundBox
 
-    # Expected after fix: XLength=length_mm, YLength=60, ZLength=165.
+    # Expected after pitch fix: XLength=length_mm, YLength=165, ZLength=60.
     # Use plain string concatenation — ternary on bb.* cannot be inside
     # the outer f-string or Python evaluates it on the host at build time.
-    y_ok = abs(bb.YLength - 60.0) < 0.5
-    z_ok = abs(bb.ZLength - 165.0) < 0.5
+    y_ok = abs(bb.YLength - 165.0) < 0.5
+    z_ok = abs(bb.ZLength - 60.0) < 0.5
     print("OK bbox=(" + str(round(bb.XLength,2)) + "," +
           str(round(bb.YLength,2)) + "," + str(round(bb.ZLength,2)) +
           ") volume=" + str(round(solid.Volume,1)))
-    print("  YLength (through-wall depth): " + str(round(bb.YLength,2)) +
-          " mm  " + ("PASS (expected 60)" if y_ok else "FAIL (expected 60)"))
-    print("  ZLength (elevation face):     " + str(round(bb.ZLength,2)) +
-          " mm  " + ("PASS (expected 165)" if z_ok else "FAIL (expected 165)"))
+    print("  YLength (ext<->int footprint): " + str(round(bb.YLength,2)) +
+          " mm  " + ("PASS (expected 165)" if y_ok else "FAIL (expected 165)"))
+    print("  ZLength (floor-up height):     " + str(round(bb.ZLength,2)) +
+          " mm  " + ("PASS (expected 60)" if z_ok else "FAIL (expected 60)"))
 
 except Exception:
     print("SCRIPT_ERROR")
@@ -173,8 +205,8 @@ def main():
     minx, miny, maxx, maxy = get_bbox()
     print(f"Profile bbox (as digitised): {maxx - minx:.2f} x {maxy - miny:.2f} mm "
           f"(local-X=165 across bar face, local-Y=60 through wall)")
-    print(f"Expected STEP bbox after fix: {length_mm:.0f} x 60.00 x 165.00 mm "
-          f"(X=length, Y=60 through wall, Z=165 elevation face)")
+    print(f"Expected STEP bbox after fix: {length_mm:.0f} x 165.00 x 60.00 mm "
+          f"(X=length, Y=165 ext<->int footprint, Z=60 floor-up height)")
 
     step_path = os.path.join(OUTPUT_DIR, "threshold_test.step")
     dxf_path  = os.path.join(OUTPUT_DIR, "threshold_section.dxf")

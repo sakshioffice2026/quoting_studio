@@ -5,31 +5,25 @@ Run from project root:
 Standalone check ONLY — NOT wired into frame_assembly.py / model3d.py /
 model3d_freecad.py.
 
-Conventions:
-  - threshold: (x,y) -> V(0,x,y-depth), extrude +X by width_mm.
-               Back face flush at Z=0 (depth=60mm, so front face at
-               Z=-60). No Y-translate (nests at bottom).
-  - head:      (x,y) -> V(0,x,y-depth), extrude +X by width_mm.
-               Back face flush at Z=0 (depth=35mm, so front face at
-               Z=-35) — same Z=0 back-face reference as threshold,
-               instead of both sharing a Z=0 front face. Translate
-               +(H - head_y_extent) on Y (nests at top).
-  - jamb:      (u,v) -> V(u + x_offset, 0, v - v_extent), extrude +Y
-               by height_mm. Placed directly in the X-Z plane (matches
-               jamb_extrude_test.py's confirmed V(u,0,v) mapping,
-               matching jamb_geometry.py's own stated convention):
-               across-face (u) -> world-X, depth (v) -> world-Z. No
-               sign flip / mirroring — both jambs use the same
-               un-mirrored traced profile.
-               Left jamb: x_offset=0 (X=0 left edge).
-               Right jamb: x_offset = width_mm - u_extent (nests at
-               the right edge of the overall frame width).
-  - after all four members are built, apply ONE rigid-body +90 degree
-    rotation about world X to the COMPLETE assembly:
-        X -> X, Y -> Z, Z -> -Y
-    so the final frame lies in the vertical XZ plane:
-        X = width, Z = height, Y = profile depth.
-    Member geometry and relative placement are unchanged.
+ITEM 1 — RELATIVE POSITIONING / SNAP CONSTRAINTS
+--------------------------------------------------
+Members are still extruded and rotated exactly as before (that
+local-to-final coordinate mapping was already verified against real
+STEP output). What changed is placement: instead of hand-computed
+.translate(V(...)) offsets, each member is now SNAPPED onto the
+shared frame boundary using its own real BoundBox in the final
+(width=X, depth=Y, height=Z) frame:
+
+    jamb_left  -> X min = 0,        Z min = 0
+    jamb_right -> X max = width_mm, Z min = 0
+    threshold  -> X min = 0,        Z min = 0
+    head       -> X min = 0,        Z max = height_mm
+    all four   -> Y min = 0 (shared depth/back-face reference)
+
+Because the snap is computed from actual solid geometry (not
+assumed profile min/max), members always meet flush at their shared
+edges regardless of source-DXF quirks. Miter cuts are NOT part of
+this step (next item).
 
 Output: output/frame_assembly_test.step
 """
@@ -45,7 +39,7 @@ from app.services.threshold_geometry import (
     get_profile_points_normalised as threshold_pts,
 )
 from app.services.head_geometry import (
-    get_head_bbox, get_profile_points_normalised as head_pts,
+    get_profile_points_normalised as head_pts,
 )
 from app.services.jamb_geometry import (
     get_profile_points_normalised as jamb_pts,
@@ -66,9 +60,6 @@ def export_assembly_step(width_mm: float, height_mm: float, step_path: str):
               "Set FREECAD_CMD env var or install FreeCAD.")
         return False
 
-    minx, miny, maxx, maxy = get_head_bbox()
-    head_y_extent = maxx - minx
-
     params_path = os.path.join(tempfile.gettempdir(), "frame_assembly_params.json")
     with open(params_path, "w", encoding="utf-8") as f:
         json.dump({
@@ -77,35 +68,18 @@ def export_assembly_step(width_mm: float, height_mm: float, step_path: str):
             "jamb_pts": jamb_pts(),
             "width_mm": width_mm,
             "height_mm": height_mm,
-            "head_y_extent": head_y_extent,
             "step_path": step_path,
         }, f)
 
-    script = """
+    script = r"""
 import FreeCAD as App, Part, json, traceback, sys
 V = App.Vector
 
-def _extrude_horizontal(pts_2d, length, reference_depth):
-    # DEPTH-ALIGNMENT FIX v2 (assumption — no exterior/interior labels
-    # exist in the source DXFs to confirm this, see chat): local y=0 in
-    # each traced profile is treated as the exterior/front edge.
-    #
-    # Measured from the exported STEP: the previous formula
-    # (y - reference_depth) flushed the BACK/interior face at the
-    # shared reference plane (Y=90, matching jamb) but left the FRONT
-    # face floating at (reference_depth - member_depth) — a 30mm gap
-    # for the threshold, 55mm for the head — instead of at the
-    # documented Y=0 exterior reference. reference_depth is no longer
-    # used here; front face now sits at true Y=0 for every horizontal
-    # member, matching the jamb's own Y=0 end.
-    #
-    # VERTICAL-SEATING FIX: the bottom (exterior) face must sit at the
-    # true Y=0 reference. Previously this relied on pts_2d already being
-    # pre-normalised upstream (get_profile_points_normalised()) with no
-    # guarantee enforced here — if that assumption ever broke, the
-    # profile's bounding box would shift into the upper half of the
-    # frame instead of seating at Y=0. Now measured directly from the
-    # actual incoming points, not assumed.
+def _extrude_horizontal(pts_2d, length):
+    # Local frame pre-rotation: profile lies in the Y-Z plane (X=0),
+    # extruded along X by 'length'. X is unaffected by the later
+    # +90deg-about-X rotation, so this axis already matches final
+    # frame width directly.
     min_y_axis = min(float(x) for x, _ in pts_2d)
     pts = [V(0.0, float(x) - min_y_axis, -float(y)) for x, y in pts_2d]
     pts.append(pts[0])
@@ -120,26 +94,11 @@ def _extrude_horizontal(pts_2d, length, reference_depth):
         raise RuntimeError(f"invalid/empty horizontal extrude, volume={solid.Volume}")
     return solid
 
-def _extrude_vertical(pts_2d, length, flip_x=False):
-    # FIX: previous code mapped v (depth, 90mm) to world-X, which made
-    # each jamb stick out 90mm beyond the frame width on its own side
-    # (matches the +90/-90mm bug seen in the reported bbox: X range
-    # was -90..1090 instead of 0..1000 for width_mm=1000).
-    #
-    # COORDINATE FIX: matches jamb_extrude_test.py's confirmed-working
-    # mapping — (u, v) -> V(u, 0, v), no sign flip, no mirror offset.
-    # The previous sign/x_offset mirroring here was never present in
-    # that verified reference and corrupted the traced profile shape
-    # for the left jamb. Both jambs use the identical un-mirrored
-    # profile; only their X position differs.
-    #   u (across profile, 67mm — the jamb's own face width) -> world-X
-    #   v (depth through wall, 90mm) -> world-Z (becomes final depth
-    #     after the assembly's +90deg rotation), back face flush at
-    #     Z=0 same convention as threshold/head.
-    u_extent = max(float(u) for u, _ in pts_2d)   # 67mm face width
-    v_extent = max(float(v) for _, v in pts_2d)   # 90mm depth
-    x_offset = u_extent if flip_x else 0.0
-    pts = [V(float(u) + x_offset, 0.0, float(v) - v_extent) for u, v in pts_2d]
+def _extrude_vertical(pts_2d, length):
+    # Local frame pre-rotation, matching jamb_extrude_test.py's
+    # confirmed-working (u, v) -> V(u, 0, v) mapping.
+    v_extent = max(float(v) for _, v in pts_2d)
+    pts = [V(float(u), 0.0, float(v) - v_extent) for u, v in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -150,63 +109,57 @@ def _extrude_vertical(pts_2d, length, flip_x=False):
     solid = face.extrude(V(0.0, length, 0.0))
     if not solid.isValid() or solid.Volume <= 1.0:
         raise RuntimeError(f"invalid/empty vertical extrude, volume={solid.Volume}")
-    return solid, u_extent
+    return solid
+
+def _rotate_x90(solid):
+    # Rigid-body +90deg about world X: X->X, Y->Z, Z->-Y.
+    # Establishes final frame: X=width, Y=depth, Z=height.
+    solid.rotate(V(0.0, 0.0, 0.0), V(1.0, 0.0, 0.0), 90.0)
+
+def _snap(solid, x=None, y=None, z=None):
+    # Translate solid so its BoundBox satisfies the given target(s).
+    # Each target is (edge, value), edge in ('min', 'max').
+    bb = solid.BoundBox
+    dx = dy = dz = 0.0
+    if x is not None:
+        edge, val = x
+        cur = bb.XMin if edge == "min" else bb.XMax
+        dx = val - cur
+    if y is not None:
+        edge, val = y
+        cur = bb.YMin if edge == "min" else bb.YMax
+        dy = val - cur
+    if z is not None:
+        edge, val = z
+        cur = bb.ZMin if edge == "min" else bb.ZMax
+        dz = val - cur
+    solid.translate(V(dx, dy, dz))
 
 try:
     data = json.load(open(r"__PARAMS_PATH__", encoding="utf-8"))
-    threshold_pts   = data["threshold_pts"]
-    head_pts        = data["head_pts"]
-    jamb_pts        = data["jamb_pts"]
-    W               = float(data["width_mm"])
-    H               = float(data["height_mm"])
-    head_y_extent   = float(data["head_y_extent"])
-    step_path       = data["step_path"]
+    threshold_pts_2d = data["threshold_pts"]
+    head_pts_2d      = data["head_pts"]
+    jamb_pts_2d      = data["jamb_pts"]
+    W                = float(data["width_mm"])
+    H                = float(data["height_mm"])
+    step_path        = data["step_path"]
 
-    # Jamb depth (90mm) is the shared exterior-face reference for all
-    # three member types — see _extrude_horizontal fix note above.
-    jamb_v_extent = max(float(v) for _, v in jamb_pts)
+    threshold  = _extrude_horizontal(threshold_pts_2d, W)
+    head       = _extrude_horizontal(head_pts_2d, W)
+    jamb_left  = _extrude_vertical(jamb_pts_2d, H)
+    jamb_right = _extrude_vertical(jamb_pts_2d, H)
 
-    threshold = _extrude_horizontal(threshold_pts, W, jamb_v_extent)
+    for solid in (threshold, head, jamb_left, jamb_right):
+        _rotate_x90(solid)
 
-    head = _extrude_horizontal(head_pts, W, jamb_v_extent)
-    head.translate(V(0.0, H - head_y_extent, 0.0))
+    # ---- SNAP CONSTRAINTS (relative positioning) -------------------
+    # Shared depth reference plane for all four members.
+    DEPTH_REF = ("min", 0.0)
 
-    # NESTED convention (per reference drawing: overall frame width W
-    # already includes the jambs — jambs sit at the two ends of the
-    # threshold/head span, not beyond it).
-    jamb_left, jamb_w = _extrude_vertical(jamb_pts, H, flip_x=False)
-
-    jamb_right, _ = _extrude_vertical(jamb_pts, H, flip_x=False)
-    jamb_right.translate(V(W - jamb_w, 0.0, 0.0))
-
-    # -------------------------------------------------------------
-    # ONE rigid-body transform for the COMPLETE ASSEMBLY.
-    #
-    # The four solids above are already generated with their actual
-    # traced profiles and their intended relative positions.
-    # Do NOT rotate/rebuild individual members here.
-    #
-    # +90 degrees about X:
-    #     X' = X
-    #     Y' = Z
-    #     Z' = -Y
-    #
-    # Final CAD convention:
-    #     X = frame width
-    #     Y = profile depth
-    #     Z = frame height
-    # -------------------------------------------------------------
-    for solid in (
-        threshold,
-        head,
-        jamb_left,
-        jamb_right,
-    ):
-        solid.rotate(
-            V(0.0, 0.0, 0.0),
-            V(1.0, 0.0, 0.0),
-            90.0,
-        )
+    _snap(jamb_left,  x=("min", 0.0), y=DEPTH_REF, z=("min", 0.0))
+    _snap(jamb_right, x=("max", W),   y=DEPTH_REF, z=("min", 0.0))
+    _snap(threshold,  x=("min", 0.0), y=DEPTH_REF, z=("min", 0.0))
+    _snap(head,       x=("min", 0.0), y=DEPTH_REF, z=("max", H))
 
     doc = App.newDocument("FrameAssemblyTest")
     o1 = doc.addObject("Part::Feature", "Threshold"); o1.Shape = threshold
