@@ -577,6 +577,32 @@ def _build_step_isolated(window, asm, z_up=False, timeout=180):
     return payload
 
 
+def _collect_member_solids(cq, asm, cx, cy):
+    """Build a cadquery solid for every frame member. Shared by
+    _build_step (STEP export) and _build_dxf_multiview (2D projections)
+    so the DXF views are always generated from the exact same geometry
+    as the STEP file — no separate/approximated geometry path."""
+    frame_solids = []
+    failed_ids = []
+    for m in asm.members:
+        try:
+            solid = _member_solid_cq(
+                cq, m, m._rings, m._sec_bar, m._sec_dep, cx, cy
+            )
+        except Exception as exc:
+            logger.warning(
+                "cq member %s failed: %s",
+                getattr(m, "id", "?"), exc,
+            )
+            solid = None
+
+        if solid is None:
+            failed_ids.append(getattr(m, "id", "?"))
+        else:
+            frame_solids.append((m, solid))
+    return frame_solids, failed_ids
+
+
 def _build_step(window, asm, z_up=False):
     try:
         import cadquery as cq
@@ -600,23 +626,8 @@ def _build_step(window, asm, z_up=False):
             return solid
         return solid.rotate((0, 0, 0), (1, 0, 0), 90)
 
-    for m in asm.members:
-        try:
-            solid = _member_solid_cq(
-                cq, m, m._rings, m._sec_bar, m._sec_dep, cx, cy
-            )
-        except Exception as exc:
-            logger.warning(
-                "cq member %s failed: %s",
-                getattr(m, "id", "?"), exc,
-            )
-            solid = None
-
-        if solid is None:
-            failed_ids.append(getattr(m, "id", "?"))
-        else:
-            count += 1
-            frame_solids.append((m, solid))
+    frame_solids, failed_ids = _collect_member_solids(cq, asm, cx, cy)
+    count = len(frame_solids)
 
     if count == 0:
         raise RuntimeError("no frame solids built")
@@ -920,6 +931,112 @@ def _member_solid_cq(cq, m, rings, sec_bar, sec_dep, cx, cy):
         y_start,
         0.0,
     ))
+
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+OUTPUT_DIR = os.path.join(_PROJECT_ROOT, "output")
+
+
+def _view_bbox(polylines):
+    xs = [x for poly in polylines for x, _y in poly]
+    ys = [y for poly in polylines for _x, y in poly]
+    if not xs:
+        return 0.0, 0.0, 0.0, 0.0
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _build_dxf_multiview(window, asm, z_up=True) -> bytes:
+    """
+    Produce a single 2D DXF sheet with three orthographic views of the
+    SAME solid assembly _build_step() exports to STEP:
+        Front (XY projection), Side (YZ projection), Top (XZ projection)
+    Views are auto-offset (no overlap): Front stays at (0,0), Top is
+    shifted on +Y, Side is shifted on +X. Every member solid's edges are
+    projected (plain projection, all edges — including boolean-cut/joint
+    edges already baked into the member geometry) so no interior/section
+    line is dropped.
+    """
+    import cadquery as cq
+    import ezdxf
+
+    W = float(window.width_mm)
+    H = float(window.height_mm)
+    cx, cy = W / 2.0, H / 2.0
+
+    frame_solids, failed_ids = _collect_member_solids(cq, asm, cx, cy)
+    if not frame_solids:
+        raise RuntimeError("no frame solids built for DXF export")
+    if failed_ids:
+        raise RuntimeError(
+            f"DXF export incomplete — {len(failed_ids)} member(s) failed "
+            f"to build and were dropped: {failed_ids}."
+        )
+
+    def zup(solid):
+        if not z_up:
+            return solid
+        return solid.rotate((0, 0, 0), (1, 0, 0), 90)
+
+    front, side, top = [], [], []
+    for _m, solid in frame_solids:
+        shape = zup(solid).val()
+        for edge in shape.Edges:
+            try:
+                pts = edge.tessellate(0.5)[0]
+            except Exception:
+                continue
+            if len(pts) < 2:
+                continue
+            front.append([(p.x, p.y) for p in pts])   # XY projection
+            side.append([(p.y, p.z) for p in pts])     # YZ projection
+            top.append([(p.x, p.z) for p in pts])       # XZ projection
+
+    doc = ezdxf.new("R2010", setup=True)
+    msp = doc.modelspace()
+    doc.layers.add("FRONT_VIEW", color=7)
+    doc.layers.add("SIDE_VIEW", color=5)
+    doc.layers.add("TOP_VIEW", color=3)
+
+    def _emit(polylines, dx, dy, layer):
+        for pts in polylines:
+            shifted = [(x + dx, y + dy) for x, y in pts]
+            msp.add_lwpolyline(shifted, dxfattribs={"layer": layer})
+
+    gap = 100.0
+    fxmin, fymin, fxmax, fymax = _view_bbox(front)
+    sxmin, symin, sxmax, symax = _view_bbox(side)
+    txmin, tymin, txmax, tymax = _view_bbox(top)
+
+    _emit(front, 0.0, 0.0, "FRONT_VIEW")                              # (0,0)
+    _emit(top, 0.0, (fymax - tymin) + gap, "TOP_VIEW")                 # +Y
+    _emit(side, (fxmax - sxmin) + gap, 0.0, "SIDE_VIEW")               # +X
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "window_drawing.dxf")
+    doc.saveas(out_path)
+    with open(out_path, "rb") as fh:
+        return fh.read()
+
+
+def generate_multiview_dxf(window, panes, tenant_id=None) -> bytes:
+    """Public entrypoint: builds the member assembly exactly like
+    generate_3d_assembly(fmt='step') does, then projects it into the
+    3-view DXF sheet. Not wired into the main 3D pipeline elsewhere —
+    only the /3d/dxf route below calls this."""
+    from .frame_assembly import build_members, resolve_profiles
+
+    profiles = resolve_profiles(
+        tenant_id, getattr(window, "material", "Aluminium"), window=window,
+    )
+    _apply_window_overrides(profiles, window, tenant_id)
+
+    asm = build_members(window, panes, profiles)
+    if not asm.members:
+        raise RuntimeError("member graph: no members")
+
+    _normalise_assembly_geometry(window, asm)
+    prepare_sections(asm, profiles)
+    return _build_dxf_multiview(window, asm, z_up=True)
 
 
 def _frame_rgb(hex_colour):

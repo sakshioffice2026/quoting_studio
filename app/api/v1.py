@@ -339,8 +339,8 @@ def export_orthographic_dxf(window_id):
 @login_required
 def export_3d(window_id, fmt):
     fmt = fmt.lower()
-    if fmt not in ('step', 'stl', 'glb'):
-        return jsonify({'error': 'Format must be step, stl or glb'}), 400
+    if fmt not in ('step', 'stl', 'glb', 'dxf'):
+        return jsonify({'error': 'Format must be step, stl, glb or dxf'}), 400
     method = request.args.get('method', 'auto')
     if method not in ('auto', 'assembly', 'freecad', 'profile', 'extrude', 'sweep'):
         method = 'auto'
@@ -359,14 +359,18 @@ def export_3d(window_id, fmt):
             sync_legacy_panes(window, Pane, db)
             db.session.commit()
             panes = window.panes.all()
-        from ..services.model3d import generate_3d
-        data = generate_3d(window, panes, tenant_id=current_user.tenant_id,
-                            fmt=fmt, method=method, z_up=z_up)
+        if fmt == 'dxf':
+            from ..services.model3d import generate_multiview_dxf
+            data = generate_multiview_dxf(window, panes, tenant_id=current_user.tenant_id)
+        else:
+            from ..services.model3d import generate_3d
+            data = generate_3d(window, panes, tenant_id=current_user.tenant_id,
+                                fmt=fmt, method=method, z_up=z_up)
         if not data:
             return jsonify({'error': '3D generation failed — cadquery may not be installed'}), 500
 
-        mimes = {'step':'application/step', 'stl':'model/stl', 'glb':'model/gltf-binary'}
-        ext   = {'step':'step', 'stl':'stl', 'glb':'glb'}[fmt]
+        mimes = {'step':'application/step', 'stl':'model/stl', 'glb':'model/gltf-binary', 'dxf':'application/dxf'}
+        ext   = {'step':'step', 'stl':'stl', 'glb':'glb', 'dxf':'dxf'}[fmt]
         fname = f'QS-{window_id}-{window.label.replace(" ","_")[:30]}.{ext}'
         current_app.logger.info('3D export: window=%d fmt=%s method=%s bytes=%d',
                                  window_id, fmt, method, len(data))
