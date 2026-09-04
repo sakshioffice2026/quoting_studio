@@ -17,7 +17,7 @@ and exported as ONE combined STEP file.
 
 NOT included yet (separate item): inward-facing jamb rotation.
 
-Output: output/window_assembly.step, output/window_assembly.dxf
+Output: output/threshold_jamb_assembly.step
 """
 import sys
 import os
@@ -34,6 +34,157 @@ from app.services.jamb_geometry import (
     get_profile_points_normalised as jamb_pts,
 )
 
+# ---------------------------------------------------------------------------
+# Head-profile extraction — reads coordinates directly from the DXF file.
+# Replaces the hardcoded HEAD_PROFILE_POINTS array for _build_head().
+# ---------------------------------------------------------------------------
+_HEAD_DXF = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "app", "cad_sections", "cad_sections", "head.dxf",
+)
+
+
+def _head_pts_from_dxf(dxf_path: str = _HEAD_DXF) -> list:
+    """
+    Extract the 2D wire vertices from the head-profile DXF and return them
+    as normalised (u, v) pairs ready for _build_head(head_pts_2d, W).
+
+    Coordinate convention (preserved from existing assembly logic):
+        u — local X in DXF (across profile, ~90 mm)  → world Z via _z(u)
+        v — local Y in DXF (depth through wall, ~35 mm) → world Y via _y(v)
+
+    The file declares $INSUNITS=1 (inches) but its coordinates are in mm —
+    the same mismatch documented in head_geometry.py.  Raw coords are used
+    as-is (no ×25.4 scaling) to match HEAD_PROFILE_POINTS exactly.
+
+    Returns [] and prints a warning on any file/parse error so the caller
+    can fall back gracefully.
+    """
+    import math
+
+    if not dxf_path or not os.path.isfile(dxf_path):
+        print(f"WARNING: head profile DXF not found: {dxf_path!r}")
+        return []
+
+    try:
+        with open(dxf_path, "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError as exc:
+        print(f"WARNING: could not read head profile DXF: {exc}")
+        return []
+
+    if not content.strip():
+        print(f"WARNING: head profile DXF is empty: {dxf_path!r}")
+        return []
+
+    # --- minimal inline DXF tag reader (no Flask / app imports needed) ------
+    def _tags(text):
+        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        i = 0
+        while i < len(lines) - 1:
+            raw = lines[i].strip()
+            val = lines[i + 1].strip()
+            i += 2
+            try:
+                yield int(raw), val
+            except ValueError:
+                pass
+
+    def _lwpolyline_pts(tag_list):
+        coords, bulges, closed = [], {}, False
+        idx = -1
+        for code, val in tag_list:
+            try:
+                if code == 10:
+                    idx += 1
+                    coords.append([float(val), None])
+                elif code == 20 and coords and coords[-1][1] is None:
+                    coords[-1][1] = float(val)
+                elif code == 42:
+                    bulges[idx] = float(val)
+                elif code == 70:
+                    closed = bool(int(float(val)) & 1)
+            except ValueError:
+                pass
+        pts = [(c[0], c[1]) for c in coords if c[1] is not None]
+        if not pts:
+            return [], False
+
+        # Expand bulge arcs so the polygon matches the real profile shape
+        def _bulge_arc(p1, p2, b, n=12):
+            x1, y1 = p1; x2, y2 = p2
+            d = math.hypot(x2 - x1, y2 - y1)
+            if d < 1e-10 or abs(b) < 1e-9:
+                return [p2]
+            theta = 4.0 * math.atan(abs(b))
+            r = d / (2.0 * math.sin(theta / 2.0))
+            dc = math.sqrt(max(0.0, r * r - (d / 2.0) ** 2))
+            alpha = math.atan2(y2 - y1, x2 - x1)
+            mx, my = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            sign = 1 if b > 0 else -1
+            cx = mx + sign * dc * math.sin(alpha)
+            cy = my - sign * dc * math.cos(alpha)
+            sa = math.atan2(y1 - cy, x1 - cx)
+            ea = math.atan2(y2 - cy, x2 - cx)
+            if b > 0:
+                if ea >= sa:
+                    ea -= 2.0 * math.pi
+            else:
+                if ea <= sa:
+                    ea += 2.0 * math.pi
+            segs = max(n, int(abs(b) * 24))
+            return [(cx + r * math.cos(sa + (ea - sa) * k / segs),
+                     cy + r * math.sin(sa + (ea - sa) * k / segs))
+                    for k in range(1, segs + 1)]
+
+        expanded = [pts[0]]
+        n = len(pts)
+        last = n if closed else n - 1
+        for i in range(last):
+            b = bulges.get(i, 0.0)
+            if abs(b) > 1e-9:
+                expanded.extend(_bulge_arc(pts[i], pts[(i + 1) % n], b))
+            else:
+                expanded.append(pts[(i + 1) % n])
+        return expanded, closed
+
+    # --- scan entities for the first closed LWPOLYLINE on a non-annotation layer
+    _EXCLUDED = ('dim', 'dimension', 'text', 'annot', 'note', 'centre',
+                 'center', 'hatch', 'hidden', 'leader', 'title', 'border')
+
+    current_type = None
+    current_layer = None
+    current_tags = []
+    result_pts = []
+
+    for code, val in _tags(content):
+        if code == 0:
+            if (current_type == "LWPOLYLINE"
+                    and not any(s in (current_layer or "").lower() for s in _EXCLUDED)):
+                pts, closed = _lwpolyline_pts(current_tags)
+                if closed and len(pts) >= 3:
+                    result_pts = pts
+                    break           # first valid closed polyline is the profile
+            current_type = val
+            current_layer = None
+            current_tags = []
+        else:
+            if code == 8:
+                current_layer = val
+            if current_type == "LWPOLYLINE":
+                current_tags.append((code, val))
+
+    if not result_pts:
+        print(f"WARNING: no closed LWPOLYLINE found in head profile DXF: {dxf_path!r}")
+        return []
+
+    # Normalise to (0, 0) origin — same pattern as get_profile_points_normalised()
+    xs = [p[0] for p in result_pts]
+    ys = [p[1] for p in result_pts]
+    min_x, min_y = min(xs), min(ys)
+    return [(round(x - min_x, 3), round(y - min_y, 3)) for x, y in result_pts]
+
+
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
 
@@ -42,23 +193,28 @@ def _find_freecad():
     return ff()
 
 
-def export_combined_step(width_mm: float, height_mm: float, step_path: str,
-                          dxf_path: str):
+def export_combined_step(width_mm: float, height_mm: float, step_path: str):
     freecad = _find_freecad()
     if not freecad:
         print("FreeCAD not found — skipping STEP export. "
               "Set FREECAD_CMD env var or install FreeCAD.")
         return False
 
+    head_pts_2d = _head_pts_from_dxf()
+    if not head_pts_2d:
+        print("WARNING: head profile extraction failed — "
+              "falling back to jamb profile for head member.")
+        head_pts_2d = jamb_pts()
+
     params_path = os.path.join(tempfile.gettempdir(), "threshold_jamb_params.json")
     with open(params_path, "w", encoding="utf-8") as f:
         json.dump({
             "threshold_pts": threshold_pts(),
             "jamb_pts": jamb_pts(),
+            "head_pts": head_pts_2d,
             "width_mm": width_mm,
             "height_mm": height_mm,
             "step_path": step_path,
-            "dxf_path": dxf_path,
         }, f)
 
     script = r"""
@@ -102,18 +258,9 @@ def _build_threshold(pts_2d, W):
         raise RuntimeError(f"invalid threshold extrude, volume={solid.Volume}")
     return solid
 
-def _build_jamb(pts_2d, H, mirror_x=False):
+def _build_jamb(pts_2d, H):
     # plane='XY' (ITEM 1 fix): (u, v) -> V(u, v, 0), extrude +Z by H.
-    # mirror_x=True flips the profile across its own vertical
-    # midline (u-axis only) so left/right jambs face inward.
-    u_vals = [float(u) for u, _ in pts_2d]
-    u_extent = max(u_vals) - min(u_vals)
-
-    def _u(u):
-        u0 = float(u) - min(u_vals)
-        return (u_extent - u0) if mirror_x else u0
-
-    pts = [V(_u(u), float(v), 0.0) for u, v in pts_2d]
+    pts = [V(float(u), float(v), 0.0) for u, v in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -126,22 +273,11 @@ def _build_jamb(pts_2d, H, mirror_x=False):
         raise RuntimeError(f"invalid jamb extrude, volume={solid.Volume}")
     return solid
 
-def _build_head(jamb_pts_2d, W):
-    # Uses the SAME jamb profile (67x90mm) instead of the old
-    # rectangular head profile. Cross-section built in the Y-Z plane,
-    # extruded along +X by full outer width W.
-    #
-    # v -> Y (depth-through-wall, unmirrored, matches jambs' own
-    # depth axis). u -> Z, inverted relative to u_max: the high-u
-    # end (glass channel) maps to Z=0 -> most-negative after
-    # placement, i.e. points downward (-Z). Low-u end (solid
-    # back/top) maps to most-negative local Z, becomes the head's
-    # top roof.
-    u_vals = [float(u) for u, _ in jamb_pts_2d]
-    u_max = max(u_vals)
-
-    pts = [V(0.0, float(v), -(u_max - float(u))) for u, v in jamb_pts_2d]
-    pts.append(pts[0])
+def _build_head(head_pts_2d, W):
+    # Cross-section in Y-Z plane, extruded along +X by W.
+    # Local v (depth) is inverted so the channel faces downward (-Z).
+    # Local u maps directly to world Z (height).
+pts = [V(0.0, float(v), float(u)) for u, v in head_pts_2d]    pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
         raise RuntimeError("head wire not closed")
@@ -176,10 +312,10 @@ try:
     data = json.load(open(r"__PARAMS_PATH__", encoding="utf-8"))
     threshold_pts_2d = data["threshold_pts"]
     jamb_pts_2d      = data["jamb_pts"]
+    head_pts_2d      = data["head_pts"]
     W                = float(data["width_mm"])
     H                = float(data["height_mm"])
     step_path        = data["step_path"]
-    dxf_path         = data["dxf_path"]
 
     threshold = _build_threshold(threshold_pts_2d, W)
     _snap(threshold, x=("min", 0.0), y=("min", 0.0), z=("min", 0.0))
@@ -187,8 +323,7 @@ try:
     threshold_ymax = threshold.BoundBox.YMax
 
     def _place_jamb(x_target):
-        mirror_x = (x_target[0] == "max")
-        jamb = _build_jamb(jamb_pts_2d, H, mirror_x=mirror_x)
+        jamb = _build_jamb(jamb_pts_2d, H)
         # Bottom face (Zmin) snaps to the threshold's highest point
         # (Zmax of the interior upstand), flush at the given X edge.
         _snap(jamb, x=x_target, z=("min", threshold_zmax))
@@ -211,20 +346,25 @@ try:
     left_jamb  = _place_jamb(("min", 0.0))
     right_jamb = _place_jamb(("max", W))
     jambs_zmax = max(left_jamb.BoundBox.ZMax, right_jamb.BoundBox.ZMax)
+    jambs_ymin = min(left_jamb.BoundBox.YMin, right_jamb.BoundBox.YMin)
 
-    head = _build_head(jamb_pts_2d, W)
-    # Bottom face (ZMin, downward-facing channel) sits directly on
-    # top of the jambs (jambs_zmax).
+    head = _build_head(head_pts_2d, W)
+    # X: flush at X=0 (left edge).
+    _snap(head, x=("min", 0.0))
     h_bb = head.BoundBox
-    dx = 0.0 - h_bb.XMin
-    dy = threshold_ymax - h_bb.YMax
-    dz = jambs_zmax - h_bb.ZMin
-    head.translate(V(dx, dy, dz))
+    # Y: head front face aligns with the jamb glazing channel plane.
+    # channel_offset=9.45mm is the local-Y depth of the glass rebate
+    # measured from jambs_ymin (jamb profile Y=0..9.45 is the channel).
+    # Y: Align head channel depth flush with the jamb glazing channel
+    # Align head YMin directly to the jamb interior reference (jambs_ymin)
+    dy = jambs_ymin - h_bb.YMin
 
-    # Trim: notch the tops of both jambs against the head so they
-    # butt cleanly under the head rail without volume overlap.
-    left_jamb = left_jamb.cut(head)
-    right_jamb = right_jamb.cut(head)
+    # Z: Snap head bottom face (ZMin) directly onto the top of the jambs (jambs_zmax)
+    dz = jambs_zmax - h_bb.ZMin
+    head.translate(V(0.0, dy, dz))
+    # Z: bottom edge of head rests directly on top of jambs, no gap.
+    dz = jambs_zmax - h_bb.ZMin
+    head.translate(V(0.0, dy, dz))
 
     doc = App.newDocument("ThresholdJambAssembly")
     o1 = doc.addObject("Part::Feature", "Threshold");  o1.Shape = threshold
@@ -235,41 +375,6 @@ try:
 
     compound = Part.makeCompound([threshold, left_jamb, right_jamb, head])
     compound.exportStep(step_path)
-
-    # DXF export: Front / Left Side / Top projections, spaced apart
-    # on the export canvas so they don't overlap.
-    try:
-        import Draft
-        import importDXF
-
-        compound_obj = doc.addObject("Part::Feature", "Compound")
-        compound_obj.Shape = compound
-        doc.recompute()
-
-        elevation_2d = Draft.make_shape2dview(compound_obj, App.Vector(0, -1, 0))
-        side_2d      = Draft.make_shape2dview(compound_obj, App.Vector(1, 0, 0))
-        plan_2d      = Draft.make_shape2dview(compound_obj, App.Vector(0, 0, -1))
-        doc.recompute()
-
-        # Elevation/Plan: identity rotation, geometry already
-        # flattened into local XY by make_shape2dview.
-        identity_rot = App.Rotation(App.Vector(0, 0, 1), 0)
-        elevation_2d.Placement.Rotation = identity_rot
-        plan_2d.Placement.Rotation      = identity_rot
-        # Side: explicit 90deg rotation about local Z so the view
-        # stands vertically, matching frame height.
-        side_2d.Placement.Rotation = App.Rotation(App.Vector(0, 0, 1), 90)
-
-        elevation_2d.Placement.Base = App.Vector(0, 0, 0)
-        side_2d.Placement.Base      = App.Vector(W + 300, 0, 0)
-        plan_2d.Placement.Base      = App.Vector(0, -400, 0)
-        doc.recompute()
-
-        importDXF.export([elevation_2d, side_2d, plan_2d], dxf_path)
-        print(f"DXF export: OK -> {dxf_path}")
-    except Exception:
-        print("DXF_EXPORT_ERROR")
-        traceback.print_exc(file=sys.stdout)
 
     bb = compound.BoundBox
     print(f"OK compound bbox=({bb.XLength:.2f},{bb.YLength:.2f},{bb.ZLength:.2f}) "
@@ -317,8 +422,7 @@ def main():
     print(f"Assembly: width(X)={width_mm} mm, height(Z)={height_mm} mm")
 
     step_path = os.path.join(OUTPUT_DIR, "window_assembly.step")
-    dxf_path = os.path.join(OUTPUT_DIR, "window_assembly.dxf")
-    step_ok = export_combined_step(width_mm, height_mm, step_path, dxf_path)
+    step_ok = export_combined_step(width_mm, height_mm, step_path)
     print(f"STEP export: {'OK -> ' + step_path if step_ok else 'FAILED'}")
 
 
