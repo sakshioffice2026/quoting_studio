@@ -17,7 +17,7 @@ and exported as ONE combined STEP file.
 
 NOT included yet (separate item): inward-facing jamb rotation.
 
-Output: output/threshold_jamb_assembly.step
+Output: output/window_assembly.step, output/window_assembly.dxf
 """
 import sys
 import os
@@ -42,7 +42,8 @@ def _find_freecad():
     return ff()
 
 
-def export_combined_step(width_mm: float, height_mm: float, step_path: str):
+def export_combined_step(width_mm: float, height_mm: float, step_path: str,
+                          dxf_path: str):
     freecad = _find_freecad()
     if not freecad:
         print("FreeCAD not found — skipping STEP export. "
@@ -57,6 +58,7 @@ def export_combined_step(width_mm: float, height_mm: float, step_path: str):
             "width_mm": width_mm,
             "height_mm": height_mm,
             "step_path": step_path,
+            "dxf_path": dxf_path,
         }, f)
 
     script = r"""
@@ -100,9 +102,18 @@ def _build_threshold(pts_2d, W):
         raise RuntimeError(f"invalid threshold extrude, volume={solid.Volume}")
     return solid
 
-def _build_jamb(pts_2d, H):
+def _build_jamb(pts_2d, H, mirror_x=False):
     # plane='XY' (ITEM 1 fix): (u, v) -> V(u, v, 0), extrude +Z by H.
-    pts = [V(float(u), float(v), 0.0) for u, v in pts_2d]
+    # mirror_x=True flips the profile across its own vertical
+    # midline (u-axis only) so left/right jambs face inward.
+    u_vals = [float(u) for u, _ in pts_2d]
+    u_extent = max(u_vals) - min(u_vals)
+
+    def _u(u):
+        u0 = float(u) - min(u_vals)
+        return (u_extent - u0) if mirror_x else u0
+
+    pts = [V(_u(u), float(v), 0.0) for u, v in pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -118,29 +129,18 @@ def _build_jamb(pts_2d, H):
 def _build_head(jamb_pts_2d, W):
     # Uses the SAME jamb profile (67x90mm) instead of the old
     # rectangular head profile. Cross-section built in the Y-Z plane,
-    # extruded along +X by W.
+    # extruded along +X by full outer width W.
     #
-    # 180deg ROTATION about the extrusion axis (X): a single-axis
-    # mirror (Z only) left the channel facing +Z and the rear wall
-    # facing the wrong way. A true 180deg turn about X flips BOTH
-    # Y and Z together — world-Y = mirrored local-v, world-Z =
-    # mirrored local-u — so the channel/stops end up facing -Z and
-    # the rear wall ends up facing +Y (interior), matching the jambs.
-    ROTATE_180_ABOUT_X = True
+    # v -> Y (depth-through-wall, unmirrored, matches jambs' own
+    # depth axis). u -> Z, inverted relative to u_max: the high-u
+    # end (glass channel) maps to Z=0 -> most-negative after
+    # placement, i.e. points downward (-Z). Low-u end (solid
+    # back/top) maps to most-negative local Z, becomes the head's
+    # top roof.
     u_vals = [float(u) for u, _ in jamb_pts_2d]
-    v_vals = [float(v) for _, v in jamb_pts_2d]
-    u_extent = max(u_vals) - min(u_vals)
-    v_extent = max(v_vals) - min(v_vals)
+    u_max = max(u_vals)
 
-    def _y(v):
-        v0 = float(v) - min(v_vals)
-        return (v_extent - v0) if ROTATE_180_ABOUT_X else v0
-
-    def _z(u):
-        u0 = float(u) - min(u_vals)
-        return (u_extent - u0) if ROTATE_180_ABOUT_X else u0
-
-    pts = [V(0.0, _y(v), _z(u)) for u, v in jamb_pts_2d]
+    pts = [V(0.0, float(v), -(u_max - float(u))) for u, v in jamb_pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
@@ -179,6 +179,7 @@ try:
     W                = float(data["width_mm"])
     H                = float(data["height_mm"])
     step_path        = data["step_path"]
+    dxf_path         = data["dxf_path"]
 
     threshold = _build_threshold(threshold_pts_2d, W)
     _snap(threshold, x=("min", 0.0), y=("min", 0.0), z=("min", 0.0))
@@ -186,7 +187,8 @@ try:
     threshold_ymax = threshold.BoundBox.YMax
 
     def _place_jamb(x_target):
-        jamb = _build_jamb(jamb_pts_2d, H)
+        mirror_x = (x_target[0] == "max")
+        jamb = _build_jamb(jamb_pts_2d, H, mirror_x=mirror_x)
         # Bottom face (Zmin) snaps to the threshold's highest point
         # (Zmax of the interior upstand), flush at the given X edge.
         _snap(jamb, x=x_target, z=("min", threshold_zmax))
@@ -208,13 +210,21 @@ try:
 
     left_jamb  = _place_jamb(("min", 0.0))
     right_jamb = _place_jamb(("max", W))
-    jambs_top  = max(left_jamb.BoundBox.ZMax, right_jamb.BoundBox.ZMax)
+    jambs_zmax = max(left_jamb.BoundBox.ZMax, right_jamb.BoundBox.ZMax)
 
     head = _build_head(jamb_pts_2d, W)
-    # Spans the full width (X=0..W) so it sits across both jambs;
-    # bottom face (Zmin) rests on the jambs' top; rear edge (Ymax)
-    # kept flush with the same depth reference as threshold/jambs.
-    _snap(head, x=("min", 0.0), z=("min", jambs_top), y=("max", threshold_ymax))
+    # Bottom face (ZMin, downward-facing channel) sits directly on
+    # top of the jambs (jambs_zmax).
+    h_bb = head.BoundBox
+    dx = 0.0 - h_bb.XMin
+    dy = threshold_ymax - h_bb.YMax
+    dz = jambs_zmax - h_bb.ZMin
+    head.translate(V(dx, dy, dz))
+
+    # Trim: notch the tops of both jambs against the head so they
+    # butt cleanly under the head rail without volume overlap.
+    left_jamb = left_jamb.cut(head)
+    right_jamb = right_jamb.cut(head)
 
     doc = App.newDocument("ThresholdJambAssembly")
     o1 = doc.addObject("Part::Feature", "Threshold");  o1.Shape = threshold
@@ -225,6 +235,41 @@ try:
 
     compound = Part.makeCompound([threshold, left_jamb, right_jamb, head])
     compound.exportStep(step_path)
+
+    # DXF export: Front / Left Side / Top projections, spaced apart
+    # on the export canvas so they don't overlap.
+    try:
+        import Draft
+        import importDXF
+
+        compound_obj = doc.addObject("Part::Feature", "Compound")
+        compound_obj.Shape = compound
+        doc.recompute()
+
+        elevation_2d = Draft.make_shape2dview(compound_obj, App.Vector(0, -1, 0))
+        side_2d      = Draft.make_shape2dview(compound_obj, App.Vector(1, 0, 0))
+        plan_2d      = Draft.make_shape2dview(compound_obj, App.Vector(0, 0, -1))
+        doc.recompute()
+
+        # Elevation/Plan: identity rotation, geometry already
+        # flattened into local XY by make_shape2dview.
+        identity_rot = App.Rotation(App.Vector(0, 0, 1), 0)
+        elevation_2d.Placement.Rotation = identity_rot
+        plan_2d.Placement.Rotation      = identity_rot
+        # Side: explicit 90deg rotation about local Z so the view
+        # stands vertically, matching frame height.
+        side_2d.Placement.Rotation = App.Rotation(App.Vector(0, 0, 1), 90)
+
+        elevation_2d.Placement.Base = App.Vector(0, 0, 0)
+        side_2d.Placement.Base      = App.Vector(W + 300, 0, 0)
+        plan_2d.Placement.Base      = App.Vector(0, -400, 0)
+        doc.recompute()
+
+        importDXF.export([elevation_2d, side_2d, plan_2d], dxf_path)
+        print(f"DXF export: OK -> {dxf_path}")
+    except Exception:
+        print("DXF_EXPORT_ERROR")
+        traceback.print_exc(file=sys.stdout)
 
     bb = compound.BoundBox
     print(f"OK compound bbox=({bb.XLength:.2f},{bb.YLength:.2f},{bb.ZLength:.2f}) "
@@ -271,8 +316,9 @@ def main():
 
     print(f"Assembly: width(X)={width_mm} mm, height(Z)={height_mm} mm")
 
-    step_path = os.path.join(OUTPUT_DIR, "threshold_jamb_assembly.step")
-    step_ok = export_combined_step(width_mm, height_mm, step_path)
+    step_path = os.path.join(OUTPUT_DIR, "window_assembly.step")
+    dxf_path = os.path.join(OUTPUT_DIR, "window_assembly.dxf")
+    step_ok = export_combined_step(width_mm, height_mm, step_path, dxf_path)
     print(f"STEP export: {'OK -> ' + step_path if step_ok else 'FAILED'}")
 
 
