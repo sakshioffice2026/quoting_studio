@@ -408,7 +408,7 @@ for m in data["members"]:
         if solid is None or not solid.isValid() or solid.Volume < 1.0:
             raise ValueError("empty/invalid extrude — box fallback")
 
-        frame_solids.append(solid)
+        frame_solids.append((m['id'], solid))
         print(f"  {{m['id']}} ok  (role={{m['role']}} L={{L:.0f}}mm bar={{bar:.0f}} depth={{depth:.0f}})",
               flush=True)
 
@@ -430,7 +430,7 @@ for m in data["members"]:
                 y_start = min(m["y1"], m["y2"]) - cy
                 box = Part.makeBox(bar, L, depth,
                                    V(mx - bar/2.0, y_start, 0.0))
-            frame_solids.append(box)
+            frame_solids.append((m['id'], box))
             print(f"  {{m['id']}} BOX-FALLBACK ({{e}})", flush=True)
         except Exception as e2:
             print(f"  {{m['id']}} FAILED entirely: {{e2}}", flush=True)
@@ -457,7 +457,7 @@ for g in data["glass"]:
         else:
             gs = Part.makeBox(g["w"], g["h"], th,
                               V(gx - g["w"]/2, gy - g["h"]/2, z0 - th/2.0))
-        glass_solids.append(gs)
+        glass_solids.append((f"Glass{{len(glass_solids)}}", gs))
     except Exception as e:
         print(f"  glass FAILED: {{e}}", flush=True)
 
@@ -466,16 +466,24 @@ all_solids = frame_solids + glass_solids
 if not all_solids:
     print("ERROR: no solids built", flush=True)
 else:
-    total_vol = sum(s.Volume for s in all_solids)
+    total_vol = sum(s.Volume for _, s in all_solids)
     print(f"DIAG: {{len(all_solids)}} solids, total volume={{total_vol:.1f}}mm3",
           flush=True)
     if {need_step}:
         # FreeCAD 1.1.3: Part.export() on raw, un-added TopoShape objects
         # silently writes a header-only STEP with no geometry. Shapes MUST
         # be assigned to real Part::Feature document objects first.
+        # Each member/glass pane keeps its own labeled Part::Feature (not
+        # fused/compounded) so the STEP tree shows a discrete hierarchy
+        # (head, jamb_left, jamb_right, threshold, glass, ...).
         step_objs = []
-        for i, s in enumerate(all_solids):
-            feat = doc.addObject("Part::Feature", f"Member{{i}}")
+        seen_labels = {{}}
+        for label, s in all_solids:
+            n = seen_labels.get(label, 0)
+            seen_labels[label] = n + 1
+            obj_name = label if n == 0 else f"{{label}}_{{n}}"
+            feat = doc.addObject("Part::Feature", obj_name)
+            feat.Label = obj_name
             feat.Shape = s
             step_objs.append(feat)
         doc.recompute()
@@ -488,13 +496,13 @@ else:
     if {need_stl}:
         if frame_solids:
             fmesh = MeshPart.meshFromShape(
-                Shape=Part.makeCompound(frame_solids),
+                Shape=Part.makeCompound([s for _, s in frame_solids]),
                 LinearDeflection=0.5, AngularDeflection=0.3, Relative=False)
             fmesh.write(r"{mpath}")
             print("STL (frame) exported", flush=True)
         if glass_solids:
             gmesh = MeshPart.meshFromShape(
-                Shape=Part.makeCompound(glass_solids),
+                Shape=Part.makeCompound([s for _, s in glass_solids]),
                 LinearDeflection=0.5, AngularDeflection=0.3, Relative=False)
             gmesh.write(r"{gpath}")
             print("STL (glass) exported", flush=True)

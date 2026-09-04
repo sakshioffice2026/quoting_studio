@@ -275,9 +275,9 @@ def _build_jamb(pts_2d, H):
 
 def _build_head(head_pts_2d, W):
     # Cross-section in Y-Z plane, extruded along +X by W.
-    # Local v (depth) is inverted so the channel faces downward (-Z).
-    # Local u maps directly to world Z (height).
-pts = [V(0.0, float(v), float(u)) for u, v in head_pts_2d]    pts.append(pts[0])
+    # Local u maps to world Y (depth), local v maps to world Z (height).
+    pts = [V(0.0, float(u), float(v)) for u, v in head_pts_2d]
+    pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
         raise RuntimeError("head wire not closed")
@@ -351,20 +351,10 @@ try:
     head = _build_head(head_pts_2d, W)
     # X: flush at X=0 (left edge).
     _snap(head, x=("min", 0.0))
-    h_bb = head.BoundBox
-    # Y: head front face aligns with the jamb glazing channel plane.
-    # channel_offset=9.45mm is the local-Y depth of the glass rebate
-    # measured from jambs_ymin (jamb profile Y=0..9.45 is the channel).
-    # Y: Align head channel depth flush with the jamb glazing channel
-    # Align head YMin directly to the jamb interior reference (jambs_ymin)
-    dy = jambs_ymin - h_bb.YMin
-
-    # Z: Snap head bottom face (ZMin) directly onto the top of the jambs (jambs_zmax)
-    dz = jambs_zmax - h_bb.ZMin
-    head.translate(V(0.0, dy, dz))
-    # Z: bottom edge of head rests directly on top of jambs, no gap.
-    dz = jambs_zmax - h_bb.ZMin
-    head.translate(V(0.0, dy, dz))
+    # Z: bottom face (ZMin) flush on top of the jambs (jambs_zmax).
+    _snap(head, z=("min", jambs_zmax))
+    # Y: align head interior face (YMin) flush with jamb interior (jambs_ymin).
+    _snap(head, y=("min", jambs_ymin))
 
     doc = App.newDocument("ThresholdJambAssembly")
     o1 = doc.addObject("Part::Feature", "Threshold");  o1.Shape = threshold
@@ -415,8 +405,8 @@ except Exception:
 
 
 def main():
-    width_mm = float(sys.argv[1]) if len(sys.argv) > 1 else 1000.0
-    height_mm = float(sys.argv[2]) if len(sys.argv) > 2 else 1200.0
+    width_mm = float(sys.argv[1]) if len(sys.argv) > 1 else 1200.0
+    height_mm = float(sys.argv[2]) if len(sys.argv) > 2 else 1500.0
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print(f"Assembly: width(X)={width_mm} mm, height(Z)={height_mm} mm")

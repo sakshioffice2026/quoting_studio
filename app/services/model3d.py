@@ -629,80 +629,22 @@ def _build_step(window, asm, z_up=False):
             f"underlying cadquery error per member."
         )
 
-    # ── FUSE every member into ONE continuous solid ──────────────────
-    # Members used to be added to the assembly individually, each its own
-    # separate BREP solid that only TOUCHES its neighbours (ring <->
-    # mullion/transom, jamb <-> head, sash <-> frame, ...). Two touching-
-    # but-unfused solids share a coincident boundary with no real
-    # topological connection between them, so any viewer renders a visible
-    # seam/sliver right at that join — this is true regardless of how
-    # precisely the member coordinates line up, which is why extending the
-    # mullion/transom ends past the ring's touch-point closed most, but not
-    # all, of the gap. Boolean-union every member into a single watertight
-    # solid so the export has no internal seams at all. Members that fail
-    # to union cleanly (rare, but OCC booleans can be fragile on complex
-    # profiles) are kept as separate parts rather than aborting the whole
-    # export, so a single bad union never blanks the download.
-    #
-    # FIX HISTORY:
-    # 1) fused.union(solid) called once per SEGMENT of a curved member's
-    #    own path (many short adjacent segments touching face-to-face) was
-    #    the actual hang — a native OCC C call that never raises, it just
-    #    sits inside the kernel until the subprocess timeout kills it.
-    #    That per-segment chain is fixed in _member_solid_cq_path, which
-    #    now returns one Compound per curved member with zero booleans.
-    # 2) Skipping ALL union for curved members (this function) was an
-    #    over-correction: it stopped the ring from ever being combined
-    #    with the straight mullion/transom, so they render as two
-    #    disconnected, interpenetrating solids instead of one clean
-    #    mitred joint — visible in STEP/DXF as the vertical member
-    #    "cutting through" the ring and as bleeding hatch lines in the
-    #    projected DXF.
-    # A SINGLE union of [fused straight body] + [one curved compound] is a
-    # cheap, ordinary boolean — nothing like the O(n) segment chain that
-    # hung — so it is safe to attempt once per curved member. Only if that
-    # one attempt genuinely raises does the member fall back to a loose,
-    # disconnected part.
-    def _is_curved(member):
-        return bool(getattr(member, "path", None))
-
-    fusable = [(m, s) for m, s in frame_solids if not _is_curved(m)]
-    curved = [(m, s) for m, s in frame_solids if _is_curved(m)]
-    loose_parts = []
-
-    if fusable:
-        fused = fusable[0][1]
-        for m, solid in fusable[1:]:
-            try:
-                fused = fused.union(solid)
-            except Exception as exc:
-                logger.warning(
-                    "frame union failed for %s, keeping as separate part: %s",
-                    getattr(m, "id", "?"), exc,
-                )
-                loose_parts.append((m, solid))
-    else:
-        fused = None
-
-    for m, solid in curved:
-        if fused is None:
-            fused = solid
-            continue
-        try:
-            fused = fused.union(solid)
-        except Exception as exc:
-            logger.warning(
-                "curved frame union failed for %s, keeping as separate "
-                "part (joint will not be mitred): %s",
-                getattr(m, "id", "?"), exc,
-            )
-            loose_parts.append((m, solid))
-
-    assembly.add(zup(fused), name="frame", color=cq.Color(r, g, b))
-    for m, solid in loose_parts:
+    # ── Members added individually, NOT fused ─────────────────────────
+    # Previously every member was boolean-unioned into one "frame" solid
+    # to avoid seam artefacts at touching joints (see git history for the
+    # prior rationale/fix-history). Per explicit request, that union is
+    # removed: each member (head, jamb_left, jamb_right, threshold, ...)
+    # is added to the assembly as its own separate, individually named
+    # solid. NOTE: no miter-trim step exists elsewhere in this pipeline —
+    # removing the union means touching members are no longer boolean-
+    # connected, so interpenetration/seams at joints (e.g. jamb <-> head)
+    # are expected and are NOT trimmed by this change.
+    for m, solid in frame_solids:
         assembly.add(
-            zup(solid), name=f"{m.role}_{m.id}", color=cq.Color(r, g, b)
+            zup(solid), name=str(getattr(m, "id", None) or f"{m.role}_{id(m)}"),
+            color=cq.Color(r, g, b),
         )
+
 
     frame_ref = max(
         (
