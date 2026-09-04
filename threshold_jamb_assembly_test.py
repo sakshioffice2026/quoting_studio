@@ -119,21 +119,28 @@ def _build_head(jamb_pts_2d, W):
     # Uses the SAME jamb profile (67x90mm) instead of the old
     # rectangular head profile. Cross-section built in the Y-Z plane,
     # extruded along +X by W.
-    #   world-Y = local-v (depth through wall) — matches the jamb's
-    #     own direct v->Y mapping, so the header shares the exact
-    #     same depth reference as the jambs for a flush joint.
-    #   world-Z = mirrored local-u — the header is the jamb profile
-    #     rotated so its channel/stop faces DOWN (-Z) into the
-    #     opening. Flip MIRROR_CHANNEL_Z if it points the wrong way.
-    MIRROR_CHANNEL_Z = True
+    #
+    # 180deg ROTATION about the extrusion axis (X): a single-axis
+    # mirror (Z only) left the channel facing +Z and the rear wall
+    # facing the wrong way. A true 180deg turn about X flips BOTH
+    # Y and Z together — world-Y = mirrored local-v, world-Z =
+    # mirrored local-u — so the channel/stops end up facing -Z and
+    # the rear wall ends up facing +Y (interior), matching the jambs.
+    ROTATE_180_ABOUT_X = True
     u_vals = [float(u) for u, _ in jamb_pts_2d]
+    v_vals = [float(v) for _, v in jamb_pts_2d]
     u_extent = max(u_vals) - min(u_vals)
+    v_extent = max(v_vals) - min(v_vals)
+
+    def _y(v):
+        v0 = float(v) - min(v_vals)
+        return (v_extent - v0) if ROTATE_180_ABOUT_X else v0
 
     def _z(u):
         u0 = float(u) - min(u_vals)
-        return (u_extent - u0) if MIRROR_CHANNEL_Z else u0
+        return (u_extent - u0) if ROTATE_180_ABOUT_X else u0
 
-    pts = [V(0.0, float(v), _z(u)) for u, v in jamb_pts_2d]
+    pts = [V(0.0, _y(v), _z(u)) for u, v in jamb_pts_2d]
     pts.append(pts[0])
     wire = Part.makePolygon(pts)
     if not wire.isClosed():
