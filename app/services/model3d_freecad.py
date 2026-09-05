@@ -502,7 +502,7 @@ else:
     # group, which also needs discrete, non-fused solids) shows a
     # discrete hierarchy (head, jamb_left, jamb_right, threshold, glass, ...).
     step_objs = []
-    if {need_step} or {need_techdraw}:
+    if {need_step} or {need_techdraw} or {need_views}:
         seen_labels = {{}}
         for label, s in all_solids:
             n = seen_labels.get(label, 0)
@@ -540,47 +540,70 @@ else:
     if {need_views}:
         import Draft
 
-        compound = Part.makeCompound([s for _, s in all_solids])
-        src = doc.addObject("Part::Feature", "AssemblyForViews")
-        src.Shape = compound
-        doc.recompute()
-        model_bb = compound.BoundBox
+        solid_objs = [obj for obj in doc.Objects
+                      if obj.isDerivedFrom("Part::Feature") and "Draft" not in obj.TypeId]
 
-        # Front = looking along -Y, Top = looking along -Z, Side = looking along -X
-        front_view = Draft.make_shape2dview(src, App.Vector(0, -1, 0))
-        top_view   = Draft.make_shape2dview(src, App.Vector(0, 0, -1))
-        side_view  = Draft.make_shape2dview(src, App.Vector(-1, 0, 0))
+        # Draft.make_shape2dview() requires a single DocumentObject, not a
+        # list — Part::Compound.Links is a non-destructive *grouping* link
+        # (no fused/copied geometry), so the individual solids above are
+        # untouched; this object only exists to satisfy that API shape.
+        view_src = doc.addObject("Part::Compound", "ViewSource")
+        view_src.Links = solid_objs
+        view_src.Visibility = False
+        doc.recompute()
+
+        # Front = looking along -Y, Side = looking along -X, Top = looking along -Z
+        front_view = Draft.make_shape2dview(view_src, App.Vector(0, -1, 0))
+        side_view  = Draft.make_shape2dview(view_src, App.Vector(-1, 0, 0))
+        top_view   = Draft.make_shape2dview(view_src, App.Vector(0, 0, -1))
         front_view.Label = "Draft_Front_View"
-        top_view.Label   = "Draft_Top_View"
         side_view.Label  = "Draft_Side_View"
+        top_view.Label   = "Draft_Top_View"
         doc.recompute()
 
-        def _wh0(v):
-            bb = v.Shape.BoundBox
-            return bb.XLength, bb.YLength, bb.XMin, bb.YMin
+        # ViewSource only exists to satisfy make_shape2dview's single-object
+        # requirement; the three views already have their Shape computed,
+        # so delete it now — it must not appear in the final tree.
+        doc.removeObject(view_src.Name)
+        doc.recompute()
 
-        fw, fh, fx0, fy0 = _wh0(front_view)
-        tw, th, tx0, ty0 = _wh0(top_view)
-        sw, sh, sx0, sy0 = _wh0(side_view)
-        GAP = 100.0  # mm between views, and between views and the 3D model
+        # NOTE: obj.Placement.Base = Vector(...) is a partial mutation on a
+        # copy returned by the Placement getter. For App::FeaturePython
+        # objects (which is what Draft.make_shape2dview creates), this can
+        # silently fail to persist. Using full Placement reassignment below
+        # instead, which reliably writes back.
 
-        # Row sits below the 3D model (lower Z), views placed side-by-side
-        # along X, starting under the model's own XY footprint.
-        row_z = model_bb.ZMin - GAP - max(fh, th, sh)
-        row_y = model_bb.YMin
-        cursor_x = model_bb.XMin
-
+        # Front View at Origin (0, 0, 0)
+        bb_f = front_view.Shape.BoundBox
         front_view.Placement = App.Placement(
-            App.Vector(cursor_x - fx0, row_y - fy0, row_z), App.Rotation())
-        cursor_x += fw + GAP
+            App.Vector(-bb_f.XMin, -bb_f.YMin, 0), App.Rotation())
 
-        top_view.Placement = App.Placement(
-            App.Vector(cursor_x - tx0, row_y - ty0, row_z), App.Rotation())
-        cursor_x += tw + GAP
+        spacing = 250.0  # Separation gap in mm
 
+        # Side View to the LEFT of Front View (Y-aligned with Front View)
+        bb_s = side_view.Shape.BoundBox
+        side_x = -bb_s.XMax - spacing
+        side_y = -bb_s.YMin
         side_view.Placement = App.Placement(
-            App.Vector(cursor_x - sx0, row_y - sy0, row_z), App.Rotation())
+            App.Vector(side_x, side_y, 0), App.Rotation())
+
+        # Top View BELOW Front View (X-aligned with Front View, First Angle)
+        bb_t = top_view.Shape.BoundBox
+        top_x = -bb_t.XMin
+        top_y = -bb_t.YMax - spacing
+        top_view.Placement = App.Placement(
+            App.Vector(top_x, top_y, 0), App.Rotation())
+
         doc.recompute()
+
+        # Reset viewport camera to a strict top-down orthographic view, so
+        # any GUI session opening this file isn't left on a skewed/rotated
+        # camera angle. No-op under freecadcmd (headless), where GuiUp is False.
+        if App.GuiUp:
+            import FreeCADGui as Gui
+            view = Gui.ActiveDocument.ActiveView
+            view.viewTop()
+            view.fitAll()
 
         doc.saveAs(r"{fcpath}")
         try:

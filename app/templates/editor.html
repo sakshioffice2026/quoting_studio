@@ -397,7 +397,7 @@ body { overflow:hidden; }
       <input type="file" id="importJson" accept=".json" style="display:none" onchange="importJSON(event)">
       <button class="btn btn-ghost btn-sm" onclick="exportDxf()">DXF</button>
       <button class="btn btn-ghost btn-sm" id="btnDraftViews" onclick="exportDraftViews()" title="Native FreeCAD document (.FCStd) — 3D model + Front/Top/Side Draft views">⬇ FreeCAD (.FCStd)</button>
-      <button class="btn btn-ghost btn-sm" id="btnTechDrawViews" onclick="exportTechDrawViews()" title="Native FreeCAD document (.FCStd) — A4 Landscape TechDraw page with Front/Top/Side projection group">⬇ TechDraw Drawing</button>
+      <!-- <button class="btn btn-ghost btn-sm" id="btnTechDrawViews" onclick="exportTechDrawViews()" title="Native FreeCAD document (.FCStd) — A4 Landscape TechDraw page with Front/Top/Side projection group">⬇ TechDraw Drawing</button> -->
       <button class="btn btn-primary btn-sm" onclick="saveNow()">Save</button>
       {% if next_window %}
       <a href="{{ url_for('editor.edit', project_id=project.id, window_id=next_window.id) }}"
