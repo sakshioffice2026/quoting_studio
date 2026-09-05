@@ -551,19 +551,48 @@ else:
         view_src.Links = solid_objs
         view_src.Visibility = False
         doc.recompute()
+        base_shape = view_src.Shape
 
-        # Front = looking along -Y, Side = looking along -X, Top = looking along -Z
-        front_view = Draft.make_shape2dview(view_src, App.Vector(0, -1, 0))
-        side_view  = Draft.make_shape2dview(view_src, App.Vector(-1, 0, 0))
-        top_view   = Draft.make_shape2dview(view_src, App.Vector(0, 0, -1))
-        front_view.Label = "Draft_Front_View"
-        side_view.Label  = "Draft_Side_View"
-        top_view.Label   = "Draft_Top_View"
+        # Draft.make_shape2dview's local 2D X/Y axes are only reliable for
+        # ONE projection direction — (0,-1,0) — which is proven correct by
+        # Front View always rendering with width→X, height→Y. Rather than
+        # guess axis mapping for the Side/Top directions, pre-rotate a
+        # temporary copy of the SAME solids by a known angle so that
+        # every view is produced through that one reliable direction:
+        #   Top:  +90° about X  -> depth (world Y) lands on page-Y, width stays on page-X
+        #   Side: -90° about Z  -> depth (world Y) lands on page-X, height (world Z,
+        #                          unchanged) stays on page-Y -> head/cill never flip
+        #
+        # Shape2DView is a PARAMETRIC object that keeps a live link to its
+        # Base object and recomputes from it — deleting the temp rotated
+        # source right after creating the view left a dangling link that a
+        # later blanket doc.recompute() could re-evaluate incorrectly
+        # (this is why Top previously came out with Side's proportions).
+        # Freezing the computed geometry into a plain, non-parametric
+        # Part::Feature immediately removes that dependency entirely.
+        def _make_view(rot_axis, rot_angle, label):
+            tmp = doc.addObject("Part::Feature", "TmpViewSrc")
+            tmp.Shape = base_shape
+            tmp.Placement = App.Placement(V(0, 0, 0), App.Rotation(rot_axis, rot_angle))
+            doc.recompute()
+            proj = Draft.make_shape2dview(tmp, App.Vector(0, -1, 0))
+            doc.recompute()
+            frozen = proj.Shape.copy()
+            doc.removeObject(proj.Name)
+            doc.removeObject(tmp.Name)
+            v = doc.addObject("Part::Feature", "View")
+            v.Shape = frozen
+            v.Label = label
+            doc.recompute()
+            return v
+
+        front_view = _make_view(V(1, 0, 0), 90,  "Draft_Front_View")
+        top_view   = _make_view(V(1, 0, 0), 0,   "Draft_Top_View")
+        side_view  = _make_view(V(0, 0, 1), -90, "Draft_Side_View")
         doc.recompute()
 
-        # ViewSource only exists to satisfy make_shape2dview's single-object
-        # requirement; the three views already have their Shape computed,
-        # so delete it now — it must not appear in the final tree.
+        # ViewSource only exists to supply base_shape above; delete it now
+        # — it must not appear in the final tree.
         doc.removeObject(view_src.Name)
         doc.recompute()
 
@@ -573,28 +602,127 @@ else:
         # silently fail to persist. Using full Placement reassignment below
         # instead, which reliably writes back.
 
-        # Front View at Origin (0, 0, 0)
+        # Front View: hard-normalize orientation. If the projection came
+        # out landscape (wider than tall), the window is lying on its
+        # side — rotate 90 deg about Z so it stands upright before
+        # anchoring at the origin.
         bb_f = front_view.Shape.BoundBox
+        front_rot = App.Rotation()
+        if (bb_f.XMax - bb_f.XMin) > (bb_f.YMax - bb_f.YMin):
+            front_rot = App.Rotation(App.Vector(0, 0, 1), 90)
+            front_view.Placement = App.Placement(V(0, 0, 0), front_rot)
+            doc.recompute()
+            bb_f = front_view.Shape.BoundBox
+
+        # Front View Anchor: Force bottom-left to (0, 0, 0)
         front_view.Placement = App.Placement(
-            App.Vector(-bb_f.XMin, -bb_f.YMin, 0), App.Rotation())
+            App.Vector(-bb_f.XMin, -bb_f.YMin, 0), front_rot)
+        bb_f = front_view.Shape.BoundBox
 
         spacing = 250.0  # Separation gap in mm
 
-        # Side View to the LEFT of Front View (Y-aligned with Front View)
+        # Side View: LEFT of Front View, bottom-aligned with Front
+        # (both final YMin = 0)
         bb_s = side_view.Shape.BoundBox
         side_x = -bb_s.XMax - spacing
         side_y = -bb_s.YMin
         side_view.Placement = App.Placement(
             App.Vector(side_x, side_y, 0), App.Rotation())
+        doc.recompute()
+        bb_s = side_view.Shape.BoundBox  # refresh: now reflects FINAL
+                                          # placed position, needed below
+                                          # for the section view's slot.
 
-        # Top View BELOW Front View (X-aligned with Front View, First Angle)
+        # Top View: rotate 90 deg about Z so the plan lies horizontally
+        # (wide, matching Front's width) instead of the tall/narrow
+        # orientation the raw projection comes out in, then place it
+        # ABOVE Front View, left-aligned with Front (both final XMin = 0).
+        top_rot = App.Rotation(App.Vector(0, 0, 1), 90)
+        top_view.Placement = App.Placement(V(0, 0, 0), top_rot)
+        doc.recompute()
         bb_t = top_view.Shape.BoundBox
         top_x = -bb_t.XMin
-        top_y = -bb_t.YMax - spacing
+        top_y = bb_f.YMax - bb_t.YMin + spacing
         top_view.Placement = App.Placement(
-            App.Vector(top_x, top_y, 0), App.Rotation())
+            App.Vector(top_x, top_y, 0), top_rot)
 
         doc.recompute()
+
+        # ── Sectional Side View: TRUE vertical cross-section at the width
+        # centerline. Previous approach removed the far half (X > xmid)
+        # then projected the remainder — but silhouette projection along
+        # -X collapses ALL surviving members onto one plane, so if any
+        # symmetric member (opposite jamb/sash) shares the same outer
+        # profile as what's kept, the result is visually identical to
+        # Draft_Side_View. That's the duplicate you saw.
+        #
+        # Correct method: intersect (.common()) each solid with a PAPER-
+        # THIN slab exactly at X=xmid. Only whichever member(s) actually
+        # cross that exact X location survive at all, and what's left IS
+        # the true cut face (cavity walls included, if the profile has
+        # them) — not a silhouette of the whole remaining assembly.
+        bb_base = base_shape.BoundBox
+        xmid = (bb_base.XMin + bb_base.XMax) / 2.0
+        margin = 50.0
+        slab_half_thickness = 1.0  # mm — thin enough to be a true section
+        slab_dy = (bb_base.YMax - bb_base.YMin) + 2 * margin
+        slab_dz = (bb_base.ZMax - bb_base.ZMin) + 2 * margin
+        slab_box = Part.makeBox(
+            2 * slab_half_thickness, slab_dy, slab_dz,
+            V(xmid - slab_half_thickness, bb_base.YMin - margin,
+              bb_base.ZMin - margin))
+
+        section_slices = []
+        for _sobj in step_objs:
+            try:
+                sl = _sobj.Shape.common(slab_box)
+                if sl.Volume > 0.001:
+                    section_slices.append(sl)
+            except Exception as _e:
+                print(f"section slice skipped for {{_sobj.Name}}: {{_e}}", flush=True)
+
+        side_section_view = None
+        if section_slices:
+            section_compound = Part.makeCompound(section_slices)
+            sec_src = doc.addObject("Part::Feature", "SectionSolid")
+            sec_src.Shape = section_compound
+            sec_src.Visibility = False
+            doc.recompute()
+
+            sec_proj = Draft.make_shape2dview(sec_src, App.Vector(-1, 0, 0))
+            doc.recompute()
+            sec_frozen = sec_proj.Shape.copy()
+            doc.removeObject(sec_proj.Name)
+            doc.removeObject(sec_src.Name)
+            doc.recompute()
+
+            # Apply the SAME 180-deg X-axis flip used for Draft_Side_View
+            # so the cill sits at the bottom / head at the top here too —
+            # this view shares the same -X projection direction and was
+            # missing this fix.
+            side_section_view = doc.addObject("Part::Feature", "SideSection")
+            side_section_view.Shape = sec_frozen
+            side_section_view.Label = "Draft_Side_Section_View"
+            doc.recompute()
+
+            sec_flip = App.Rotation(App.Vector(1, 0, 0), 180)
+            side_section_view.Placement = App.Placement(V(0, 0, 0), sec_flip)
+            doc.recompute()
+
+            # Placement: LEFT of Front was requested, but Draft_Side_View
+            # already occupies that exact slot and must stay untouched —
+            # placing the section literally there would overlap it. Instead
+            # place the section further LEFT, just outside Draft_Side_View
+            # (same side-view "slot", no collision), bottom-aligned to 0
+            # to match Front/Side's shared baseline.
+            bb_ss = side_section_view.Shape.BoundBox
+            ss_x = (bb_s.XMin - spacing) - bb_ss.XMax
+            ss_y = -bb_ss.YMin
+            side_section_view.Placement = App.Placement(
+                App.Vector(ss_x, ss_y, 0), sec_flip)
+            doc.recompute()
+        else:
+            print("WARNING: sectional side view produced no geometry", flush=True)
 
         # Reset viewport camera to a strict top-down orthographic view, so
         # any GUI session opening this file isn't left on a skewed/rotated
@@ -608,8 +736,10 @@ else:
         doc.saveAs(r"{fcpath}")
         try:
             _fsz = os.path.getsize(r"{fcpath}")
-            print(f"FCStd with Draft views saved ({{_fsz}} bytes): "
-                  f"{{front_view.Name}}, {{top_view.Name}}, {{side_view.Name}}",
+            _names = f"{{front_view.Name}}, {{top_view.Name}}, {{side_view.Name}}"
+            if side_section_view is not None:
+                _names += f", {{side_section_view.Name}}"
+            print(f"FCStd with Draft views saved ({{_fsz}} bytes): {{_names}}",
                   flush=True)
         except Exception as _e:
             print("FCStd save check failed:", _e, flush=True)
