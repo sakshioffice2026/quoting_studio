@@ -396,7 +396,8 @@ body { overflow:hidden; }
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importJson').click()">Import JSON</button>
       <input type="file" id="importJson" accept=".json" style="display:none" onchange="importJSON(event)">
       <button class="btn btn-ghost btn-sm" onclick="exportDxf()">DXF</button>
-      <button class="btn btn-ghost btn-sm" id="btnDwg" onclick="exportDwg()" title="DWG export (requires ODA)">DWG</button>
+      <button class="btn btn-ghost btn-sm" id="btnDraftViews" onclick="exportDraftViews()" title="Native FreeCAD document (.FCStd) — 3D model + Front/Top/Side Draft views">⬇ FreeCAD (.FCStd)</button>
+      <button class="btn btn-ghost btn-sm" id="btnTechDrawViews" onclick="exportTechDrawViews()" title="Native FreeCAD document (.FCStd) — A4 Landscape TechDraw page with Front/Top/Side projection group">⬇ TechDraw Drawing</button>
       <button class="btn btn-primary btn-sm" onclick="saveNow()">Save</button>
       {% if next_window %}
       <a href="{{ url_for('editor.edit', project_id=project.id, window_id=next_window.id) }}"
@@ -1289,6 +1290,42 @@ async function flushSave(){
 }
 async function exportDxf(){ await flushSave(); window.location.href=`${API}/windows/${QS_WINDOW_ID}/engineering.dxf`; }
 async function exportDwg(){ await flushSave(); window.location.href=`${API}/windows/${QS_WINDOW_ID}/dwg`; }
+async function exportDraftViews(){
+  showToast('Generating FreeCAD document… (this may take a few seconds)','info');
+  try{
+    await flushSave();
+    const r=await fetch(`${API}/windows/${QS_WINDOW_ID}/draft-views.fcstd`);
+    if(!r.ok){
+      let msg='Export failed';
+      try{ const d=await r.json(); msg=d.error||msg; }catch(e){}
+      showToast('✗ '+msg,'error'); return;
+    }
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url;
+    a.download=`QS-W${QS_WINDOW_ID}.fcstd`; document.body.appendChild(a); a.click();
+    setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1500);
+    showToast('✓ FreeCAD document downloaded','ok');
+  }catch(e){ showToast('✗ '+e.message,'error'); }
+}
+async function exportTechDrawViews(){
+  showToast('Generating TechDraw drawing… (this may take a few seconds)','info');
+  try{
+    await flushSave();
+    const r=await fetch(`${API}/windows/${QS_WINDOW_ID}/techdraw-views.fcstd`);
+    if(!r.ok){
+      let msg='Export failed';
+      try{ const d=await r.json(); msg=d.error||msg; }catch(e){}
+      showToast('✗ '+msg,'error'); return;
+    }
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url;
+    a.download=`QS-W${QS_WINDOW_ID}-techdraw.fcstd`; document.body.appendChild(a); a.click();
+    setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1500);
+    showToast('✓ TechDraw document downloaded','ok');
+  }catch(e){ showToast('✗ '+e.message,'error'); }
+}
 function view3D(){ window.open(`/projects/${QS_PROJECT_ID}/windows/${QS_WINDOW_ID}/3d`,'_blank'); }
 function exportOrthographic(){
   document.getElementById('panel3d')?.classList.remove('show');
@@ -1496,14 +1533,6 @@ window.addEventListener('beforeunload', (e) => {
 
 window.addEventListener('load', () => {
   if(dc){ dc.fitView(); updateUndoButtons(); }
-  // probe ODA availability — disable DWG button if not installed
-  fetch(`${API}/oda-status`).then(r=>r.json()).then(d=>{
-    const btn=document.getElementById('btnDwg');
-    if(btn && !d.available){
-      btn.disabled=true; btn.title='DWG unavailable — ODA not installed on server';
-      btn.style.opacity='0.4'; btn.style.cursor='not-allowed';
-    }
-  }).catch(()=>{});
 });
 
 /* ── Profiles + JSON tab helpers (PWQ-3645) ── */

@@ -231,11 +231,14 @@ input[type=range] { width:100%; accent-color:var(--copper); }
            onclick="window.location.href=`${API}/windows/${QS_WINDOW_ID}/orthographic.dxf`;return false;">
           📐 Orthographic views (DXF)</a>
         <a class="dl-btn" href="#"
-           onclick="window.location.href=`${API}/windows/${QS_WINDOW_ID}/draft-views.dxf`;return false;">
-          📐 Draft 2D Views (DXF)</a>
+           onclick="window.location.href=`${API}/windows/${QS_WINDOW_ID}/draft-views.fcstd`;return false;">
+          ⬇ FreeCAD Document (.FCStd)</a>
         <div class="hint">Engineering DXF: elevation + plan strip + vertical section,
           fully dimensioned. Orthographic DXF: true front/top/side projections
-          with hidden lines. STEP requires the cadquery kernel on the server.</div>
+          with hidden lines. FreeCAD Document: native .FCStd containing the 3D
+          model plus Draft_Front_View / Draft_Top_View / Draft_Side_View —
+          open directly in FreeCAD to inspect the full tree.
+          STEP requires the cadquery kernel on the server.</div>
 
       </div><!-- /panel-scroll -->
     </div><!-- /m3d-panel -->

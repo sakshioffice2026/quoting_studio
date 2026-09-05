@@ -335,6 +335,89 @@ def export_orthographic_dxf(window_id):
 
 
 # ------------------------------------------------------------------ #
+#  GET  /api/v1/windows/<id>/draft-views.fcstd
+#  Native FreeCAD document containing the 3D solids plus Draft_Front_View,
+#  Draft_Top_View, Draft_Side_View (Draft.make_shape2dview) — same solids
+#  used for STEP export. No DXF/STEP is produced by this endpoint.
+# ------------------------------------------------------------------ #
+@api_v1_bp.route('/windows/<int:window_id>/draft-views.fcstd', methods=['GET'])
+@login_required
+def export_draft_views_fcstd(window_id):
+    try:
+        window = _own_window(window_id)
+        panes  = window.panes.all()
+        try:
+            assert_legacy_panes_match(window, panes)
+        except ValueError:
+            sync_legacy_panes(window, Pane, db)
+            db.session.commit()
+            panes = window.panes.all()
+
+        bad = _validate_or_400(window, panes)
+        if bad:
+            return bad
+
+        from ..services.model3d_freecad import generate_3d_freecad
+        data = generate_3d_freecad(window, panes, tenant_id=current_user.tenant_id,
+                                    fmt='fcstd')
+        if not data:
+            return jsonify({'error': 'Draft views generation failed'}), 500
+
+        fname = f'QS-{window_id}-{(window.label or "unit").replace(" ","_")[:30]}-DRAFT.fcstd'
+        current_app.logger.info('Draft views document: window=%d bytes=%d',
+                                window_id, len(data))
+        return Response(data, mimetype='application/octet-stream',
+                        headers={'Content-Disposition':
+                                 f'attachment; filename={fname}'})
+    except Exception as exc:
+        current_app.logger.exception('draft views drawing error window=%d: %s',
+                                     window_id, exc)
+        return jsonify({'error': 'Draft views generation failed'}), 500
+
+
+# ------------------------------------------------------------------ #
+#  GET  /api/v1/windows/<id>/techdraw-views.fcstd
+#  Native FreeCAD document containing a TechDraw::DrawPage (A4 Landscape)
+#  with a TechDraw::DrawProjGroup (Front/Top/Right) built from the same
+#  discrete, non-fused Part::Feature solids used for STEP export.
+#  No DXF/STEP is produced by this endpoint.
+# ------------------------------------------------------------------ #
+@api_v1_bp.route('/windows/<int:window_id>/techdraw-views.fcstd', methods=['GET'])
+@login_required
+def export_techdraw_views_fcstd(window_id):
+    try:
+        window = _own_window(window_id)
+        panes  = window.panes.all()
+        try:
+            assert_legacy_panes_match(window, panes)
+        except ValueError:
+            sync_legacy_panes(window, Pane, db)
+            db.session.commit()
+            panes = window.panes.all()
+
+        bad = _validate_or_400(window, panes)
+        if bad:
+            return bad
+
+        from ..services.model3d_freecad import generate_3d_freecad
+        data = generate_3d_freecad(window, panes, tenant_id=current_user.tenant_id,
+                                    fmt='techdraw')
+        if not data:
+            return jsonify({'error': 'TechDraw views generation failed'}), 500
+
+        fname = f'QS-{window_id}-{(window.label or "unit").replace(" ","_")[:30]}-TECHDRAW.fcstd'
+        current_app.logger.info('TechDraw views document: window=%d bytes=%d',
+                                window_id, len(data))
+        return Response(data, mimetype='application/octet-stream',
+                        headers={'Content-Disposition':
+                                 f'attachment; filename={fname}'})
+    except Exception as exc:
+        current_app.logger.exception('techdraw views drawing error window=%d: %s',
+                                     window_id, exc)
+        return jsonify({'error': 'TechDraw views generation failed'}), 500
+
+
+# ------------------------------------------------------------------ #
 @api_v1_bp.route('/windows/<int:window_id>/3d/<fmt>', methods=['GET'])
 @login_required
 def export_3d(window_id, fmt):

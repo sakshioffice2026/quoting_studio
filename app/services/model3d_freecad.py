@@ -70,11 +70,7 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
     if not freecad:
         raise RuntimeError('FreeCAD not found — tried all known paths')
 
-    fmt = (fmt or 'glb').lower().strip()
-    # Public API name for the native FreeCAD Draft projection export.
-    # Keep aliases so older callers cannot accidentally fall through to STL.
-    if fmt in ('draft_views', 'draft-dxf', 'draft_dxf', 'dxf'):
-        fmt = 'dxf_views'
+    fmt = fmt.lower()
     from .frame_assembly import build_members, resolve_profiles
     from .model3d_assembly import (_apply_window_overrides, _MIN_DEPTH,
                                    prepare_sections)
@@ -114,12 +110,13 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
         tmp_dir = tempfile.gettempdir()
     wid     = getattr(window, 'id', 0)
 
-    json_path   = os.path.join(tmp_dir, f'qs_asm_{wid}.json')
-    script_path = os.path.join(tmp_dir, f'qs_fc_{wid}.py')
-    step_path   = os.path.join(tmp_dir, f'qs_out_{wid}.step')
-    stl_path    = os.path.join(tmp_dir, f'qs_out_{wid}.stl')
-    glass_path  = os.path.join(tmp_dir, f'qs_glass_{wid}.stl')
-    views_path  = os.path.join(tmp_dir, f'qs_views_{wid}.dxf')
+    json_path     = os.path.join(tmp_dir, f'qs_asm_{wid}.json')
+    script_path   = os.path.join(tmp_dir, f'qs_fc_{wid}.py')
+    step_path     = os.path.join(tmp_dir, f'qs_out_{wid}.step')
+    stl_path      = os.path.join(tmp_dir, f'qs_out_{wid}.stl')
+    glass_path    = os.path.join(tmp_dir, f'qs_glass_{wid}.stl')
+    fcstd_path    = os.path.join(tmp_dir, f'qs_model_{wid}.FCStd')
+    techdraw_path = os.path.join(tmp_dir, f'qs_techdraw_{wid}.FCStd')
 
     try:
         with open(json_path, 'w', encoding='utf-8') as f:
@@ -127,7 +124,7 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
         with open(script_path, 'w', encoding='utf-8') as f:
             f.write("# -*- coding: utf-8 -*-\n")
             f.write(_build_script(json_path, step_path, stl_path, glass_path,
-                                   views_path, fmt))
+                                   fcstd_path, techdraw_path, fmt))
 
         env = os.environ.copy()
         env['LIBGL_ALWAYS_SOFTWARE'] = '1'
@@ -143,24 +140,20 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
                 f'FreeCAD script did not complete. '
                 f'stdout: {(r.stdout or "")[-2000:]}')
 
-        if fmt == 'dxf_views':
-            # IMPORTANT: Draft views have their own output file. Do NOT read
-            # stl_path here. This early return is what keeps dxf_views from
-            # falling through into the normal STL/GLB pipeline.
-            data = _read(views_path)
-            txt = data[:500000].decode('latin-1', errors='ignore').upper()
-            if 'ENTITIES' not in txt:
+        if fmt == 'fcstd':
+            data = _read(fcstd_path)
+            if len(data) < 200:
                 raise RuntimeError(
-                    'FreeCAD produced a Draft views DXF with no ENTITIES section '
-                    f'({len(data)} bytes). stdout tail:\n{(r.stdout or "")[-3000:]}')
-            # A valid DXF should contain at least one common drawing entity.
-            if not any(token in txt for token in (
-                    'LINE', 'LWPOLYLINE', 'POLYLINE', 'CIRCLE', 'ARC',
-                    'SPLINE', 'ELLIPSE')):
+                    'FreeCAD produced an empty .FCStd document '
+                    f'({len(data)} bytes). stdout tail:\n{(r.stdout or "")[-2000:]}')
+            return data
+
+        if fmt == 'techdraw':
+            data = _read(techdraw_path)
+            if len(data) < 200:
                 raise RuntimeError(
-                    'FreeCAD produced a Draft views DXF with no drawing entities '
-                    f'({len(data)} bytes). stdout tail:\n{(r.stdout or "")[-3000:]}')
-            logger.info('FreeCAD Draft 2D views DXF: %d bytes', len(data))
+                    'FreeCAD produced an empty TechDraw .FCStd document '
+                    f'({len(data)} bytes). stdout tail:\n{(r.stdout or "")[-2000:]}')
             return data
 
         if fmt == 'step':
@@ -200,7 +193,7 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
 
     finally:
         for p in (json_path, script_path, step_path, stl_path, glass_path,
-                  views_path):
+                  fcstd_path, techdraw_path):
             try:
                 if os.path.exists(p):
                     os.remove(p)
@@ -286,16 +279,18 @@ def _serialise(window, asm) -> dict:
 #  FREECAD SCRIPT
 # ══════════════════════════════════════════════════════════════════════
 def _build_script(json_path: str, step_path: str,
-                  stl_path: str, glass_path: str, views_path: str,
-                  fmt: str) -> str:
+                  stl_path: str, glass_path: str,
+                  fcstd_path: str, techdraw_path: str, fmt: str) -> str:
     jpath = json_path.replace('\\', '/')
     spath = step_path.replace('\\', '/')
     mpath = stl_path.replace('\\', '/')
     gpath = glass_path.replace('\\', '/')
-    vpath = views_path.replace('\\', '/')
-    need_step  = 'True' if fmt in ('step', 'glb') else 'False'
-    need_stl   = 'True' if fmt in ('stl',  'glb') else 'False'
-    need_views = 'True' if fmt == 'dxf_views' else 'False'
+    fcpath = fcstd_path.replace('\\', '/')
+    tdpath = techdraw_path.replace('\\', '/')
+    need_step      = 'True' if fmt in ('step', 'glb') else 'False'
+    need_stl       = 'True' if fmt in ('stl',  'glb') else 'False'
+    need_views     = 'True' if fmt in ('fcstd',)      else 'False'
+    need_techdraw  = 'True' if fmt in ('techdraw',)   else 'False'
 
     return f'''
 import FreeCAD as App, Part, MeshPart, json, os, math
@@ -499,14 +494,15 @@ else:
     total_vol = sum(s.Volume for _, s in all_solids)
     print(f"DIAG: {{len(all_solids)}} solids, total volume={{total_vol:.1f}}mm3",
           flush=True)
-    if {need_step}:
-        # FreeCAD 1.1.3: Part.export() on raw, un-added TopoShape objects
-        # silently writes a header-only STEP with no geometry. Shapes MUST
-        # be assigned to real Part::Feature document objects first.
-        # Each member/glass pane keeps its own labeled Part::Feature (not
-        # fused/compounded) so the STEP tree shows a discrete hierarchy
-        # (head, jamb_left, jamb_right, threshold, glass, ...).
-        step_objs = []
+    # FreeCAD 1.1.3: Part.export() on raw, un-added TopoShape objects
+    # silently writes a header-only STEP with no geometry. Shapes MUST
+    # be assigned to real Part::Feature document objects first.
+    # Each member/glass pane keeps its own labeled Part::Feature (not
+    # fused/compounded) so the STEP tree (and the TechDraw projection
+    # group, which also needs discrete, non-fused solids) shows a
+    # discrete hierarchy (head, jamb_left, jamb_right, threshold, glass, ...).
+    step_objs = []
+    if {need_step} or {need_techdraw}:
         seen_labels = {{}}
         for label, s in all_solids:
             n = seen_labels.get(label, 0)
@@ -517,6 +513,7 @@ else:
             feat.Shape = s
             step_objs.append(feat)
         doc.recompute()
+    if {need_step}:
         Part.export(step_objs, r"{spath}")
         try:
             _sz = os.path.getsize(r"{spath}")
@@ -537,81 +534,105 @@ else:
             gmesh.write(r"{gpath}")
             print("STL (glass) exported", flush=True)
 
-    # ── Native FreeCAD Draft 2D multi-view drawing → DXF ─────────────
-    # Reuses the SAME Part solids already built above. There is deliberately
-    # no STL/mesh step in this branch. Draft Shape2DView projects the actual
-    # FreeCAD B-Rep geometry onto the XY plane, then importDXF writes that
-    # 2D linework to the requested DXF file.
+    # ── Native Draft 2D views kept in the document tree (no DXF/STEP) ──
+    # Reuses the SAME solids already built above for the 3D geometry --
+    # the member/glass construction code above this block is untouched.
     if {need_views}:
         import Draft
-        import importDXF
 
-        source_shapes = [s for _, s in all_solids
-                         if s is not None and not s.isNull()]
-        if not source_shapes:
-            raise RuntimeError("no solids available for Draft 2D projection")
-
-        compound = Part.makeCompound(source_shapes)
+        compound = Part.makeCompound([s for _, s in all_solids])
         src = doc.addObject("Part::Feature", "AssemblyForViews")
-        src.Label = "QS Window Assembly"
         src.Shape = compound
         doc.recompute()
+        model_bb = compound.BoundBox
 
-        # FreeCAD Draft Shape2DView always creates its 2D result on the XY
-        # plane. With our model axes this gives: front X/Z, top X/Y, side Y/Z.
-        maker = getattr(Draft, "make_shape2dview", None)
-        if maker is None:
-            maker = getattr(Draft, "makeShape2DView", None)
-        if maker is None:
-            raise RuntimeError("FreeCAD Draft Shape2DView API is unavailable")
-
-        def _make_draft_view(label, direction):
-            view = maker(src, direction)
-            view.Label = label
-            try:
-                view.ProjectionMode = "Solid"
-            except Exception:
-                pass
-            try:
-                view.HiddenLines = True
-            except Exception:
-                pass
-            return view
-
-        # Looking directions are chosen only to establish the projection;
-        # Draft maps the resulting projection onto the XY drawing plane.
-        front_view = _make_draft_view("FRONT", App.Vector(0, -1, 0))
-        top_view   = _make_draft_view("TOP",   App.Vector(0, 0, -1))
-        side_view  = _make_draft_view("SIDE",  App.Vector(-1, 0, 0))
+        # Front = looking along -Y, Top = looking along -Z, Side = looking along -X
+        front_view = Draft.make_shape2dview(src, App.Vector(0, -1, 0))
+        top_view   = Draft.make_shape2dview(src, App.Vector(0, 0, -1))
+        side_view  = Draft.make_shape2dview(src, App.Vector(-1, 0, 0))
+        front_view.Label = "Draft_Front_View"
+        top_view.Label   = "Draft_Top_View"
+        side_view.Label  = "Draft_Side_View"
         doc.recompute()
 
         def _wh0(v):
             bb = v.Shape.BoundBox
-            return (max(bb.XLength, 1.0), max(bb.YLength, 1.0),
-                    bb.XMin, bb.YMin)
+            return bb.XLength, bb.YLength, bb.XMin, bb.YMin
 
         fw, fh, fx0, fy0 = _wh0(front_view)
         tw, th, tx0, ty0 = _wh0(top_view)
         sw, sh, sx0, sy0 = _wh0(side_view)
-        GAP = max(100.0, W * 0.05)
+        GAP = 100.0  # mm between views, and between views and the 3D model
 
-        # Non-overlapping sheet layout: FRONT lower-left, SIDE lower-right,
-        # TOP above FRONT. Positions are derived from actual projected bounds.
-        front_view.Placement.Base = App.Vector(-fx0, -fy0, 0)
-        side_view.Placement.Base  = App.Vector(-sx0 + fw + GAP, -sy0, 0)
-        top_view.Placement.Base    = App.Vector(-tx0, -ty0 + max(fh, sh) + GAP, 0)
+        # Row sits below the 3D model (lower Z), views placed side-by-side
+        # along X, starting under the model's own XY footprint.
+        row_z = model_bb.ZMin - GAP - max(fh, th, sh)
+        row_y = model_bb.YMin
+        cursor_x = model_bb.XMin
+
+        front_view.Placement = App.Placement(
+            App.Vector(cursor_x - fx0, row_y - fy0, row_z), App.Rotation())
+        cursor_x += fw + GAP
+
+        top_view.Placement = App.Placement(
+            App.Vector(cursor_x - tx0, row_y - ty0, row_z), App.Rotation())
+        cursor_x += tw + GAP
+
+        side_view.Placement = App.Placement(
+            App.Vector(cursor_x - sx0, row_y - sy0, row_z), App.Rotation())
         doc.recompute()
 
-        # Export the Draft projection objects themselves, not the source 3D
-        # solid. This is the native FreeCAD Draft DXF path.
-        views = [front_view, top_view, side_view]
-        importDXF.export(views, r"{vpath}")
+        doc.saveAs(r"{fcpath}")
+        try:
+            _fsz = os.path.getsize(r"{fcpath}")
+            print(f"FCStd with Draft views saved ({{_fsz}} bytes): "
+                  f"{{front_view.Name}}, {{top_view.Name}}, {{side_view.Name}}",
+                  flush=True)
+        except Exception as _e:
+            print("FCStd save check failed:", _e, flush=True)
 
-        if not os.path.exists(r"{vpath}") or os.path.getsize(r"{vpath}") < 100:
-            raise RuntimeError("FreeCAD Draft DXF export produced no usable file")
+    # ── TechDraw multi-view drawing page (Front/Top/Side) — no DXF/STEP ─
+    # Uses the SAME individual, non-fused Part::Feature solids built
+    # above (step_objs) — the member/glass construction code above this
+    # block is untouched.
+    if {need_techdraw}:
+        import TechDraw, glob
 
-        _vsz = os.path.getsize(r"{vpath}")
-        print(f"DRAFT_VIEWS_DXF_EXPORTED ({{_vsz}} bytes)", flush=True)
+        tmpl_dir = os.path.join(App.getResourceDir(), 'Mod', 'TechDraw', 'Templates')
+        candidates = glob.glob(os.path.join(tmpl_dir, 'A4_Landscape*.svg'))
+        if not candidates:
+            candidates = glob.glob(os.path.join(tmpl_dir, '*Landscape*.svg'))
+        if not candidates:
+            raise RuntimeError(f"No A4 Landscape TechDraw template found in {{tmpl_dir}}")
+        template_path = candidates[0]
+
+        page = doc.addObject('TechDraw::DrawPage', 'Page')
+        template = doc.addObject('TechDraw::DrawSVGTemplate', 'Template')
+        template.Template = template_path
+        page.Template = template
+
+        dpg = doc.addObject('TechDraw::DrawProjGroup', 'ProjGroup')
+        page.addView(dpg)
+        dpg.Source = step_objs
+        doc.recompute()
+
+        # Front is normally auto-added as the anchor when Source is first
+        # set; explicitly request all three so the drawing is complete
+        # even if the anchor wasn't created automatically.
+        for _view in ('Front', 'Top', 'Right'):
+            try:
+                dpg.addProjection(_view)
+            except Exception as _e:
+                print(f"addProjection {{_view}} skipped: {{_e}}", flush=True)
+        doc.recompute()
+
+        doc.saveAs(r"{tdpath}")
+        try:
+            _tsz = os.path.getsize(r"{tdpath}")
+            print(f"TechDraw FCStd saved ({{_tsz}} bytes): page={{page.Name}} "
+                  f"projgroup={{dpg.Name}}", flush=True)
+        except Exception as _e:
+            print("TechDraw FCStd save check failed:", _e, flush=True)
 
 App.closeDocument(doc.Name)
 print("FREECAD_DONE", flush=True)
