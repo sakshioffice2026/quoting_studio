@@ -654,8 +654,22 @@ else:
         # then feed through the IDENTICAL pipeline as _make_view:
         #   Part::Feature  →  Placement(-90° Z)  →  make_shape2dview((0,-1,0))
         # This is the only projection path that reliably produces edges.
-        bb_base = base_shape.BoundBox
-        xmid   = (bb_base.XMin + bb_base.XMax) / 2.0
+        bb_base  = base_shape.BoundBox
+        geo_xmid = (bb_base.XMin + bb_base.XMax) / 2.0
+
+        # Target the cut at a real vertical member (jamb/mullion/stile)
+        # nearest the geometric midpoint instead of an arbitrary geometric
+        # split, which on asymmetric layouts can land in empty glass and
+        # produce a section with no member profile. Falls back to the
+        # geometric midpoint when no vertical member exists (e.g. a
+        # single-pane picture window).
+        vert_centers = [
+            (mm["x1"] + mm["x2"]) / 2.0 - cx
+            for mm in data["members"] if mm.get("orientation") == "vertical"
+        ]
+        xmid = (min(vert_centers, key=lambda v: abs(v - geo_xmid))
+                if vert_centers else geo_xmid)
+
         margin = 200.0
         # Cutter removes the RIGHT half (X > xmid)
         half_space = Part.makeBox(
@@ -664,34 +678,38 @@ else:
             (bb_base.ZMax - bb_base.ZMin) + 2 * margin,
             V(xmid, bb_base.YMin - margin, bb_base.ZMin - margin))
 
-        print(f"Section: xmid={{xmid:.1f}} bb=[{{bb_base.XMin:.1f}},{{bb_base.XMax:.1f}}]x[{{bb_base.YMin:.1f}},{{bb_base.YMax:.1f}}]x[{{bb_base.ZMin:.1f}},{{bb_base.ZMax:.1f}}]", flush=True)
+        print(f"Section: xmid={{xmid:.1f}} (geo_mid={{geo_xmid:.1f}}) "
+              f"bb=[{{bb_base.XMin:.1f}},{{bb_base.XMax:.1f}}]x"
+              f"[{{bb_base.YMin:.1f}},{{bb_base.YMax:.1f}}]x"
+              f"[{{bb_base.ZMin:.1f}},{{bb_base.ZMax:.1f}}]", flush=True)
 
+        HATCH_SPACING = 3.0   # mm, ISO 128 cross-hatch baseline
         side_section_view = None
+        section_hatch = None
         try:
             # Cut the world-space compound — produces a TopoShape with left-half solids
             sec_shape = base_shape.cut(half_space)
             print(f"Section cut: valid={{sec_shape.isValid()}} solids={{len(sec_shape.Solids)}} vol={{sec_shape.Volume:.1f}}", flush=True)
 
             if sec_shape.isValid() and len(sec_shape.Solids) > 0:
-                # Identical to _make_view: assign to Part::Feature, set rotation as Placement
-                sec_tmp = doc.addObject("Part::Feature", "SecHalfRot")
-                sec_tmp.Shape = sec_shape
-                sec_tmp.Placement = App.Placement(
-                    V(0, 0, 0), App.Rotation(V(0, 0, 1), -90))
-                sec_tmp.Visibility = False
-                doc.recompute()
+                # Draft.make_shape2dview (ProjectionMode=1) unreliably
+                # returns 0 edges on this multi-solid cut compound in
+                # FreeCAD 1.1.3. Build the wireframe directly from
+                # sec_shape.Edges instead, using the SAME (world Y, world Z)
+                # -> (page X, page Y) mapping as the -90 deg Z rotation +
+                # (0,-1,0) projection this replaces (and that the hatch
+                # code below already uses) — geometry stays synchronized.
+                wire_edges = []
+                for e in sec_shape.Edges:
+                    try:
+                        pts3d = e.discretize(Deflection=0.2)
+                        pts2d = [V(p.y, p.z, 0.0) for p in pts3d]
+                        if len(pts2d) >= 2:
+                            wire_edges.append(Part.makePolygon(pts2d))
+                    except Exception:
+                        continue
 
-                sec_proj = Draft.make_shape2dview(sec_tmp, App.Vector(0, -1, 0))
-                try:
-                    sec_proj.ProjectionMode = 1   # Individual Faces — shows cavity wires
-                except Exception:
-                    pass
-                doc.recompute()
-
-                sec_frozen = sec_proj.Shape.copy()
-                doc.removeObject(sec_proj.Name)
-                doc.removeObject(sec_tmp.Name)
-                doc.recompute()
+                sec_frozen = Part.Compound(wire_edges) if wire_edges else None
 
                 n_edges = len(sec_frozen.Edges) if sec_frozen else 0
                 print(f"Section projection: {{n_edges}} edges", flush=True)
@@ -709,12 +727,236 @@ else:
                         App.Vector(ss_x, ss_y, 0), App.Rotation())
                     doc.recompute()
                     print(f"Draft_Side_Section_View: x={{ss_x:.1f}} y={{ss_y:.1f}} edges={{n_edges}}", flush=True)
+
+                    # ── Section hatching ─────────────────────────────────
+                    # Find the faces actually exposed by the cut (planar,
+                    # normal along world X, lying at X == xmid) — the real
+                    # sectioned material, not background/silhouette edges.
+                    # Rebuild each as a 2D face in the SAME (height, depth)
+                    # page frame the projection above uses (world Y->page
+                    # X, world Z->page Y — identical to the -90 deg Z
+                    # rotation + (0,-1,0) projection pipeline), then fill
+                    # with a 45 deg cross-hatch at HATCH_SPACING pitch.
+                    try:
+                        TOL = 0.5
+                        hatch_edges = []
+                        for f in sec_shape.Faces:
+                            try:
+                                u0, u1, v0, v1 = f.ParameterRange
+                                n = f.normalAt((u0 + u1) / 2.0, (v0 + v1) / 2.0)
+                                if abs(abs(n.x) - 1.0) > 0.05:
+                                    continue
+                                if abs(f.CenterOfMass.x - xmid) > TOL:
+                                    continue
+                            except Exception:
+                                continue
+
+                            def _pg(pt):
+                                return (pt.y, pt.z)
+
+                            def _wire_pts(w):
+                                pts = []
+                                for e in w.OrderedEdges:
+                                    for p in e.discretize(Deflection=0.2)[:-1]:
+                                        pts.append(_pg(p))
+                                return pts
+
+                            def _mk_2d_face(pts):
+                                verts = [V(px, py, 0.0) for px, py in pts]
+                                verts.append(verts[0])
+                                return Part.Face(Part.makePolygon(verts))
+
+                            outer_pts = _wire_pts(f.OuterWire)
+                            hole_pts  = [_wire_pts(w) for w in f.Wires
+                                         if not w.isSame(f.OuterWire)]
+                            if len(outer_pts) < 3:
+                                continue
+                            try:
+                                hf = _mk_2d_face(outer_pts)
+                                for hp in hole_pts:
+                                    if len(hp) >= 3:
+                                        hf = hf.cut(_mk_2d_face(hp))
+                            except Exception:
+                                continue
+
+                            bb2  = hf.BoundBox
+                            diag = ((bb2.XMax - bb2.XMin) ** 2
+                                    + (bb2.YMax - bb2.YMin) ** 2) ** 0.5 + 10.0
+                            step = HATCH_SPACING * (2 ** 0.5)
+                            n_lines = int(diag / step) + 2
+                            cx0, cy0 = bb2.XMin - 5.0, bb2.YMin - 5.0
+                            for i in range(-n_lines, n_lines):
+                                ox = cx0 + i * step
+                                p0 = V(ox - diag, cy0 - diag, 0.0)
+                                p1 = V(ox + diag, cy0 + diag, 0.0)
+                                try:
+                                    line = Part.LineSegment(p0, p1).toShape()
+                                    hatch_edges.extend(line.common(hf).Edges)
+                                except Exception:
+                                    continue
+
+                        if hatch_edges:
+                            section_hatch = doc.addObject("Part::Feature", "SectionHatch")
+                            section_hatch.Shape = Part.Compound(hatch_edges)
+                            section_hatch.Label = "Draft_Side_Section_Hatch"
+                            section_hatch.Placement = App.Placement(
+                                App.Vector(ss_x, ss_y, 0), App.Rotation())
+                            doc.recompute()
+                            print(f"Section hatch: {{len(hatch_edges)}} lines", flush=True)
+                        else:
+                            print("WARNING: section hatch produced no lines", flush=True)
+                    except Exception as _hatch_e:
+                        print(f"WARNING: section hatch failed: {{_hatch_e}}", flush=True)
                 else:
                     print("WARNING: section projection returned no edges", flush=True)
             else:
                 print("WARNING: section cut returned no solids", flush=True)
         except Exception as _sec_e:
             print(f"WARNING: section view failed: {{_sec_e}}", flush=True)
+
+        # ── Sectional Top View (horizontal cut) ─────────────────────────
+        # Same technique as the vertical section above, but cutting along
+        # world Y (height) through the nearest horizontal member (head/
+        # cill/transom) to the vertical midpoint, viewed in Top-view
+        # orientation. Placed BELOW Front View (spacing gap) so none of
+        # the existing Front/Top/Side/SideSection positions are touched.
+        top_section_view = None
+        top_section_hatch = None
+        try:
+            geo_ymid = (bb_base.YMin + bb_base.YMax) / 2.0
+            horiz_centers = [
+                (mm["y1"] + mm["y2"]) / 2.0 - cy
+                for mm in data["members"] if mm.get("orientation") == "horizontal"
+            ]
+            ymid = (min(horiz_centers, key=lambda v: abs(v - geo_ymid))
+                    if horiz_centers else geo_ymid)
+
+            # Cutter removes the TOP half (Y > ymid)
+            half_space_t = Part.makeBox(
+                (bb_base.XMax - bb_base.XMin) + 2 * margin,
+                (bb_base.YMax - ymid) + margin,
+                (bb_base.ZMax - bb_base.ZMin) + 2 * margin,
+                V(bb_base.XMin - margin, ymid, bb_base.ZMin - margin))
+
+            print(f"Top section: ymid={{ymid:.1f}} (geo_mid={{geo_ymid:.1f}})", flush=True)
+
+            sec_shape_t = base_shape.cut(half_space_t)
+            print(f"Top section cut: valid={{sec_shape_t.isValid()}} "
+                  f"solids={{len(sec_shape_t.Solids)}} vol={{sec_shape_t.Volume:.1f}}",
+                  flush=True)
+
+            if sec_shape_t.isValid() and len(sec_shape_t.Solids) > 0:
+                # Page mapping: raw top-down projection keeps world X
+                # (width) on page-X and world Z (depth) on page-Y, giving
+                # the correct WIDE/short orientation matching Top View
+                # (width is large, depth is small) — no extra rotation.
+                wire_edges_t = []
+                for e in sec_shape_t.Edges:
+                    try:
+                        pts3d = e.discretize(Deflection=0.2)
+                        pts2d = [V(p.x, p.z, 0.0) for p in pts3d]
+                        if len(pts2d) >= 2:
+                            wire_edges_t.append(Part.makePolygon(pts2d))
+                    except Exception:
+                        continue
+
+                ts_frozen = Part.Compound(wire_edges_t) if wire_edges_t else None
+                n_edges_t = len(ts_frozen.Edges) if ts_frozen else 0
+                print(f"Top section projection: {{n_edges_t}} edges", flush=True)
+
+                if n_edges_t > 0:
+                    top_section_view = doc.addObject("Part::Feature", "TopSection")
+                    top_section_view.Shape = ts_frozen
+                    top_section_view.Label = "Draft_Top_Section_View"
+                    doc.recompute()
+
+                    bb_ts = top_section_view.Shape.BoundBox
+                    ts_h  = bb_ts.YMax - bb_ts.YMin
+                    ts_x  = -bb_ts.XMin
+                    ts_y  = -spacing - ts_h
+                    top_section_view.Placement = App.Placement(
+                        App.Vector(ts_x, ts_y, 0), App.Rotation())
+                    doc.recompute()
+                    print(f"Draft_Top_Section_View: x={{ts_x:.1f}} y={{ts_y:.1f}} "
+                          f"edges={{n_edges_t}}", flush=True)
+
+                    # ── Top section hatching (same technique as side) ───
+                    try:
+                        TOL = 0.5
+                        hatch_edges_t = []
+                        for f in sec_shape_t.Faces:
+                            try:
+                                u0, u1, v0, v1 = f.ParameterRange
+                                n = f.normalAt((u0 + u1) / 2.0, (v0 + v1) / 2.0)
+                                if abs(abs(n.y) - 1.0) > 0.05:
+                                    continue
+                                if abs(f.CenterOfMass.y - ymid) > TOL:
+                                    continue
+                            except Exception:
+                                continue
+
+                            def _pg_t(pt):
+                                return (pt.x, pt.z)
+
+                            def _wire_pts_t(w):
+                                pts = []
+                                for e in w.OrderedEdges:
+                                    for p in e.discretize(Deflection=0.2)[:-1]:
+                                        pts.append(_pg_t(p))
+                                return pts
+
+                            def _mk_2d_face_t(pts):
+                                verts = [V(px, py, 0.0) for px, py in pts]
+                                verts.append(verts[0])
+                                return Part.Face(Part.makePolygon(verts))
+
+                            outer_pts = _wire_pts_t(f.OuterWire)
+                            hole_pts  = [_wire_pts_t(w) for w in f.Wires
+                                         if not w.isSame(f.OuterWire)]
+                            if len(outer_pts) < 3:
+                                continue
+                            try:
+                                hf = _mk_2d_face_t(outer_pts)
+                                for hp in hole_pts:
+                                    if len(hp) >= 3:
+                                        hf = hf.cut(_mk_2d_face_t(hp))
+                            except Exception:
+                                continue
+
+                            bb2  = hf.BoundBox
+                            diag = ((bb2.XMax - bb2.XMin) ** 2
+                                    + (bb2.YMax - bb2.YMin) ** 2) ** 0.5 + 10.0
+                            step = HATCH_SPACING * (2 ** 0.5)
+                            n_lines = int(diag / step) + 2
+                            cx0, cy0 = bb2.XMin - 5.0, bb2.YMin - 5.0
+                            for i in range(-n_lines, n_lines):
+                                ox = cx0 + i * step
+                                p0 = V(ox - diag, cy0 - diag, 0.0)
+                                p1 = V(ox + diag, cy0 + diag, 0.0)
+                                try:
+                                    line = Part.LineSegment(p0, p1).toShape()
+                                    hatch_edges_t.extend(line.common(hf).Edges)
+                                except Exception:
+                                    continue
+
+                        if hatch_edges_t:
+                            top_section_hatch = doc.addObject("Part::Feature", "TopSectionHatch")
+                            top_section_hatch.Shape = Part.Compound(hatch_edges_t)
+                            top_section_hatch.Label = "Draft_Top_Section_Hatch"
+                            top_section_hatch.Placement = App.Placement(
+                                App.Vector(ts_x, ts_y, 0), App.Rotation())
+                            doc.recompute()
+                            print(f"Top section hatch: {{len(hatch_edges_t)}} lines", flush=True)
+                        else:
+                            print("WARNING: top section hatch produced no lines", flush=True)
+                    except Exception as _hatch_te:
+                        print(f"WARNING: top section hatch failed: {{_hatch_te}}", flush=True)
+                else:
+                    print("WARNING: top section projection returned no edges", flush=True)
+            else:
+                print("WARNING: top section cut returned no solids", flush=True)
+        except Exception as _sec_te:
+            print(f"WARNING: top section view failed: {{_sec_te}}", flush=True)
 
         # Reset viewport camera to a strict top-down orthographic view, so
         # any GUI session opening this file isn't left on a skewed/rotated
@@ -731,6 +973,12 @@ else:
             _names = f"{{front_view.Name}}, {{top_view.Name}}, {{side_view.Name}}"
             if side_section_view is not None:
                 _names += f", {{side_section_view.Name}}"
+            if section_hatch is not None:
+                _names += f", {{section_hatch.Name}}"
+            if top_section_view is not None:
+                _names += f", {{top_section_view.Name}}"
+            if top_section_hatch is not None:
+                _names += f", {{top_section_hatch.Name}}"
             print(f"FCStd with Draft views saved ({{_fsz}} bytes): {{_names}}",
                   flush=True)
         except Exception as _e:
