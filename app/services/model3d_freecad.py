@@ -70,7 +70,11 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
     if not freecad:
         raise RuntimeError('FreeCAD not found — tried all known paths')
 
-    fmt = fmt.lower()
+    fmt = (fmt or 'glb').lower().strip()
+    # Public API name for the native FreeCAD Draft projection export.
+    # Keep aliases so older callers cannot accidentally fall through to STL.
+    if fmt in ('draft_views', 'draft-dxf', 'draft_dxf', 'dxf'):
+        fmt = 'dxf_views'
     from .frame_assembly import build_members, resolve_profiles
     from .model3d_assembly import (_apply_window_overrides, _MIN_DEPTH,
                                    prepare_sections)
@@ -115,13 +119,15 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
     step_path   = os.path.join(tmp_dir, f'qs_out_{wid}.step')
     stl_path    = os.path.join(tmp_dir, f'qs_out_{wid}.stl')
     glass_path  = os.path.join(tmp_dir, f'qs_glass_{wid}.stl')
+    views_path  = os.path.join(tmp_dir, f'qs_views_{wid}.dxf')
 
     try:
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(asm_data, f)
         with open(script_path, 'w', encoding='utf-8') as f:
             f.write("# -*- coding: utf-8 -*-\n")
-            f.write(_build_script(json_path, step_path, stl_path, glass_path, fmt))
+            f.write(_build_script(json_path, step_path, stl_path, glass_path,
+                                   views_path, fmt))
 
         env = os.environ.copy()
         env['LIBGL_ALWAYS_SOFTWARE'] = '1'
@@ -136,6 +142,26 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
             raise RuntimeError(
                 f'FreeCAD script did not complete. '
                 f'stdout: {(r.stdout or "")[-2000:]}')
+
+        if fmt == 'dxf_views':
+            # IMPORTANT: Draft views have their own output file. Do NOT read
+            # stl_path here. This early return is what keeps dxf_views from
+            # falling through into the normal STL/GLB pipeline.
+            data = _read(views_path)
+            txt = data[:500000].decode('latin-1', errors='ignore').upper()
+            if 'ENTITIES' not in txt:
+                raise RuntimeError(
+                    'FreeCAD produced a Draft views DXF with no ENTITIES section '
+                    f'({len(data)} bytes). stdout tail:\n{(r.stdout or "")[-3000:]}')
+            # A valid DXF should contain at least one common drawing entity.
+            if not any(token in txt for token in (
+                    'LINE', 'LWPOLYLINE', 'POLYLINE', 'CIRCLE', 'ARC',
+                    'SPLINE', 'ELLIPSE')):
+                raise RuntimeError(
+                    'FreeCAD produced a Draft views DXF with no drawing entities '
+                    f'({len(data)} bytes). stdout tail:\n{(r.stdout or "")[-3000:]}')
+            logger.info('FreeCAD Draft 2D views DXF: %d bytes', len(data))
+            return data
 
         if fmt == 'step':
             data = _read(step_path)
@@ -173,7 +199,8 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
         return _stl_to_glb(stl_data, window, glass_data)
 
     finally:
-        for p in (json_path, script_path, step_path, stl_path, glass_path):
+        for p in (json_path, script_path, step_path, stl_path, glass_path,
+                  views_path):
             try:
                 if os.path.exists(p):
                     os.remove(p)
@@ -259,13 +286,16 @@ def _serialise(window, asm) -> dict:
 #  FREECAD SCRIPT
 # ══════════════════════════════════════════════════════════════════════
 def _build_script(json_path: str, step_path: str,
-                  stl_path: str, glass_path: str, fmt: str) -> str:
+                  stl_path: str, glass_path: str, views_path: str,
+                  fmt: str) -> str:
     jpath = json_path.replace('\\', '/')
     spath = step_path.replace('\\', '/')
     mpath = stl_path.replace('\\', '/')
     gpath = glass_path.replace('\\', '/')
-    need_step = 'True' if fmt in ('step', 'glb') else 'False'
-    need_stl  = 'True' if fmt in ('stl',  'glb') else 'False'
+    vpath = views_path.replace('\\', '/')
+    need_step  = 'True' if fmt in ('step', 'glb') else 'False'
+    need_stl   = 'True' if fmt in ('stl',  'glb') else 'False'
+    need_views = 'True' if fmt == 'dxf_views' else 'False'
 
     return f'''
 import FreeCAD as App, Part, MeshPart, json, os, math
@@ -506,6 +536,82 @@ else:
                 LinearDeflection=0.5, AngularDeflection=0.3, Relative=False)
             gmesh.write(r"{gpath}")
             print("STL (glass) exported", flush=True)
+
+    # ── Native FreeCAD Draft 2D multi-view drawing → DXF ─────────────
+    # Reuses the SAME Part solids already built above. There is deliberately
+    # no STL/mesh step in this branch. Draft Shape2DView projects the actual
+    # FreeCAD B-Rep geometry onto the XY plane, then importDXF writes that
+    # 2D linework to the requested DXF file.
+    if {need_views}:
+        import Draft
+        import importDXF
+
+        source_shapes = [s for _, s in all_solids
+                         if s is not None and not s.isNull()]
+        if not source_shapes:
+            raise RuntimeError("no solids available for Draft 2D projection")
+
+        compound = Part.makeCompound(source_shapes)
+        src = doc.addObject("Part::Feature", "AssemblyForViews")
+        src.Label = "QS Window Assembly"
+        src.Shape = compound
+        doc.recompute()
+
+        # FreeCAD Draft Shape2DView always creates its 2D result on the XY
+        # plane. With our model axes this gives: front X/Z, top X/Y, side Y/Z.
+        maker = getattr(Draft, "make_shape2dview", None)
+        if maker is None:
+            maker = getattr(Draft, "makeShape2DView", None)
+        if maker is None:
+            raise RuntimeError("FreeCAD Draft Shape2DView API is unavailable")
+
+        def _make_draft_view(label, direction):
+            view = maker(src, direction)
+            view.Label = label
+            try:
+                view.ProjectionMode = "Solid"
+            except Exception:
+                pass
+            try:
+                view.HiddenLines = True
+            except Exception:
+                pass
+            return view
+
+        # Looking directions are chosen only to establish the projection;
+        # Draft maps the resulting projection onto the XY drawing plane.
+        front_view = _make_draft_view("FRONT", App.Vector(0, -1, 0))
+        top_view   = _make_draft_view("TOP",   App.Vector(0, 0, -1))
+        side_view  = _make_draft_view("SIDE",  App.Vector(-1, 0, 0))
+        doc.recompute()
+
+        def _wh0(v):
+            bb = v.Shape.BoundBox
+            return (max(bb.XLength, 1.0), max(bb.YLength, 1.0),
+                    bb.XMin, bb.YMin)
+
+        fw, fh, fx0, fy0 = _wh0(front_view)
+        tw, th, tx0, ty0 = _wh0(top_view)
+        sw, sh, sx0, sy0 = _wh0(side_view)
+        GAP = max(100.0, W * 0.05)
+
+        # Non-overlapping sheet layout: FRONT lower-left, SIDE lower-right,
+        # TOP above FRONT. Positions are derived from actual projected bounds.
+        front_view.Placement.Base = App.Vector(-fx0, -fy0, 0)
+        side_view.Placement.Base  = App.Vector(-sx0 + fw + GAP, -sy0, 0)
+        top_view.Placement.Base    = App.Vector(-tx0, -ty0 + max(fh, sh) + GAP, 0)
+        doc.recompute()
+
+        # Export the Draft projection objects themselves, not the source 3D
+        # solid. This is the native FreeCAD Draft DXF path.
+        views = [front_view, top_view, side_view]
+        importDXF.export(views, r"{vpath}")
+
+        if not os.path.exists(r"{vpath}") or os.path.getsize(r"{vpath}") < 100:
+            raise RuntimeError("FreeCAD Draft DXF export produced no usable file")
+
+        _vsz = os.path.getsize(r"{vpath}")
+        print(f"DRAFT_VIEWS_DXF_EXPORTED ({{_vsz}} bytes)", flush=True)
 
 App.closeDocument(doc.Name)
 print("FREECAD_DONE", flush=True)
