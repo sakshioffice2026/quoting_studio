@@ -648,81 +648,73 @@ else:
 
         doc.recompute()
 
-        # ── Sectional Side View: TRUE vertical cross-section at the width
-        # centerline. Previous approach removed the far half (X > xmid)
-        # then projected the remainder — but silhouette projection along
-        # -X collapses ALL surviving members onto one plane, so if any
-        # symmetric member (opposite jamb/sash) shares the same outer
-        # profile as what's kept, the result is visually identical to
-        # Draft_Side_View. That's the duplicate you saw.
-        #
-        # Correct method: intersect (.common()) each solid with a PAPER-
-        # THIN slab exactly at X=xmid. Only whichever member(s) actually
-        # cross that exact X location survive at all, and what's left IS
-        # the true cut face (cavity walls included, if the profile has
-        # them) — not a silhouette of the whole remaining assembly.
+        # ── Sectional Side View ─────────────────────────────────────────
+        # Use base_shape (already world-space compound) directly.
+        # Cut it with a half-space box to keep only X <= xmid,
+        # then feed through the IDENTICAL pipeline as _make_view:
+        #   Part::Feature  →  Placement(-90° Z)  →  make_shape2dview((0,-1,0))
+        # This is the only projection path that reliably produces edges.
         bb_base = base_shape.BoundBox
-        xmid = (bb_base.XMin + bb_base.XMax) / 2.0
-        margin = 50.0
-        slab_half_thickness = 1.0  # mm — thin enough to be a true section
-        slab_dy = (bb_base.YMax - bb_base.YMin) + 2 * margin
-        slab_dz = (bb_base.ZMax - bb_base.ZMin) + 2 * margin
-        slab_box = Part.makeBox(
-            2 * slab_half_thickness, slab_dy, slab_dz,
-            V(xmid - slab_half_thickness, bb_base.YMin - margin,
-              bb_base.ZMin - margin))
+        xmid   = (bb_base.XMin + bb_base.XMax) / 2.0
+        margin = 200.0
+        # Cutter removes the RIGHT half (X > xmid)
+        half_space = Part.makeBox(
+            (bb_base.XMax - xmid) + margin,
+            (bb_base.YMax - bb_base.YMin) + 2 * margin,
+            (bb_base.ZMax - bb_base.ZMin) + 2 * margin,
+            V(xmid, bb_base.YMin - margin, bb_base.ZMin - margin))
 
-        section_slices = []
-        for _sobj in step_objs:
-            try:
-                sl = _sobj.Shape.common(slab_box)
-                if sl.Volume > 0.001:
-                    section_slices.append(sl)
-            except Exception as _e:
-                print(f"section slice skipped for {{_sobj.Name}}: {{_e}}", flush=True)
+        print(f"Section: xmid={{xmid:.1f}} bb=[{{bb_base.XMin:.1f}},{{bb_base.XMax:.1f}}]x[{{bb_base.YMin:.1f}},{{bb_base.YMax:.1f}}]x[{{bb_base.ZMin:.1f}},{{bb_base.ZMax:.1f}}]", flush=True)
 
         side_section_view = None
-        if section_slices:
-            section_compound = Part.makeCompound(section_slices)
-            sec_src = doc.addObject("Part::Feature", "SectionSolid")
-            sec_src.Shape = section_compound
-            sec_src.Visibility = False
-            doc.recompute()
+        try:
+            # Cut the world-space compound — produces a TopoShape with left-half solids
+            sec_shape = base_shape.cut(half_space)
+            print(f"Section cut: valid={{sec_shape.isValid()}} solids={{len(sec_shape.Solids)}} vol={{sec_shape.Volume:.1f}}", flush=True)
 
-            sec_proj = Draft.make_shape2dview(sec_src, App.Vector(-1, 0, 0))
-            doc.recompute()
-            sec_frozen = sec_proj.Shape.copy()
-            doc.removeObject(sec_proj.Name)
-            doc.removeObject(sec_src.Name)
-            doc.recompute()
+            if sec_shape.isValid() and len(sec_shape.Solids) > 0:
+                # Identical to _make_view: assign to Part::Feature, set rotation as Placement
+                sec_tmp = doc.addObject("Part::Feature", "SecHalfRot")
+                sec_tmp.Shape = sec_shape
+                sec_tmp.Placement = App.Placement(
+                    V(0, 0, 0), App.Rotation(V(0, 0, 1), -90))
+                sec_tmp.Visibility = False
+                doc.recompute()
 
-            # Apply the SAME 180-deg X-axis flip used for Draft_Side_View
-            # so the cill sits at the bottom / head at the top here too —
-            # this view shares the same -X projection direction and was
-            # missing this fix.
-            side_section_view = doc.addObject("Part::Feature", "SideSection")
-            side_section_view.Shape = sec_frozen
-            side_section_view.Label = "Draft_Side_Section_View"
-            doc.recompute()
+                sec_proj = Draft.make_shape2dview(sec_tmp, App.Vector(0, -1, 0))
+                try:
+                    sec_proj.ProjectionMode = 1   # Individual Faces — shows cavity wires
+                except Exception:
+                    pass
+                doc.recompute()
 
-            sec_flip = App.Rotation(App.Vector(1, 0, 0), 180)
-            side_section_view.Placement = App.Placement(V(0, 0, 0), sec_flip)
-            doc.recompute()
+                sec_frozen = sec_proj.Shape.copy()
+                doc.removeObject(sec_proj.Name)
+                doc.removeObject(sec_tmp.Name)
+                doc.recompute()
 
-            # Placement: LEFT of Front was requested, but Draft_Side_View
-            # already occupies that exact slot and must stay untouched —
-            # placing the section literally there would overlap it. Instead
-            # place the section further LEFT, just outside Draft_Side_View
-            # (same side-view "slot", no collision), bottom-aligned to 0
-            # to match Front/Side's shared baseline.
-            bb_ss = side_section_view.Shape.BoundBox
-            ss_x = (bb_s.XMin - spacing) - bb_ss.XMax
-            ss_y = -bb_ss.YMin
-            side_section_view.Placement = App.Placement(
-                App.Vector(ss_x, ss_y, 0), sec_flip)
-            doc.recompute()
-        else:
-            print("WARNING: sectional side view produced no geometry", flush=True)
+                n_edges = len(sec_frozen.Edges) if sec_frozen else 0
+                print(f"Section projection: {{n_edges}} edges", flush=True)
+
+                if n_edges > 0:
+                    side_section_view = doc.addObject("Part::Feature", "SideSection")
+                    side_section_view.Shape = sec_frozen
+                    side_section_view.Label = "Draft_Side_Section_View"
+                    doc.recompute()
+
+                    bb_ss = side_section_view.Shape.BoundBox
+                    ss_x  = bb_s.XMin - spacing - bb_ss.XMax
+                    ss_y  = -bb_ss.YMin
+                    side_section_view.Placement = App.Placement(
+                        App.Vector(ss_x, ss_y, 0), App.Rotation())
+                    doc.recompute()
+                    print(f"Draft_Side_Section_View: x={{ss_x:.1f}} y={{ss_y:.1f}} edges={{n_edges}}", flush=True)
+                else:
+                    print("WARNING: section projection returned no edges", flush=True)
+            else:
+                print("WARNING: section cut returned no solids", flush=True)
+        except Exception as _sec_e:
+            print(f"WARNING: section view failed: {{_sec_e}}", flush=True)
 
         # Reset viewport camera to a strict top-down orthographic view, so
         # any GUI session opening this file isn't left on a skewed/rotated
