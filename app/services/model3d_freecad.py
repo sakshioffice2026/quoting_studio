@@ -675,6 +675,10 @@ else:
                 for e in sec_shape.Edges:
                     try:
                         pts3d = e.discretize(Deflection=0.2)
+                        # Only project edges on the cut plane (x ≈ xmid).
+                        # Background/silhouette edges produce clutter lines.
+                        if not all(abs(p.x - xmid) < 1.0 for p in pts3d):
+                            continue
                         pts2d = [V(p.y, p.z, 0.0) for p in pts3d]
                         if len(pts2d) >= 2:
                             wire_edges.append(Part.makePolygon(pts2d))
@@ -720,47 +724,49 @@ else:
                     # rotation + (0,-1,0) projection pipeline), then fill
                     # with a 45 deg cross-hatch at HATCH_SPACING pitch.
                     try:
-                        TOL = 0.5
+                        TOL = 1.0
                         hatch_edges = []
-                        for f in sec_shape.Faces:
+
+                        def _pg_s(pt):
+                            return (pt.y, pt.z)
+
+                        def _wire_pts_s(w):
+                            pts = []
+                            for e in w.OrderedEdges:
+                                for p in e.discretize(Deflection=0.2)[:-1]:
+                                    pts.append(_pg_s(p))
+                            return pts
+
+                        def _clean_wire_s(w):
                             try:
-                                u0, u1, v0, v1 = f.ParameterRange
-                                n = f.normalAt((u0 + u1) / 2.0, (v0 + v1) / 2.0)
-                                if abs(abs(n.x) - 1.0) > 0.05:
-                                    continue
-                                if abs(f.CenterOfMass.x - xmid) > TOL:
-                                    continue
+                                chains = Part.sortEdges(w.Edges)
+                                if not chains or not chains[0]:
+                                    return None
+                                cw = Part.Wire(chains[0])
+                                cw.fix(1e-6, 1e-6, 1e-6)
                             except Exception:
-                                continue
+                                return None
+                            if not cw.isClosed() or not cw.isValid():
+                                return None
+                            return cw
 
-                            def _pg(pt):
-                                return (pt.y, pt.z)
-
-                            def _wire_pts(w):
-                                pts = []
-                                for e in w.OrderedEdges:
-                                    for p in e.discretize(Deflection=0.2)[:-1]:
-                                        pts.append(_pg(p))
-                                return pts
-
-                            def _mk_2d_face(pts):
+                        def _mk_2d_face_s(pts):
+                            try:
                                 verts = [V(px, py, 0.0) for px, py in pts]
                                 verts.append(verts[0])
-                                return Part.Face(Part.makePolygon(verts))
-
-                            outer_pts = _wire_pts(f.OuterWire)
-                            hole_pts  = [_wire_pts(w) for w in f.Wires
-                                         if not w.isSame(f.OuterWire)]
-                            if len(outer_pts) < 3:
-                                continue
-                            try:
-                                hf = _mk_2d_face(outer_pts)
-                                for hp in hole_pts:
-                                    if len(hp) >= 3:
-                                        hf = hf.cut(_mk_2d_face(hp))
+                                wire = Part.makePolygon(verts)
+                                if not wire.isClosed():
+                                    return None
+                                face = Part.Face(wire)
+                                face.fix(1e-6, 1e-6, 1e-6)
+                                if not face.isValid() or face.Area < 1.0:
+                                    return None
+                                return face
                             except Exception:
-                                continue
+                                return None
 
+                        def _hatch_2d_s(hf):
+                            edges = []
                             bb2  = hf.BoundBox
                             diag = ((bb2.XMax - bb2.XMin) ** 2
                                     + (bb2.YMax - bb2.YMin) ** 2) ** 0.5 + 10.0
@@ -773,9 +779,51 @@ else:
                                 p1 = V(ox + diag, cy0 + diag, 0.0)
                                 try:
                                     line = Part.LineSegment(p0, p1).toShape()
-                                    hatch_edges.extend(line.common(hf).Edges)
+                                    edges.extend(line.common(hf).Edges)
                                 except Exception:
                                     continue
+                            return edges
+
+                        for _lbl, _sol in frame_solids:
+                            try:
+                                _cut = _sol.cut(half_space)
+                                if not _cut.isValid() or not _cut.Solids:
+                                    continue
+                            except Exception:
+                                continue
+                            for _f in _cut.Faces:
+                                try:
+                                    u0, u1, v0, v1 = _f.ParameterRange
+                                    _n = _f.normalAt((u0+u1)/2.0, (v0+v1)/2.0)
+                                    if abs(abs(_n.x) - 1.0) > 0.05:
+                                        continue
+                                    if abs(_f.CenterOfMass.x - xmid) > TOL:
+                                        continue
+                                except Exception:
+                                    continue
+                                _oc = _clean_wire_s(_f.OuterWire)
+                                if _oc is None:
+                                    continue
+                                _op = _wire_pts_s(_oc)
+                                if len(_op) < 3:
+                                    continue
+                                _hf = _mk_2d_face_s(_op)
+                                if _hf is None:
+                                    continue
+                                for _w in _f.Wires:
+                                    if _w.isSame(_f.OuterWire):
+                                        continue
+                                    _hc = _clean_wire_s(_w)
+                                    if _hc is not None:
+                                        _hp = _wire_pts_s(_hc)
+                                        if len(_hp) >= 3:
+                                            _hole = _mk_2d_face_s(_hp)
+                                            if _hole is not None:
+                                                try:
+                                                    _hf = _hf.cut(_hole)
+                                                except Exception:
+                                                    pass
+                                hatch_edges.extend(_hatch_2d_s(_hf))
 
                         if hatch_edges:
                             section_hatch = doc.addObject("Part::Feature", "SectionHatch")
@@ -837,6 +885,12 @@ else:
                 for e in sec_shape_t.Edges:
                     try:
                         pts3d = e.discretize(Deflection=0.2)
+                        # Only project edges that lie ON the cut plane
+                        # (y ≈ ymid). Background/silhouette edges not at
+                        # the section plane produce the messy diagonal
+                        # lines that clutter the top section view.
+                        if not all(abs(p.y - ymid) < 1.0 for p in pts3d):
+                            continue
                         pts2d = [V(p.x, p.z, 0.0) for p in pts3d]
                         if len(pts2d) >= 2:
                             wire_edges_t.append(Part.makePolygon(pts2d))
@@ -877,76 +931,54 @@ else:
                     print(f"Draft_Top_Section_View: x={{target_x:.1f}} y={{target_y:.1f}} "
                           f"edges={{n_edges_t}}", flush=True)
 
-                    # ── Top section hatching (same technique as side) ───
+                    # ── Top section hatching (per-solid face-level) ─────
+                    # Cut each frame solid individually so that glass
+                    # openings, internal voids and inter-member gaps are
+                    # naturally unhatched — no merged outer boundary.
                     try:
-                        TOL = 0.5
+                        TOL = 1.0
                         hatch_edges_t = []
-                        for f in sec_shape_t.Faces:
+
+                        def _pg_t(pt):
+                            return (pt.x, pt.z)
+
+                        def _wire_pts_t(w):
+                            pts = []
+                            for e in w.OrderedEdges:
+                                for p in e.discretize(Deflection=0.2)[:-1]:
+                                    pts.append(_pg_t(p))
+                            return pts
+
+                        def _clean_wire_t(w):
                             try:
-                                u0, u1, v0, v1 = f.ParameterRange
-                                n = f.normalAt((u0 + u1) / 2.0, (v0 + v1) / 2.0)
-                                if abs(abs(n.y) - 1.0) > 0.05:
-                                    continue
-                                if abs(f.CenterOfMass.y - ymid) > TOL:
-                                    continue
+                                chains = Part.sortEdges(w.Edges)
+                                if not chains or not chains[0]:
+                                    return None
+                                cw = Part.Wire(chains[0])
+                                cw.fix(1e-6, 1e-6, 1e-6)
                             except Exception:
-                                continue
+                                return None
+                            if not cw.isClosed() or not cw.isValid():
+                                return None
+                            return cw
 
-                            def _pg_t(pt):
-                                return (pt.x, pt.z)
-
-                            def _wire_pts_t(w):
-                                pts = []
-                                for e in w.OrderedEdges:
-                                    for p in e.discretize(Deflection=0.2)[:-1]:
-                                        pts.append(_pg_t(p))
-                                return pts
-
-                            def _clean_wire_t(w):
-                                # Rebuild + fix so only closed,
-                                # non-self-intersecting wires reach the
-                                # hatcher — a raw/degenerate wire here is
-                                # what produces the long diagonal
-                                # hatch artifacts.
-                                try:
-                                    cw = Part.Wire(w.Edges)
-                                    cw.fix(1e-6, 1e-6, 1e-6)
-                                except Exception:
-                                    return None
-                                if not cw.isClosed():
-                                    return None
-                                return cw
-
-                            def _mk_2d_face_t(pts):
+                        def _mk_2d_face_t(pts):
+                            try:
                                 verts = [V(px, py, 0.0) for px, py in pts]
                                 verts.append(verts[0])
-                                face = Part.Face(Part.makePolygon(verts))
+                                wire = Part.makePolygon(verts)
+                                if not wire.isClosed():
+                                    return None
+                                face = Part.Face(wire)
                                 face.fix(1e-6, 1e-6, 1e-6)
+                                if not face.isValid() or face.Area < 1.0:
+                                    return None
                                 return face
-
-                            outer_clean = _clean_wire_t(f.OuterWire)
-                            if outer_clean is None:
-                                continue
-                            outer_pts = _wire_pts_t(outer_clean)
-                            hole_pts = []
-                            for w in f.Wires:
-                                if w.isSame(f.OuterWire):
-                                    continue
-                                hw_clean = _clean_wire_t(w)
-                                if hw_clean is not None:
-                                    hole_pts.append(_wire_pts_t(hw_clean))
-                            if len(outer_pts) < 3:
-                                continue
-                            try:
-                                hf = _mk_2d_face_t(outer_pts)
-                                if not hf.isValid():
-                                    continue
-                                for hp in hole_pts:
-                                    if len(hp) >= 3:
-                                        hf = hf.cut(_mk_2d_face_t(hp))
                             except Exception:
-                                continue
+                                return None
 
+                        def _hatch_2d(hf):
+                            edges = []
                             bb2  = hf.BoundBox
                             diag = ((bb2.XMax - bb2.XMin) ** 2
                                     + (bb2.YMax - bb2.YMin) ** 2) ** 0.5 + 10.0
@@ -959,9 +991,51 @@ else:
                                 p1 = V(ox + diag, cy0 + diag, 0.0)
                                 try:
                                     line = Part.LineSegment(p0, p1).toShape()
-                                    hatch_edges_t.extend(line.common(hf).Edges)
+                                    edges.extend(line.common(hf).Edges)
                                 except Exception:
                                     continue
+                            return edges
+
+                        for _lbl, _sol in frame_solids:
+                            try:
+                                _cut = _sol.cut(half_space_t)
+                                if not _cut.isValid() or not _cut.Solids:
+                                    continue
+                            except Exception:
+                                continue
+                            for _f in _cut.Faces:
+                                try:
+                                    u0, u1, v0, v1 = _f.ParameterRange
+                                    _n = _f.normalAt((u0+u1)/2.0, (v0+v1)/2.0)
+                                    if abs(abs(_n.y) - 1.0) > 0.05:
+                                        continue
+                                    if abs(_f.CenterOfMass.y - ymid) > TOL:
+                                        continue
+                                except Exception:
+                                    continue
+                                _oc = _clean_wire_t(_f.OuterWire)
+                                if _oc is None:
+                                    continue
+                                _op = _wire_pts_t(_oc)
+                                if len(_op) < 3:
+                                    continue
+                                _hf = _mk_2d_face_t(_op)
+                                if _hf is None:
+                                    continue
+                                for _w in _f.Wires:
+                                    if _w.isSame(_f.OuterWire):
+                                        continue
+                                    _hc = _clean_wire_t(_w)
+                                    if _hc is not None:
+                                        _hp = _wire_pts_t(_hc)
+                                        if len(_hp) >= 3:
+                                            _hole = _mk_2d_face_t(_hp)
+                                            if _hole is not None:
+                                                try:
+                                                    _hf = _hf.cut(_hole)
+                                                except Exception:
+                                                    pass
+                                hatch_edges_t.extend(_hatch_2d(_hf))
 
                         if hatch_edges_t:
                             top_section_hatch = doc.addObject("Part::Feature", "TopSectionHatch")

@@ -195,11 +195,16 @@ def _ring_area(ring):
     return abs(total) * 0.5
 
 
-_SQUARE_TOL = 30.0  # mm; below this |bar-depth| the swap heuristic is ambiguous
-_NO_SWAP_ROLES = {"mullion", "transom", "meeting_stile"}
-
-
 def _section_rings(loops, bar, depth, role=None, member_id=None):
+    """
+    Normalise DXF loops into (u, v) section space where u ∈ [0, bar]
+    and v ∈ [0, depth].
+
+    Orientation is resolved purely by whichever axis-assignment minimises
+    total dimension error against the nominal (bar, depth).  No role-based
+    suppression and no tolerance gate — this is deterministic for all
+    profile types including near-square mullions and transoms.
+    """
     rect = (
         [[(0.0, 0.0), (bar, 0.0), (bar, depth), (0.0, depth)]],
         float(bar),
@@ -223,25 +228,12 @@ def _section_rings(loops, bar, depth, role=None, member_id=None):
 
     xs = [x for x, _ in rings[0]]
     ys = [y for _, y in rings[0]]
-    w = max(xs) - min(xs)
-    h = max(ys) - min(ys)
+    w = max(xs) - min(xs)   # DXF X span
+    h = max(ys) - min(ys)   # DXF Y span
 
-    rotate = (
-        abs(w - bar) + abs(h - depth)
-        > abs(h - bar) + abs(w - depth)
-    )
-    role_l = (role or "").lower()
-    id_l = (member_id or "").lower()
-    is_mullion = role_l in _NO_SWAP_ROLES or id_l.startswith("m_")
-    if is_mullion or abs(bar - depth) < _SQUARE_TOL:
-        rotate = False
-
-    if is_mullion:
-        # Explicit 90 deg CCW rotation of the ring coordinates so the
-        # mullion profile stands upright facing left, instead of relying
-        # on the ambiguous auto-swap heuristic above.
-        rings = [[(-y, x) for x, y in ring] for ring in rings]
-    elif rotate:
+    # Swap X↔Y when that assignment better matches (bar, depth).
+    # Applied unconditionally — no role suppression, no square tolerance.
+    if (abs(w - bar) + abs(h - depth)) > (abs(h - bar) + abs(w - depth)):
         rings = [[(y, x) for x, y in ring] for ring in rings]
 
     xs = [x for ring in rings for x, _ in ring]

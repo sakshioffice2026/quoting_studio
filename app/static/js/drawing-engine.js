@@ -2689,12 +2689,16 @@ class DrawingCanvas {
     clearTimeout(this._sectionFocusTimeout);
     this._profileSuggestModalOpen = true;
     this._profileSuggestRole = role;
+    modal.style.display = '';
     modal.classList.add('on');
   }
 
   _hideProfileSuggestModal(){
     const modal = document.getElementById('qsProfileSuggestModal');
-    if (modal) modal.classList.remove('on');
+    if (modal){
+      modal.classList.remove('on');
+      modal.style.display = 'none';
+    }
     this._profileSuggestModalOpen = false;
     this._profileSuggestRole = null;
   }
@@ -3068,6 +3072,7 @@ window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templa
     const modal = document.createElement('div');
     modal.className = 'qs-modal';
     modal.id = 'qsProfileSuggestModal';
+    modal.style.display = 'none';
     modal.innerHTML = ''
       + '<div class="qs-modal-box" onclick="event.stopPropagation()">'
       + '  <h3>Apply CAD Profile</h3>'
@@ -3090,6 +3095,12 @@ window.QSDraw = { WindowModel, DrawingCanvas, TEMPLATES, templateToPanes, templa
   window.qsEnsureProfileSuggestModal = ensureProfileSuggestModal;
 
   function init(){
+    // Only the Window Editor/Detail page defines setWindowProfile.
+    // Other pages that merely load drawing-engine.js (e.g. the
+    // template chooser) must never get the Apply CAD Profile modal
+    // injected into their DOM.
+    if (typeof window.setWindowProfile !== 'function') return;
+
     injectPreviewStyles();
     ensureProfileSuggestModal();
     wireLegacyAutoApplyGuard();
