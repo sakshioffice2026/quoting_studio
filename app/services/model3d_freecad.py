@@ -654,7 +654,8 @@ else:
               f"[{{bb_base.YMin:.1f}},{{bb_base.YMax:.1f}}]x"
               f"[{{bb_base.ZMin:.1f}},{{bb_base.ZMax:.1f}}]", flush=True)
 
-        HATCH_SPACING = 3.0   # mm, ISO 128 cross-hatch baseline
+        HATCH_SPACING = 5.0   # mm, ISO 128 cross-hatch baseline (shared by
+                              # Draft_Side_Section_Hatch and Draft_Top_Section_Hatch)
         side_section_view = None
         section_hatch = None
         try:
@@ -852,17 +853,24 @@ else:
                     top_section_view.Label = "Draft_Top_Section_View"
                     doc.recompute()
 
-                    # Rotate +90 deg about Z.
-                    top_rot = App.Rotation(App.Vector(0, 0, 1), 90.0)
+                    # No rotation: edges were already built with world X on
+                    # page X and world Z on page Y, which is horizontally
+                    # aligned with Front View — keep it that way.
+                    top_rot = App.Rotation()
                     top_section_view.Placement = App.Placement(V(0, 0, 0), top_rot)
                     doc.recompute()
                     bb_ts = top_section_view.Shape.BoundBox
 
-                    # Same slot/formula the original Draft_Top_View used:
-                    # left-anchored at page X=0, sitting spacing above
-                    # front_bb.YMax.
-                    target_x = -bb_ts.XMin
-                    target_y = bb_f.YMax - bb_ts.YMin + spacing
+                    # Anchor directly to Draft_Front_View's live bounding
+                    # box (not the earlier bb_f snapshot) so this always
+                    # matches the actual Front Elevation, not any other
+                    # placed view.
+                    front_bb = front_view.Shape.BoundBox
+
+                    # Horizontally aligned with Front View, placed above it,
+                    # compensated for the shape's internal bbox origin.
+                    target_x = front_bb.XMin - bb_ts.XMin
+                    target_y = front_bb.YMax + spacing - bb_ts.YMin
                     top_section_view.Placement = App.Placement(
                         App.Vector(target_x, target_y, 0), top_rot)
                     doc.recompute()
@@ -894,18 +902,45 @@ else:
                                         pts.append(_pg_t(p))
                                 return pts
 
+                            def _clean_wire_t(w):
+                                # Rebuild + fix so only closed,
+                                # non-self-intersecting wires reach the
+                                # hatcher — a raw/degenerate wire here is
+                                # what produces the long diagonal
+                                # hatch artifacts.
+                                try:
+                                    cw = Part.Wire(w.Edges)
+                                    cw.fix(1e-6, 1e-6, 1e-6)
+                                except Exception:
+                                    return None
+                                if not cw.isClosed():
+                                    return None
+                                return cw
+
                             def _mk_2d_face_t(pts):
                                 verts = [V(px, py, 0.0) for px, py in pts]
                                 verts.append(verts[0])
-                                return Part.Face(Part.makePolygon(verts))
+                                face = Part.Face(Part.makePolygon(verts))
+                                face.fix(1e-6, 1e-6, 1e-6)
+                                return face
 
-                            outer_pts = _wire_pts_t(f.OuterWire)
-                            hole_pts  = [_wire_pts_t(w) for w in f.Wires
-                                         if not w.isSame(f.OuterWire)]
+                            outer_clean = _clean_wire_t(f.OuterWire)
+                            if outer_clean is None:
+                                continue
+                            outer_pts = _wire_pts_t(outer_clean)
+                            hole_pts = []
+                            for w in f.Wires:
+                                if w.isSame(f.OuterWire):
+                                    continue
+                                hw_clean = _clean_wire_t(w)
+                                if hw_clean is not None:
+                                    hole_pts.append(_wire_pts_t(hw_clean))
                             if len(outer_pts) < 3:
                                 continue
                             try:
                                 hf = _mk_2d_face_t(outer_pts)
+                                if not hf.isValid():
+                                    continue
                                 for hp in hole_pts:
                                     if len(hp) >= 3:
                                         hf = hf.cut(_mk_2d_face_t(hp))
