@@ -587,8 +587,6 @@ else:
             return v
 
         front_view = _make_view(V(1, 0, 0), 90,  "Draft_Front_View")
-        top_view   = _make_view(V(1, 0, 0), 0,   "Draft_Top_View")
-        side_view  = _make_view(V(0, 0, 1), -90, "Draft_Side_View")
         doc.recompute()
 
         # ViewSource only exists to supply base_shape above; delete it now
@@ -620,33 +618,6 @@ else:
         bb_f = front_view.Shape.BoundBox
 
         spacing = 250.0  # Separation gap in mm
-
-        # Side View: LEFT of Front View, bottom-aligned with Front
-        # (both final YMin = 0)
-        bb_s = side_view.Shape.BoundBox
-        side_x = -bb_s.XMax - spacing
-        side_y = -bb_s.YMin
-        side_view.Placement = App.Placement(
-            App.Vector(side_x, side_y, 0), App.Rotation())
-        doc.recompute()
-        bb_s = side_view.Shape.BoundBox  # refresh: now reflects FINAL
-                                          # placed position, needed below
-                                          # for the section view's slot.
-
-        # Top View: rotate 90 deg about Z so the plan lies horizontally
-        # (wide, matching Front's width) instead of the tall/narrow
-        # orientation the raw projection comes out in, then place it
-        # ABOVE Front View, left-aligned with Front (both final XMin = 0).
-        top_rot = App.Rotation(App.Vector(0, 0, 1), 90)
-        top_view.Placement = App.Placement(V(0, 0, 0), top_rot)
-        doc.recompute()
-        bb_t = top_view.Shape.BoundBox
-        top_x = -bb_t.XMin
-        top_y = bb_f.YMax - bb_t.YMin + spacing
-        top_view.Placement = App.Placement(
-            App.Vector(top_x, top_y, 0), top_rot)
-
-        doc.recompute()
 
         # ── Sectional Side View ─────────────────────────────────────────
         # Use base_shape (already world-space compound) directly.
@@ -720,13 +691,23 @@ else:
                     side_section_view.Label = "Draft_Side_Section_View"
                     doc.recompute()
 
-                    bb_ss = side_section_view.Shape.BoundBox
-                    ss_x  = bb_s.XMin - spacing - bb_ss.XMax
-                    ss_y  = -bb_ss.YMin
-                    side_section_view.Placement = App.Placement(
-                        App.Vector(ss_x, ss_y, 0), App.Rotation())
+                    # Rotate +90 deg about Z so the section stands
+                    # vertically (threshold/sill at bottom, head at top),
+                    # matching the Front View's orientation.
+                    side_rot = App.Rotation(App.Vector(0, 0, 1), 90.0)
+                    side_section_view.Placement = App.Placement(V(0, 0, 0), side_rot)
                     doc.recompute()
-                    print(f"Draft_Side_Section_View: x={{ss_x:.1f}} y={{ss_y:.1f}} edges={{n_edges}}", flush=True)
+                    bb_ss = side_section_view.Shape.BoundBox
+
+                    # Anchor directly LEFT of Front View, bottom-aligned
+                    # with Front's baseline (both final YMin equal).
+                    target_x = bb_f.XMin - spacing
+                    target_y = bb_f.YMin
+                    side_section_view.Placement = App.Placement(
+                        App.Vector(target_x - bb_ss.XMin,
+                                    target_y - bb_ss.YMin, 0), side_rot)
+                    doc.recompute()
+                    print(f"Draft_Side_Section_View: x={{target_x:.1f}} y={{target_y:.1f}} edges={{n_edges}}", flush=True)
 
                     # ── Section hatching ─────────────────────────────────
                     # Find the faces actually exposed by the cut (planar,
@@ -800,7 +781,8 @@ else:
                             section_hatch.Shape = Part.Compound(hatch_edges)
                             section_hatch.Label = "Draft_Side_Section_Hatch"
                             section_hatch.Placement = App.Placement(
-                                App.Vector(ss_x, ss_y, 0), App.Rotation())
+                                App.Vector(target_x - bb_ss.XMin,
+                                            target_y - bb_ss.YMin, 0), side_rot)
                             doc.recompute()
                             print(f"Section hatch: {{len(hatch_edges)}} lines", flush=True)
                         else:
@@ -870,14 +852,21 @@ else:
                     top_section_view.Label = "Draft_Top_Section_View"
                     doc.recompute()
 
-                    bb_ts = top_section_view.Shape.BoundBox
-                    ts_h  = bb_ts.YMax - bb_ts.YMin
-                    ts_x  = -bb_ts.XMin
-                    ts_y  = -spacing - ts_h
-                    top_section_view.Placement = App.Placement(
-                        App.Vector(ts_x, ts_y, 0), App.Rotation())
+                    # Rotate +90 deg about Z.
+                    top_rot = App.Rotation(App.Vector(0, 0, 1), 90.0)
+                    top_section_view.Placement = App.Placement(V(0, 0, 0), top_rot)
                     doc.recompute()
-                    print(f"Draft_Top_Section_View: x={{ts_x:.1f}} y={{ts_y:.1f}} "
+                    bb_ts = top_section_view.Shape.BoundBox
+
+                    # Same slot/formula the original Draft_Top_View used:
+                    # left-anchored at page X=0, sitting spacing above
+                    # front_bb.YMax.
+                    target_x = -bb_ts.XMin
+                    target_y = bb_f.YMax - bb_ts.YMin + spacing
+                    top_section_view.Placement = App.Placement(
+                        App.Vector(target_x, target_y, 0), top_rot)
+                    doc.recompute()
+                    print(f"Draft_Top_Section_View: x={{target_x:.1f}} y={{target_y:.1f}} "
                           f"edges={{n_edges_t}}", flush=True)
 
                     # ── Top section hatching (same technique as side) ───
@@ -944,7 +933,7 @@ else:
                             top_section_hatch.Shape = Part.Compound(hatch_edges_t)
                             top_section_hatch.Label = "Draft_Top_Section_Hatch"
                             top_section_hatch.Placement = App.Placement(
-                                App.Vector(ts_x, ts_y, 0), App.Rotation())
+                                App.Vector(target_x, target_y, 0), top_rot)
                             doc.recompute()
                             print(f"Top section hatch: {{len(hatch_edges_t)}} lines", flush=True)
                         else:
@@ -970,7 +959,7 @@ else:
         doc.saveAs(r"{fcpath}")
         try:
             _fsz = os.path.getsize(r"{fcpath}")
-            _names = f"{{front_view.Name}}, {{top_view.Name}}, {{side_view.Name}}"
+            _names = f"{{front_view.Name}}"
             if side_section_view is not None:
                 _names += f", {{side_section_view.Name}}"
             if section_hatch is not None:

@@ -121,13 +121,15 @@ def prepare_sections(asm, profiles) -> int:
         loops = prof.get("loops")
         key = (
             f"{m.profile_code or m.role}:"
+            f"{m.role}:"
             f"{float(m.bar_width):.4f}x{float(m.depth):.4f}:"
             f"{'L' if loops else 'R'}"
         )
 
         if key not in cache:
             rings, sec_bar, sec_dep = _section_rings(
-                loops, float(m.bar_width), float(m.depth)
+                loops, float(m.bar_width), float(m.depth),
+                role=m.role, member_id=m.id,
             )
             if 0 < sec_dep < _MIN_DEPTH:
                 scale = _MIN_DEPTH / sec_dep
@@ -193,7 +195,11 @@ def _ring_area(ring):
     return abs(total) * 0.5
 
 
-def _section_rings(loops, bar, depth):
+_SQUARE_TOL = 30.0  # mm; below this |bar-depth| the swap heuristic is ambiguous
+_NO_SWAP_ROLES = {"mullion", "transom", "meeting_stile"}
+
+
+def _section_rings(loops, bar, depth, role=None, member_id=None):
     rect = (
         [[(0.0, 0.0), (bar, 0.0), (bar, depth), (0.0, depth)]],
         float(bar),
@@ -224,8 +230,18 @@ def _section_rings(loops, bar, depth):
         abs(w - bar) + abs(h - depth)
         > abs(h - bar) + abs(w - depth)
     )
+    role_l = (role or "").lower()
+    id_l = (member_id or "").lower()
+    is_mullion = role_l in _NO_SWAP_ROLES or id_l.startswith("m_")
+    if is_mullion or abs(bar - depth) < _SQUARE_TOL:
+        rotate = False
 
-    if rotate:
+    if is_mullion:
+        # Explicit 90 deg CCW rotation of the ring coordinates so the
+        # mullion profile stands upright facing left, instead of relying
+        # on the ambiguous auto-swap heuristic above.
+        rings = [[(-y, x) for x, y in ring] for ring in rings]
+    elif rotate:
         rings = [[(y, x) for x, y in ring] for ring in rings]
 
     xs = [x for ring in rings for x, _ in ring]
