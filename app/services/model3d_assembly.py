@@ -195,16 +195,12 @@ def _ring_area(ring):
     return abs(total) * 0.5
 
 
-def _section_rings(loops, bar, depth, role=None, member_id=None):
-    """
-    Normalise DXF loops into (u, v) section space where u ∈ [0, bar]
-    and v ∈ [0, depth].
+_SQUARE_TOL = 30.0  # mm; below this |bar-depth| the swap heuristic is ambiguous
+_NO_SWAP_ROLES = {"mullion", "transom", "meeting_stile", "casement"}
+_EXPLICIT_ROTATE_ROLES = {"mullion", "transom", "meeting_stile"}
 
-    Orientation is resolved purely by whichever axis-assignment minimises
-    total dimension error against the nominal (bar, depth).  No role-based
-    suppression and no tolerance gate — this is deterministic for all
-    profile types including near-square mullions and transoms.
-    """
+
+def _section_rings(loops, bar, depth, role=None, member_id=None):
     rect = (
         [[(0.0, 0.0), (bar, 0.0), (bar, depth), (0.0, depth)]],
         float(bar),
@@ -226,14 +222,33 @@ def _section_rings(loops, bar, depth, role=None, member_id=None):
 
     rings.sort(key=_ring_area, reverse=True)
 
+    # Ordinary (non-square) members: the aspect-ratio swap heuristic
+    # corrects real axis-swapped CAD loops and stays active — removing
+    # it breaks jamb/head/cill cross-section orientation. It is only
+    # disabled where it's genuinely ambiguous: near-square profiles and
+    # explicit mullion/transom/meeting_stile members, which instead get
+    # a deterministic explicit rotation below.
     xs = [x for x, _ in rings[0]]
     ys = [y for _, y in rings[0]]
-    w = max(xs) - min(xs)   # DXF X span
-    h = max(ys) - min(ys)   # DXF Y span
+    w = max(xs) - min(xs)
+    h = max(ys) - min(ys)
+    rotate = (
+        abs(w - bar) + abs(h - depth)
+        > abs(h - bar) + abs(w - depth)
+    )
 
-    # Swap X↔Y when that assignment better matches (bar, depth).
-    # Applied unconditionally — no role suppression, no square tolerance.
-    if (abs(w - bar) + abs(h - depth)) > (abs(h - bar) + abs(w - depth)):
+    role_l = (role or "").lower()
+    id_l = (member_id or "").lower()
+    no_swap = role_l in _NO_SWAP_ROLES or id_l.startswith("m_")
+    explicit_rotate = role_l in _EXPLICIT_ROTATE_ROLES or id_l.startswith("m_")
+    if no_swap or abs(bar - depth) < _SQUARE_TOL:
+        rotate = False
+
+    if explicit_rotate:
+        # Explicit 90 deg CCW rotation of the ring coordinates so the
+        # mullion/transom profile stands upright facing left.
+        rings = [[(-y, x) for x, y in ring] for ring in rings]
+    elif rotate:
         rings = [[(y, x) for x, y in ring] for ring in rings]
 
     xs = [x for ring in rings for x, _ in ring]
