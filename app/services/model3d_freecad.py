@@ -413,17 +413,21 @@ def make_path_solid(rings, bar, depth, path, closed):
 # Depth uses exactly one sign convention (-Z) in both TOP and SIDE.
 
 VIEW_TO_PAGE = {{
-    'front': lambda p: (p.x, p.y),
-    'top':   lambda p: (p.x, -p.z),
-    'side':  lambda p: (p.z, p.y),
+    'front': lambda p: (p.x,  p.y),    # look -Z : X->pgX, Y->pgY
+    'top':   lambda p: (p.x, -p.z),    # look -Y : X->pgX, -Z->pgY (ext face at bottom)
+    'side':  lambda p: (p.z,  p.y),    # look -X : Z->pgX,  Y->pgY
 }}
 
 # World-space extrusion axis for each member orientation. Used to test
 # whether a member's own length axis runs parallel (in-plane) to a given
 # section cut plane, versus transverse (perpendicular) to it.
+# Z axis added: members extruded along Z (none currently, but guards
+# against future panel/threshold members and prevents all-exclusion when
+# the side section uses a Z-normal plane.
 _ORIENT_AXIS = {{
     'horizontal': V(1, 0, 0),
     'vertical':   V(0, 1, 0),
+    'depth':      V(0, 0, 1),
 }}
 
 def _project_edges(shape, to_page, deflection=0.2, exclude_plane=None):
@@ -703,7 +707,10 @@ def build_ortho_view(doc, name_prefix, base_shape, view_key, frame_solid_list=No
             orient = _member_orientation.get(mid)
             axis = _ORIENT_AXIS.get(orient)
             _dot = axis.dot(plane_normal) if axis is not None else None
-            _included = not (axis is not None and abs(_dot) < 0.5)
+            # Exclude member when its extrusion axis IS the cut-plane normal (dot~1).
+            # Side (X-normal): horizontal(X) dot=1 excluded, vertical(Y) dot=0 included.
+            # Top  (Y-normal): vertical(Y)   dot=1 excluded, horizontal(X) dot=0 included.
+            _included = not (axis is not None and abs(_dot) > 0.5)
             print(f"    [{{name_prefix}}] member={{mid}} orient={{orient}} "
                   f"dot={{_dot}} {{'INCLUDED' if _included else 'excluded'}}",
                   flush=True)
@@ -971,33 +978,38 @@ else:
             margin  = 200.0
             bb_base = base_shape.BoundBox
 
-            # ── Sectional Side View: cut plane in X through the real
-            # vertical member (jamb/mullion/stile) nearest the geometric
-            # midpoint, so the section always lands on a member profile
-            # instead of an arbitrary geometric split that can fall in
-            # empty glass.
+            # ── Sectional Side View ──────────────────────────────────────
+            # Side section: cut X-normal through a vertical member (jamb/mullion).
+            # Snap xmid to nearest vertical member centre so slice() always
+            # hits real frame material, not the glass gap at X=0.
+            # to_page: Z->pgX, Y->pgY.
+            # bg_cutter keeps left half (X < xmid).
+            # Horizontal members (axis X, dot=1) → excluded.
+            # Vertical members   (axis Y, dot=0) → included → hatched.
             geo_xmid = (bb_base.XMin + bb_base.XMax) / 2.0
-            vert_centers = [
-                (mm["x1"] + mm["x2"]) / 2.0 - cx
-                for mm in data["members"] if mm.get("orientation") == "vertical"
-            ]
-            xmid = (min(vert_centers, key=lambda v: abs(v - geo_xmid))
-                    if vert_centers else geo_xmid)
-            half_x = Part.makeBox(
-                (bb_base.XMax - xmid) + margin,
+            vert_members = [mm for mm in data["members"] if mm.get("orientation") == "vertical"]
+            vert_centers = [(mm["x1"] + mm["x2"]) / 2.0 - cx for mm in vert_members]
+            if vert_centers:
+                nearest = min(zip(vert_centers, vert_members), key=lambda t: abs(t[0] - geo_xmid))
+                xmid = nearest[0]
+                xbar = float(nearest[1].get("bar", 67))
+            else:
+                xmid = geo_xmid
+                xbar = 67.0
+            # bg_cutter keeps left half (X < xmid); slice inside jamb at xmid - xbar/4
+            xslice = xmid - xbar / 4.0
+            side_cutter = Part.makeBox(
+                (xmid - bb_base.XMin) + margin,
                 (bb_base.YMax - bb_base.YMin) + 2 * margin,
                 (bb_base.ZMax - bb_base.ZMin) + 2 * margin,
-                V(xmid, bb_base.YMin - margin, bb_base.ZMin - margin))
+                V(bb_base.XMin - margin, bb_base.YMin - margin, bb_base.ZMin - margin))
 
-            print(f"Section: xmid={{xmid:.1f}} (geo_mid={{geo_xmid:.1f}}) "
-                  f"bb=[{{bb_base.XMin:.1f}},{{bb_base.XMax:.1f}}]x"
-                  f"[{{bb_base.YMin:.1f}},{{bb_base.YMax:.1f}}]x"
-                  f"[{{bb_base.ZMin:.1f}},{{bb_base.ZMax:.1f}}]", flush=True)
+            print(f"Side section: xmid={{xmid:.1f}} xslice={{xslice:.1f}} xbar={{xbar:.1f}}", flush=True)
 
             side = build_ortho_view(doc, "SideSection", base_shape, 'side',
                                      frame_solid_list=frame_solid_list,
-                                     bg_cutter=half_x,
-                                     plane_normal=V(1, 0, 0), plane_distance=xmid)
+                                     bg_cutter=side_cutter,
+                                     plane_normal=V(1, 0, 0), plane_distance=xslice)
             if side is None:
                 print("WARNING: side section produced no geometry", flush=True)
             else:
@@ -1009,34 +1021,48 @@ else:
                 print(f"Draft_SideSection_View: x={{target_x:.1f}} "
                       f"edges={{len(side['bg'].Shape.Edges)}}", flush=True)
 
-            # ── Sectional Top View: cut plane in Y through the real
-            # horizontal member (head/cill/transom) nearest the geometric
-            # midpoint. Same VIEW_TO_PAGE convention as Side, so width and
-            # depth line up between Top and Side/Front automatically.
+            # ── Sectional Top View ───────────────────────────────────────
+            # Cut plane: Y-normal at ymid (looking down, -Y direction).
+            # to_page maps: page-X = X (width), page-Y = -Z (depth flipped).
+            # Snap ymid to the nearest HORIZONTAL member centre so the cut
+            # always passes through real frame material (head/sill/transom)
+            # rather than landing in open glass area.
+            # bg_cutter keeps the TOP half (Y > ymid) so the retained
+            # silhouette shows the frame from above.
+            # Included for hatching: horizontal members (dot of V(1,0,0)
+            # with V(0,1,0) = 0 → included) AND vertical members (dot=0 →
+            # included). Only members extruded along Y (none normally) are
+            # excluded — so jamb, mullion, head, sill all get hatched.
+            # Top section: cut Y-normal through head member centre.
+            # Reveals depth (Z) profile of head/jamb/mullion looking down.
+            # to_page: X->pgX, Z->pgY.
+            # bg_cutter keeps top half (Y > ymid).
+            # Vertical members (axis Y, dot with V(0,1,0)=1) → excluded.
+            # Horizontal members (axis X, dot=0) → included → hatched cross-section.
             geo_ymid = (bb_base.YMin + bb_base.YMax) / 2.0
-            # Bug-A fix (Top section) excludes HORIZONTAL members from the
-            # slice/hatch pass — only vertical members (jamb/mullion) are
-            # sliced there, and their transverse cross-section is constant
-            # along the full window height. Snapping ymid to the nearest
-            # horizontal member's center no longer affects which cross-
-            # section is drawn, and previously pushed the background
-            # cutter almost to the bounding-box edge (observed:
-            # ymid=-667.0 vs bbox Y=[-712.5,720.2]), leaving most of the
-            # background silhouette cut away. Use the geometric midpoint
-            # so the background cutter retains a symmetric half instead.
-            ymid = geo_ymid
+            horiz_members = [mm for mm in data["members"] if mm.get("orientation") == "horizontal"]
+            # Snap to HEAD: the horizontal member with the highest Y centre
+            if horiz_members:
+                head_m = max(horiz_members, key=lambda mm: (mm["y1"] + mm["y2"]) / 2.0)
+                ymid = (head_m["y1"] + head_m["y2"]) / 2.0 - cy
+                ybar = float(head_m.get("bar", 35))
+            else:
+                ymid = geo_ymid
+                ybar = 35.0
+            # bg_cutter keeps top half (Y > ymid); slice inside head at ymid + ybar/4
+            yslice = ymid + ybar / 4.0
             half_y = Part.makeBox(
                 (bb_base.XMax - bb_base.XMin) + 2 * margin,
                 (bb_base.YMax - ymid) + margin,
                 (bb_base.ZMax - bb_base.ZMin) + 2 * margin,
                 V(bb_base.XMin - margin, ymid, bb_base.ZMin - margin))
 
-            print(f"Top section: ymid={{ymid:.1f}} (geo_mid={{geo_ymid:.1f}})", flush=True)
+            print(f"Top section: ymid={{ymid:.1f}} yslice={{yslice:.1f}} ybar={{ybar:.1f}}", flush=True)
 
             top = build_ortho_view(doc, "TopSection", base_shape, 'top',
                                     frame_solid_list=frame_solid_list,
                                     bg_cutter=half_y,
-                                    plane_normal=V(0, 1, 0), plane_distance=ymid)
+                                    plane_normal=V(0, 1, 0), plane_distance=yslice)
             if top is None:
                 print("WARNING: top section produced no geometry", flush=True)
             else:
