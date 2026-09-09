@@ -17,24 +17,23 @@
 (function () {
   if (typeof window === 'undefined') return;
 
-  // drawing-engine.js is a classic script, so DrawingCanvas may be exposed as
-  // a global lexical binding rather than window.QSDraw. Support both forms
-  // without changing the existing renderer/export pattern.
-  let DrawingCanvas = null;
+  // drawing-engine.js is a classic script. Depending on its export pattern,
+  // DrawingCanvas may be a window property or a global lexical binding.
+  let CanvasCtor = null;
   if (window.QSDraw && window.QSDraw.DrawingCanvas) {
-    DrawingCanvas = window.QSDraw.DrawingCanvas;
+    CanvasCtor = window.QSDraw.DrawingCanvas;
   } else if (typeof window.DrawingCanvas === 'function') {
-    DrawingCanvas = window.DrawingCanvas;
-  } else if (typeof DrawingCanvas === 'function') {
-    DrawingCanvas = DrawingCanvas;
+    CanvasCtor = window.DrawingCanvas;
+  } else if (typeof DrawingCanvas !== 'undefined' && typeof DrawingCanvas === 'function') {
+    CanvasCtor = DrawingCanvas;
   }
 
-  if (!DrawingCanvas || !DrawingCanvas.prototype ||
-      typeof DrawingCanvas.prototype.render !== 'function') return;
-  if (DrawingCanvas.prototype.__qsCadLayerFixInstalled) return;
-  DrawingCanvas.prototype.__qsCadLayerFixInstalled = true;
+  if (!CanvasCtor || !CanvasCtor.prototype ||
+      typeof CanvasCtor.prototype.render !== 'function') return;
+  if (CanvasCtor.prototype.__qsCadLayerFixInstalled) return;
+  CanvasCtor.prototype.__qsCadLayerFixInstalled = true;
 
-  const originalRender = DrawingCanvas.prototype.render;
+  const originalRender = CanvasCtor.prototype.render;
 
   function makeLayer(id, label) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -105,7 +104,7 @@
 
       if (kind === 'glass') layers.glass.appendChild(node);
       else if (kind === 'sash') layers.sash.appendChild(node);
-      else if (kind === 'arch') layers.arch.appendChild(node);
+      else if (kind === 'arch' || kind === 'transom') layers.arch.appendChild(node);
       else if (kind === 'frame') layers.frame.appendChild(node);
       else layers.other.appendChild(node);
     }
@@ -119,7 +118,7 @@
     svg.setAttribute('data-qs-display-order', 'glass,sash,arch-transom,frame,overlay');
   }
 
-  DrawingCanvas.prototype.render = function () {
+  CanvasCtor.prototype.render = function () {
     originalRender.apply(this, arguments);
     normaliseLayers(this);
   };
