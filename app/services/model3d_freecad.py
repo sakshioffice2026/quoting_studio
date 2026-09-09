@@ -301,6 +301,7 @@ cx, cy = W / 2.0, H / 2.0
 # pipeline below to tell whether a member's own extrusion axis runs
 # parallel (in-plane) or perpendicular (transverse) to a given cut plane.
 _member_orientation = {{m["id"]: m.get("orientation") for m in data["members"]}}
+_member_curved = {{m["id"]: bool(m.get("path")) for m in data["members"]}}
 
 doc = App.newDocument("QS")
 frame_solids = []
@@ -356,14 +357,57 @@ def make_face_rings(rings, plane, bar, depth):
             print("hole face skipped:", e, flush=True)
     return outer, holes
 
+def _half_space_box(point, normal, size=100000.0):
+    """Big prism occupying the half-space on the +normal side of the plane
+    through 'point'. solid.cut(_half_space_box(...)) trims a solid flush
+    to that plane — used to mitre adjacent arc segments together.
+
+    Built from an explicit orthonormal basis (cross products) instead of
+    App.Rotation(V(1,0,0), n): that constructor is singular whenever n is
+    near-antiparallel to (1,0,0), which a semicircular arc's bisector
+    direction hits in the normal course of sweeping 180 degrees — the
+    resulting exception was caught by the caller's box-fallback and
+    silently replaced the whole curved head with its bounding box."""
+    n = V(normal.x, normal.y, normal.z)
+    if n.Length < 1e-9:
+        n = V(0.0, 0.0, 1.0)
+    n.normalize()
+    ref = V(0.0, 0.0, 1.0) if abs(n.z) < 0.9 else V(1.0, 0.0, 0.0)
+    u = ref.cross(n)
+    if u.Length < 1e-9:
+        u = V(0.0, 1.0, 0.0).cross(n)
+    u.normalize()
+    w = n.cross(u)
+    w.normalize()
+    h = size / 2.0
+    pts = [point + u * (-h) + w * (-h),
+           point + u * ( h) + w * (-h),
+           point + u * ( h) + w * ( h),
+           point + u * (-h) + w * ( h)]
+    pts.append(pts[0])
+    face = Part.Face(Part.makePolygon(pts))
+    return face.extrude(n * size)
+
 def make_path_solid(rings, bar, depth, path, closed):
     """Curved member (arched/gothic head, full circular ring): sweep the
     section along each straight polyline edge of path — the FreeCAD
     mirror of model3d.py::_member_mesh_path / _member_solid_cq_path, so
-    all three exporters (trimesh/cadquery/FreeCAD) agree on placement."""
+    all three exporters (trimesh/cadquery/FreeCAD) agree on placement.
+
+    Each polyline edge is built as its own straight extruded segment with
+    square (perpendicular) end caps, so consecutive segments at different
+    angles don't align at their shared edge — this left a small facet /
+    "tooth" at every sub-segment step around the arc, most visible near
+    the ends where the tangent angle changes fastest relative to the
+    straight jamb it meets. Internal joints are now mitred: the two
+    segments meeting at each interior path point are each trimmed to the
+    bisector plane of their directions, so the outer/inner curve boundary
+    is continuous instead of faceted. The path's first/last endpoints
+    (spring points, meeting the jamb) are left untouched — that is a
+    separate joint, not this bug."""
     n = len(path)
     count = n if closed else n - 1
-    solids = []
+    raw = []  # (segment_solid, p0_centered, p1_centered)
     for i in range(count):
         p0 = path[i]
         p1 = path[(i + 1) % n] if closed else path[i + 1]
@@ -386,10 +430,33 @@ def make_path_solid(rings, bar, depth, path, closed):
         tx = p0[0] - cx - ux * bar / 2.0
         ty = p0[1] - cy - uy * bar / 2.0
         seg.translate(V(tx, ty, 0.0))
-        solids.append(seg)
+        raw.append((seg, (p0[0] - cx, p0[1] - cy), (p1[0] - cx, p1[1] - cy)))
 
-    if not solids:
+    if not raw:
         return None
+
+    solids = [s for s, _, _ in raw]
+    for i in range(len(raw) - 1):
+        p0a, p1a = raw[i][1], raw[i][2]
+        p0b, p1b = raw[i + 1][1], raw[i + 1][2]
+        dir_a = V(p1a[0] - p0a[0], p1a[1] - p0a[1], 0.0)
+        dir_b = V(p1b[0] - p0b[0], p1b[1] - p0b[1], 0.0)
+        if dir_a.Length < 1e-6 or dir_b.Length < 1e-6:
+            continue
+        dir_a.normalize()
+        dir_b.normalize()
+        bis = dir_a + dir_b
+        if bis.Length < 1e-6:
+            continue
+        bis.normalize()
+        joint = V(p1a[0], p1a[1], 0.0)
+        try:
+            solids[i]     = solids[i].cut(_half_space_box(joint, bis))
+            solids[i + 1] = solids[i + 1].cut(
+                _half_space_box(joint, V(-bis.x, -bis.y, -bis.z)))
+        except Exception as e:
+            print("path mitre cut failed:", e, flush=True)
+
     result = solids[0]
     for s in solids[1:]:
         result = result.fuse(s)
@@ -704,6 +771,10 @@ def build_ortho_view(doc, name_prefix, base_shape, view_key, frame_solid_list=No
             # members still contribute their real silhouette via the
             # background projection above; they are only excluded from
             # the slice/hatch pass here.
+            if _member_curved.get(mid):
+                print(f"    [{{name_prefix}}] member={{mid}} curved-path — "
+                      f"excluded from slice/hatch (silhouette only)", flush=True)
+                continue
             orient = _member_orientation.get(mid)
             axis = _ORIENT_AXIS.get(orient)
             _dot = axis.dot(plane_normal) if axis is not None else None

@@ -113,6 +113,8 @@ def get_step_views(window, panes, tenant_id=None) -> dict:
     arch_rise = None
     if isinstance(design, dict):
         arch_rise = design.get('archRise')
+        if arch_rise is None:
+            arch_rise = design.get('archRise_mm')
     size_shape_key = (
         float(getattr(window, 'width_mm', 0) or 0),
         float(getattr(window, 'height_mm', 0) or 0),

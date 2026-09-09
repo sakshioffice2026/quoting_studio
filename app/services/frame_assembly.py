@@ -646,6 +646,8 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
     if shape == 'rectangular':
         shape = 'rectangle'
     arch_rise = design.get('archRise')
+    if arch_rise is None:
+        arch_rise = design.get('archRise_mm')
     try:
         arch_rise = float(arch_rise) if arch_rise is not None else None
     except (TypeError, ValueError):
@@ -731,9 +733,25 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         rx_in = max(W / 2.0 - bar_h, 1.0)
         ry_in = max(H / 2.0 - bar_h, 1.0)
         ellipse_poly = _ellipse_points(cx, cy, rx_in, ry_in, segments=96)
+        arch_inner_poly = None
+    elif shape == 'arched':
+        # Arc radius MUST match the jamb's own inner face (bar_j), not the
+        # head's bar (bar_h): the arc's start/end points are stitched
+        # directly onto the jamb straight segments below. A radius based on
+        # bar_h leaves a gap/step at the spring line (if bar_h != bar_j),
+        # producing a non-convex notch that silently breaks the convex-only
+        # Sutherland-Hodgman clip below (collapses the whole clip flat).
+        rx_in = ry_in = None
+        ellipse_poly = None
+        r_in = max(W / 2.0 - bar_j, 1.0)
+        arch_inner_poly = (
+            [(bar_j, bar_c), (W - bar_j, bar_c), (W - bar_j, spring_y)]
+            + _arc_points(W / 2.0, spring_y, r_in, 0.0, 180.0, segments=48)
+        )
     else:
         rx_in = ry_in = None
         ellipse_poly = None
+        arch_inner_poly = None
 
     rects = _norm_panes(panes, W, H)
 
@@ -992,6 +1010,14 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             # never pokes past the round frame at the pane's outer corner.
             rect_poly = [(gx, gy), (gx + gw, gy), (gx + gw, gy + gh), (gx, gy + gh)]
             clipped = _clip_polygon_convex(rect_poly, ellipse_poly)
+            if len(clipped) < 3:
+                continue
+            clip_path = clipped
+        elif shape == 'arched':
+            # Same clip, against the arched inner-face boundary built above,
+            # so the pane follows the round top instead of a flat cut line.
+            rect_poly = [(gx, gy), (gx + gw, gy), (gx + gw, gy + gh), (gx, gy + gh)]
+            clipped = _clip_polygon_convex(rect_poly, arch_inner_poly)
             if len(clipped) < 3:
                 continue
             clip_path = clipped

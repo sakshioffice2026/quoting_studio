@@ -94,6 +94,8 @@ def read_shape(window) -> tuple[str, float]:
         shape = "rectangle"
 
     arch_rise = design.get("archRise")
+    if arch_rise is None:
+        arch_rise = design.get("archRise_mm")
     try:
         arch_rise = float(arch_rise) if arch_rise is not None else 0.0
     except (TypeError, ValueError):

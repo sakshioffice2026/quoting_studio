@@ -71,6 +71,8 @@ def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
     if shape == 'rectangular':
         shape = 'rectangle'
     arch_rise = design.get('archRise')
+    if arch_rise is None:
+        arch_rise = design.get('archRise_mm')
     try:
         arch_rise = float(arch_rise) if arch_rise is not None else None
     except (TypeError, ValueError):

@@ -585,7 +585,7 @@ def build_geometry(
         shape = "rectangle"
 
     arch_rise_mm = _number(
-        design.get("archRise"),
+        design.get("archRise", design.get("archRise_mm")),
         0.0,
     )
 
