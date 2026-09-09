@@ -979,18 +979,31 @@ else:
             bb_base = base_shape.BoundBox
 
             # ── Sectional Side View ──────────────────────────────────────
-            # Side section: cut X-normal through a vertical member (jamb/mullion).
-            # Snap xmid to nearest vertical member centre so slice() always
-            # hits real frame material, not the glass gap at X=0.
+            # Side section: cut X-normal through a vertical JAMB member —
+            # not any vertical member. A window's centre mullion
+            # (role == "mullion") commonly sits closer to the model's
+            # geometric X-mid than either jamb, so a plain "nearest
+            # vertical member" search locks onto the mullion instead of a
+            # jamb, cutting the section at the wrong location with the
+            # wrong bar width (confirmed against an uploaded window
+            # .FCStd: jambs at X=-566.5/+566.5, mullion at X=0.0 — the old
+            # nearest-to-center search always chose the mullion).
+            # Restricting the candidate pool to role == "jamb" ensures the
+            # Side Section always cuts through a real outer-frame jamb, as
+            # intended, on both doors (no mullion present) and windows
+            # (mullion present). Fallback to geo_xmid/67mm below is
+            # unchanged for the edge case of zero jamb-role members.
             # to_page: Z->pgX, Y->pgY.
             # bg_cutter keeps left half (X < xmid).
             # Horizontal members (axis X, dot=1) → excluded.
             # Vertical members   (axis Y, dot=0) → included → hatched.
             geo_xmid = (bb_base.XMin + bb_base.XMax) / 2.0
-            vert_members = [mm for mm in data["members"] if mm.get("orientation") == "vertical"]
-            vert_centers = [(mm["x1"] + mm["x2"]) / 2.0 - cx for mm in vert_members]
-            if vert_centers:
-                nearest = min(zip(vert_centers, vert_members), key=lambda t: abs(t[0] - geo_xmid))
+            jamb_members = [mm for mm in data["members"]
+                            if mm.get("orientation") == "vertical"
+                            and mm.get("role") == "jamb"]
+            jamb_centers = [(mm["x1"] + mm["x2"]) / 2.0 - cx for mm in jamb_members]
+            if jamb_centers:
+                nearest = min(zip(jamb_centers, jamb_members), key=lambda t: abs(t[0] - geo_xmid))
                 xmid = nearest[0]
                 xbar = float(nearest[1].get("bar", 67))
             else:
