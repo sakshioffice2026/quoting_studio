@@ -555,12 +555,11 @@ def _add_circular_frame_ring(A: Assembly, W, H, p_head, depth):
     ))
 
 
-def _add_arched_head(A: Assembly, W, spring_y, p_head, depth):
-    """Semicircular arched head spanning the two jamb tops, radius W/2,
-    centred at (W/2, spring_y) — mirrors engineering_dxf.py's 'arched'
-    branch (add_arc center=(W/2,spring_y), radius=W/2, 0deg->180deg)."""
+def _add_arched_head(A: Assembly, W, spring_y, p_head, depth, arch_rise=None):
+    """Arched head: radius = arch_rise (not W/2) so apex stays at H."""
     cx = W / 2.0
-    path = _arc_points(cx, spring_y, W / 2.0, 180.0, 0.0, segments=32)
+    r = arch_rise if (arch_rise and arch_rise > 0) else W / 2.0
+    path = _arc_points(cx, spring_y, r, 180.0, 0.0, segments=32)
     bar = p_head['bar']
     A.members.append(Member(
         id='F_head', role=ROLE_HEAD, orientation=ORI_H,
@@ -646,8 +645,6 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
     if shape == 'rectangular':
         shape = 'rectangle'
     arch_rise = design.get('archRise')
-    if arch_rise is None:
-        arch_rise = design.get('archRise_mm')
     try:
         arch_rise = float(arch_rise) if arch_rise is not None else None
     except (TypeError, ValueError):
@@ -681,12 +678,12 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
 
         if shape == 'arched':
             spring_y = H - arch_rise
-            _add_arched_head(A, W, spring_y, p_head, p_head['depth'])
-            jy1, jy2 = bar_c, spring_y
+            _add_arched_head(A, W, spring_y, p_head, p_head['depth'], arch_rise=arch_rise)
+            jy1, jy2 = bar_c, H  # jambs run full height; arch head fuses at top
         elif shape == 'gothic':
             spring_y = H - arch_rise
             _add_gothic_head(A, W, H, spring_y, arch_rise, p_head, p_head['depth'])
-            jy1, jy2 = bar_c, spring_y
+            jy1, jy2 = bar_c, H  # jambs run full height; arch head fuses at top
         else:
             # Plain rectangle (default). Head — centre line at
             # y = H - bar_h/2, spanning full width.
@@ -733,25 +730,9 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         rx_in = max(W / 2.0 - bar_h, 1.0)
         ry_in = max(H / 2.0 - bar_h, 1.0)
         ellipse_poly = _ellipse_points(cx, cy, rx_in, ry_in, segments=96)
-        arch_inner_poly = None
-    elif shape == 'arched':
-        # Arc radius MUST match the jamb's own inner face (bar_j), not the
-        # head's bar (bar_h): the arc's start/end points are stitched
-        # directly onto the jamb straight segments below. A radius based on
-        # bar_h leaves a gap/step at the spring line (if bar_h != bar_j),
-        # producing a non-convex notch that silently breaks the convex-only
-        # Sutherland-Hodgman clip below (collapses the whole clip flat).
-        rx_in = ry_in = None
-        ellipse_poly = None
-        r_in = max(W / 2.0 - bar_j, 1.0)
-        arch_inner_poly = (
-            [(bar_j, bar_c), (W - bar_j, bar_c), (W - bar_j, spring_y)]
-            + _arc_points(W / 2.0, spring_y, r_in, 0.0, 180.0, segments=48)
-        )
     else:
         rx_in = ry_in = None
         ellipse_poly = None
-        arch_inner_poly = None
 
     rects = _norm_panes(panes, W, H)
 
@@ -1010,14 +991,6 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             # never pokes past the round frame at the pane's outer corner.
             rect_poly = [(gx, gy), (gx + gw, gy), (gx + gw, gy + gh), (gx, gy + gh)]
             clipped = _clip_polygon_convex(rect_poly, ellipse_poly)
-            if len(clipped) < 3:
-                continue
-            clip_path = clipped
-        elif shape == 'arched':
-            # Same clip, against the arched inner-face boundary built above,
-            # so the pane follows the round top instead of a flat cut line.
-            rect_poly = [(gx, gy), (gx + gw, gy), (gx + gw, gy + gh), (gx, gy + gh)]
-            clipped = _clip_polygon_convex(rect_poly, arch_inner_poly)
             if len(clipped) < 3:
                 continue
             clip_path = clipped
