@@ -1,16 +1,8 @@
 """
 app/services/model3d_freecad.py — FreeCAD-based 3D window/door assembly.
-
-Correct approach (mirrors Image 1 engineering drawing):
-  1. For each member, the cross-section polygon is built DIRECTLY in the
-     correct plane (YZ for horizontal, XZ for vertical members).
-  2. Extrude along the member's axis direction (V(L,0,0) or V(0,L,0)).
-  3. Translate to member world position.
-  NO rotation matrices. NO mitre cuts (aluminium = butt joints).
-
-Subprocess pattern follows SCAPI generator.py exactly.
 """
 from __future__ import annotations
+
 import os, json, subprocess, tempfile, logging
 
 logger = logging.getLogger(__name__)
@@ -59,8 +51,9 @@ def _find_freecad_OLD() -> str | None:
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  PUBLIC ENTRY
+# PUBLIC ENTRY
 # ══════════════════════════════════════════════════════════════════════
+
 def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
     """
     Build window/door using FreeCAD. Raises RuntimeError if FreeCAD is not
@@ -73,11 +66,11 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
     fmt = fmt.lower()
     from .frame_assembly import build_members, resolve_profiles
     from .model3d_assembly import (_apply_window_overrides, _MIN_DEPTH,
-                                   prepare_sections)
+                                    prepare_sections)
 
     profiles = resolve_profiles(tenant_id,
-                                getattr(window, 'material', 'Aluminium'),
-                                window=window)
+                                 getattr(window, 'material', 'Aluminium'),
+                                 window=window)
     _apply_window_overrides(profiles, window, tenant_id)
     asm = build_members(window, panes, profiles)
     if not asm.members:
@@ -108,7 +101,7 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
                 continue
     if tmp_dir is None:
         tmp_dir = tempfile.gettempdir()
-    wid     = getattr(window, 'id', 0)
+    wid = getattr(window, 'id', 0)
 
     json_path     = os.path.join(tmp_dir, f'qs_asm_{wid}.json')
     script_path   = os.path.join(tmp_dir, f'qs_fc_{wid}.py')
@@ -129,8 +122,8 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
         env = os.environ.copy()
         env['LIBGL_ALWAYS_SOFTWARE'] = '1'
         r = subprocess.run([freecad, script_path],
-                           capture_output=True, text=True,
-                           timeout=180, env=env)
+                            capture_output=True, text=True,
+                            timeout=180, env=env)
         logger.debug('FreeCAD stdout: %s', (r.stdout or '')[-4000:])
         if r.stderr:
             logger.warning('FreeCAD stderr: %s', r.stderr[-300:])
@@ -168,6 +161,7 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
                     'FreeCAD produced a STEP with no solid geometry '
                     f'({len(data)} bytes). stdout tail:\n{(r.stdout or "")[-2000:]}')
             return data
+
         stl_data = _read(stl_path)
         if fmt == 'stl':
             # Merge glass into the STL so a standalone download is complete
@@ -182,6 +176,7 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
             except Exception as exc:
                 logger.debug('STL glass merge skipped: %s', exc)
             return stl_data
+
         glass_data = None
         try:
             if os.path.exists(glass_path) and os.path.getsize(glass_path) > 100:
@@ -202,13 +197,14 @@ def generate_3d_freecad(window, panes, tenant_id=None, fmt='glb') -> bytes:
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  SERIALISE → JSON
+# SERIALISE → JSON
 # ══════════════════════════════════════════════════════════════════════
+
 def _serialise(window, asm) -> dict:
     r, g, b = 0.42, 0.42, 0.44
     try:
         h = (getattr(window, 'frame_colour_hex', None) or '#6a6a6c').lstrip('#')
-        r, g, b = int(h[0:2],16)/255, int(h[2:4],16)/255, int(h[4:6],16)/255
+        r, g, b = int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
     except Exception:
         pass
 
@@ -225,8 +221,8 @@ def _serialise(window, asm) -> dict:
             'length': float(m.length),
             # NORMALISED rings from prepare_sections: rings[0] outer,
             # rings[1:] holes; u = across bar (0..bar), v = depth (0..depth).
-            'rings':  [[[float(u), float(v)] for u, v in r]
-                       for r in getattr(m, '_rings', [])],
+            'rings':  [[[float(u), float(v)] for u, v in ring]
+                       for ring in getattr(m, '_rings', [])],
             # Curved member (arched/gothic head, full circular ring):
             # authoritative polyline — mirrors model3d.py's path handling
             # (_member_mesh_path / _member_solid_cq_path). Without this the
@@ -243,10 +239,10 @@ def _serialise(window, asm) -> dict:
     # at the external face. Reference the FRAME depth (head/jamb/sash), not the
     # deep sill, so the glass beds in the frame rebate instead of behind it.
     frame_ref = max((m.depth for m in asm.members
-                     if m.role in ('head', 'jamb', 'mullion', 'transom',
-                                   'sash', 'outer_frame')), default=65.0)
-    dep_max    = max((m.depth for m in asm.members), default=65.0)
-    glass_z    = max(frame_ref - 24.0, frame_ref * 0.35)   # rebate pocket
+                      if m.role in ('head', 'jamb', 'mullion', 'transom',
+                                    'sash', 'outer_frame')), default=65.0)
+    dep_max = max((m.depth for m in asm.members), default=65.0)
+    glass_z = max(frame_ref - 24.0, frame_ref * 0.35)   # rebate pocket
 
     glass = []
     for gc in asm.glass:
@@ -270,52 +266,58 @@ def _serialise(window, asm) -> dict:
         'frame_rgb': [r, g, b],
         'members':   members,
         'glass':     glass,
-        'glass_z':   glass_z,             # rebate pocket, behind inner face
+        'glass_z':   glass_z,              # rebate pocket, behind inner face
         'panel_z':   frame_ref * 0.5,      # solid panel centred in frame depth
     }
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  FREECAD SCRIPT
+# FREECAD SCRIPT
 # ══════════════════════════════════════════════════════════════════════
+
 def _build_script(json_path: str, step_path: str,
-                  stl_path: str, glass_path: str,
-                  fcstd_path: str, techdraw_path: str, fmt: str) -> str:
-    jpath = json_path.replace('\\', '/')
-    spath = step_path.replace('\\', '/')
-    mpath = stl_path.replace('\\', '/')
-    gpath = glass_path.replace('\\', '/')
+                   stl_path: str, glass_path: str,
+                   fcstd_path: str, techdraw_path: str, fmt: str) -> str:
+    jpath  = json_path.replace('\\', '/')
+    spath  = step_path.replace('\\', '/')
+    mpath  = stl_path.replace('\\', '/')
+    gpath  = glass_path.replace('\\', '/')
     fcpath = fcstd_path.replace('\\', '/')
     tdpath = techdraw_path.replace('\\', '/')
-    need_step      = 'True' if fmt in ('step', 'glb') else 'False'
-    need_stl       = 'True' if fmt in ('stl',  'glb') else 'False'
-    need_views     = 'True' if fmt in ('fcstd',)      else 'False'
-    need_techdraw  = 'True' if fmt in ('techdraw',)   else 'False'
+    need_step     = 'True' if fmt in ('step', 'glb') else 'False'
+    need_stl      = 'True' if fmt in ('stl', 'glb') else 'False'
+    need_views    = 'True' if fmt in ('fcstd',) else 'False'
+    need_techdraw = 'True' if fmt in ('techdraw',) else 'False'
 
     return f'''
 import FreeCAD as App, Part, MeshPart, json, os, math
 V = App.Vector
 
-data   = json.load(open(r"{jpath}", encoding="utf-8"))
-W, H   = data["width"], data["height"]
+data = json.load(open(r"{jpath}", encoding="utf-8"))
+W, H = data["width"], data["height"]
 cx, cy = W / 2.0, H / 2.0
 
-doc           = App.newDocument("QS")
-frame_solids  = []
-glass_solids  = []
-dep_max       = max((m["depth"] for m in data["members"]), default=65.0)
+# Per-member orientation lookup, keyed by member id — used by the section
+# pipeline below to tell whether a member's own extrusion axis runs
+# parallel (in-plane) or perpendicular (transverse) to a given cut plane.
+_member_orientation = {{m["id"]: m.get("orientation") for m in data["members"]}}
+
+doc = App.newDocument("QS")
+frame_solids = []
+glass_solids = []
+dep_max = max((m["depth"] for m in data["members"]), default=65.0)
 
 # ── helper: cross-section face from loops or plain rectangle ─────────
 # loops: list of point-lists where each pt is (u, v)
-#   u = across the bar  (0 .. bar)  maps to the face-perpendicular axis
-#   v = through-wall    (0 .. depth) maps to Z in world space
+# u = across the bar (0 .. bar) maps to the face-perpendicular axis
+# v = through-wall (0 .. depth) maps to Z in world space
 # For HORIZONTAL member: u → Y (bar straddles centre line), v → Z
-# For VERTICAL   member: u → X (bar straddles centre line), v → Z
+# For VERTICAL member: u → X (bar straddles centre line), v → Z
 
 def _mk_face(pts_2d, plane, bar, depth):
     """
     Build a Part.Face from a list of (u,v) points in the given plane.
-    plane: 'H' → YZ plane (u→Y, v→Z);  'V' → XZ plane (u→X, v→Z).
+    plane: 'H' → YZ plane (u→Y, v→Z); 'V' → XZ plane (u→X, v→Z).
     Validates the wire; falls back to a rectangle if the outline is bad.
     """
     b2 = bar / 2.0
@@ -326,7 +328,7 @@ def _mk_face(pts_2d, plane, bar, depth):
     try:
         pts = [_v(u, v) for u, v in pts_2d]
         if len(pts) >= 3:
-            pts.append(pts[0])                     # close the wire
+            pts.append(pts[0])  # close the wire
             wire = Part.makePolygon(pts)
             if wire.isClosed():
                 face = Part.Face(wire)
@@ -356,7 +358,7 @@ def make_face_rings(rings, plane, bar, depth):
 
 def make_path_solid(rings, bar, depth, path, closed):
     """Curved member (arched/gothic head, full circular ring): sweep the
-    section along each straight polyline edge of `path` — the FreeCAD
+    section along each straight polyline edge of path — the FreeCAD
     mirror of model3d.py::_member_mesh_path / _member_solid_cq_path, so
     all three exporters (trimesh/cadquery/FreeCAD) agree on placement."""
     n = len(path)
@@ -393,13 +395,405 @@ def make_path_solid(rings, bar, depth, path, closed):
         result = result.fuse(s)
     return result
 
+# ══════════════════════════════════════════════════════════════════════
+# SHARED ORTHOGRAPHIC SECTION-VIEW PIPELINE
+# (used identically by Front / Side-section / Top-section — this is the
+# single source of truth for coordinate mapping, cut validation, hatch
+# clipping, and draw order, replacing three previously divergent
+# hand-written implementations.)
+# ══════════════════════════════════════════════════════════════════════
+# World axes are fixed by the member-placement code above: X = width,
+# Y = height, Z = depth (through-wall). Page mappings are declared once
+# here so Front/Top/Side can never drift independently of each other.
+#   FRONT : page = ( X,  Y)  width -> page X, height -> page Y
+#   TOP   : page = ( X, -Z)  width -> page X, depth  -> page Y (flip)
+#   SIDE  : page = (-Z,  Y)  depth -> page X (flip),  height -> page Y
+# Height is shared on page-Y between FRONT and SIDE with no sign flip.
+# Width is shared on page-X between FRONT and TOP with no sign flip.
+# Depth uses exactly one sign convention (-Z) in both TOP and SIDE.
+
+VIEW_TO_PAGE = {{
+    'front': lambda p: (p.x, p.y),
+    'top':   lambda p: (p.x, -p.z),
+    'side':  lambda p: (p.z, p.y),
+}}
+
+# World-space extrusion axis for each member orientation. Used to test
+# whether a member's own length axis runs parallel (in-plane) to a given
+# section cut plane, versus transverse (perpendicular) to it.
+_ORIENT_AXIS = {{
+    'horizontal': V(1, 0, 0),
+    'vertical':   V(0, 1, 0),
+}}
+
+def _project_edges(shape, to_page, deflection=0.2, exclude_plane=None):
+    """Manual edge -> page-space wireframe. Used for all three views so
+    they share one code path and one failure mode instead of relying on
+    Draft.make_shape2dview's single reliable projection direction.
+
+    exclude_plane, when given as (normal_vector, distance), skips any
+    edge whose points all lie on that plane. This is used to drop the
+    cap face generated by the background boolean cut at the section
+    plane, which would otherwise duplicate the independently-built
+    cut-profile edges (ghost/double lines)."""
+    polys = []
+    for e in shape.Edges:
+        try:
+            pts3d = e.discretize(Deflection=deflection)
+            if exclude_plane is not None:
+                n, d = exclude_plane
+                if all(abs(n.dot(p) - d) < 1e-3 for p in pts3d):
+                    continue
+            pts2d = [V(*to_page(p), 0.0) for p in pts3d]
+            if len(pts2d) >= 2:
+                polys.append(Part.makePolygon(pts2d))
+        except Exception:
+            continue
+    return Part.Compound(polys) if polys else None
+
+def _clean_wire_shared(w):
+    """Closure/self-intersection guard shared by all views. A wire that
+    fails to rebuild closed never reaches the hatcher or the profile
+    outline, which is what previously let broken/open cut-loops through
+    as corrupted section geometry."""
+    try:
+        cw = Part.Wire(w.OrderedEdges)
+        cw.fix(1e-4, 1e-4, 1e-4)
+    except Exception:
+        return None
+    return cw if cw.isClosed() else None
+
+def _slice_wires_to_faces(solid, plane_normal, distance, to_page):
+    """Extract the exact planar section wires from one solid and preserve
+    every disconnected section loop.
+
+    The previous implementation reduced all returned OCC section wires to
+    one "largest outer" polygon and classified the rest with a page-space
+    point-in-polygon test. That is unsafe for profiles with multiple loops
+    or touching/near-touching boundaries and can turn a valid section into
+    a self-crossing polygon, which then makes the hatch clip into triangles.
+
+    Here the containment relationship is established while the wires are
+    still native FreeCAD geometry. Each valid section wire becomes a native
+    planar face; its CenterOfMass is tested against the other native faces.
+    The page-space polygons are only used for display after the topology has
+    already been classified.
+
+    Returns a list of (outer_pts, [hole_pts, ...]) tuples in page space.
+    """
+    try:
+        wires = solid.slice(plane_normal, distance)
+    except Exception:
+        return []
+    if not wires:
+        return []
+
+    loops = []
+    for w in wires:
+        cw = _clean_wire_shared(w)
+        if cw is None:
+            continue
+        try:
+            native_face = Part.Face(cw)
+            if not native_face.isValid() or native_face.Area <= 1e-6:
+                continue
+        except Exception:
+            continue
+
+        pts = []
+        for e in cw.OrderedEdges:
+            try:
+                ep = e.discretize(Deflection=0.2)
+            except Exception:
+                ep = []
+            if len(ep) >= 2:
+                for p in ep[:-1]:
+                    pts.append(to_page(p))
+
+        if len(pts) >= 3:
+            loops.append({{
+                'wire': cw,
+                'face': native_face,
+                'pts': pts,
+                'area': float(native_face.Area),
+                'depth': 0,
+            }})
+
+    if not loops:
+        return []
+
+    # Determine nesting from native OCC faces, not from discretised page
+    # polygons. This avoids winding assumptions and avoids using a boundary
+    # vertex as the containment probe.
+    for i, item in enumerate(loops):
+        probe = item['face'].CenterOfMass
+        depth = 0
+        for j, other in enumerate(loops):
+            if i == j or other['area'] <= item['area']:
+                continue
+            try:
+                if other['face'].isInside(probe, 1e-6, False):
+                    depth += 1
+            except Exception:
+                continue
+        item['depth'] = depth
+
+    # Even nesting depth = material, odd nesting depth = void. Build one
+    # section face per material island; do not collapse disconnected outers
+    # into one polygon.
+    result = []
+    for i, outer in enumerate(loops):
+        if outer['depth'] % 2 != 0:
+            continue
+
+        holes = []
+        for j, candidate in enumerate(loops):
+            if j == i or candidate['depth'] != outer['depth'] + 1:
+                continue
+            try:
+                if outer['face'].isInside(candidate['face'].CenterOfMass,
+                                           1e-6, False):
+                    holes.append(candidate['pts'])
+            except Exception:
+                continue
+
+        result.append((outer['pts'], holes))
+
+    return result
+
+def _face_from_loops(outer_pts, hole_pts_list):
+    """Build one validated page-space section face from one material island.
+
+    The caller has already classified the loops from native OCC section
+    topology, so this function performs only the final page-space conversion
+    needed by the hatch boolean.
+    """
+    def mk(pts):
+        try:
+            verts = [V(px, py, 0.0) for px, py in pts]
+            if len(verts) < 3:
+                return None
+            verts.append(verts[0])
+            w = Part.makePolygon(verts)
+            if not w.isClosed():
+                return None
+            f = Part.Face(w)
+            if not f.isValid() or f.Area <= 1e-6:
+                return None
+            return f
+        except Exception:
+            return None
+
+    outer = mk(outer_pts)
+    if outer is None:
+        return None
+
+    for hp in hole_pts_list:
+        hf = mk(hp)
+        if hf is None:
+            continue
+        try:
+            cut = outer.cut(hf)
+            if cut.isValid():
+                outer = cut
+        except Exception:
+            continue
+
+    return outer if outer.isValid() else None
+
+def _hatch_lines(face2d, spacing, angle_deg):
+    """45deg cross-hatch lines strictly clipped to face2d via boolean
+    common — lines can never extend past the actual solid cut face, so
+    hatching never bleeds into holes or background geometry."""
+    bb = face2d.BoundBox
+    diag = math.hypot(bb.XMax - bb.XMin, bb.YMax - bb.YMin) + 10.0
+    ang = math.radians(angle_deg)
+    dx, dy = math.cos(ang), math.sin(ang)
+    step = spacing * (2 ** 0.5)
+    n = int(diag / step) + 2
+    ox0, oy0 = bb.XMin - 5.0, bb.YMin - 5.0
+    edges = []
+    for i in range(-n, n):
+        ox = ox0 + i * step
+        p0 = V(ox - diag * dx, oy0 - diag * dy, 0.0)
+        p1 = V(ox + diag * dx, oy0 + diag * dy, 0.0)
+        try:
+            line = Part.LineSegment(p0, p1).toShape()
+            common = line.common(face2d)
+            edges.extend(common.Edges)
+        except Exception:
+            continue
+    return edges
+
+def _cut_frame_solids(frame_solid_list, cutter):
+    """Per-solid cut, validated. Cutting each member independently (never
+    a single boolean cut across the whole compound) avoids OCC merging
+    touching solids' faces at shared seams into one distorted face — the
+    source of the old wedge-shaped section corruption. Glass is excluded
+    by the caller, so a hollow opening can never produce a cut face to
+    hatch here."""
+    pieces = []
+    for _, solid in frame_solid_list:
+        try:
+            c = solid.cut(cutter)
+            if c.isValid() and len(c.Solids) > 0:
+                pieces.append(c)
+        except Exception:
+            continue
+    return Part.Compound(pieces) if pieces else None
+
+# Explicit draw-order stack: background wireframe paints first, hatch
+# fills on top of it, bold cut-profile outlines paint last/on top.
+_Z_BG, _Z_HATCH, _Z_PROFILE = 0.0, 0.05, 0.10
+
+def build_ortho_view(doc, name_prefix, base_shape, view_key, frame_solid_list=None,
+                      bg_cutter=None, plane_normal=None, plane_distance=None,
+                      hatch_spacing=5.0, hatch_angle=45.0):
+    """Single builder for Front (bg_cutter=None) and Side/Top sections.
+
+    The BACKGROUND silhouette (what's visible beyond the cut plane) still
+    comes from a half-space boolean cut (bg_cutter) — that's the only way
+    to get a real retained 3D shape to project. But the CUT PROFILE and
+    HATCH — the part that was actually broken — now come from
+    Shape.slice() per solid via _slice_wires_to_face(), not from
+    reverse-engineering a face out of the boolean cut result. Returns a
+    dict of created objects, or None if nothing could be built."""
+    to_page = VIEW_TO_PAGE[view_key]
+    src_shape = base_shape
+    if bg_cutter is not None:
+        src_shape = _cut_frame_solids(frame_solid_list, bg_cutter)
+        if src_shape is None:
+            return None
+
+    # Bug B fix: the boolean cut above caps the open volume with a new
+    # planar face exactly at the section plane. Its boundary edges are
+    # coplanar with (and duplicate) the independently-built cut-profile
+    # edges below, producing ghost/double lines. Exclude edges lying on
+    # that plane from the background projection.
+    exclude_plane = ((plane_normal, plane_distance)
+                      if plane_normal is not None else None)
+    bg = _project_edges(src_shape, to_page, exclude_plane=exclude_plane)
+    if bg is None or len(bg.Edges) == 0:
+        return None
+
+    bg_obj = doc.addObject("Part::Feature", f"{{name_prefix}}Background")
+    bg_obj.Shape = bg
+    bg_obj.Label = f"Draft_{{name_prefix}}_View"
+    bg_obj.Placement = App.Placement(V(0, 0, _Z_BG), App.Rotation())
+    doc.recompute()
+
+    profile_obj = None
+    hatch_obj = None
+
+    if plane_normal is not None:
+        profile_edges = []
+        hatch_edges = []
+        for mid, solid in frame_solid_list:
+            # Bug A fix: a member whose own extrusion axis runs parallel
+            # to this section's cut plane (e.g. a horizontal head/sill
+            # member sliced by the Top section's Y-normal plane, or a
+            # vertical jamb/mullion sliced by the Side section's X-normal
+            # plane) does not produce a true transverse cross-section —
+            # OCC's slice() instead returns a longitudinal cut spanning
+            # the member's full length, which the old code hatched as an
+            # oversized "material" face (black-fill / squeeze). Such
+            # members still contribute their real silhouette via the
+            # background projection above; they are only excluded from
+            # the slice/hatch pass here.
+            orient = _member_orientation.get(mid)
+            axis = _ORIENT_AXIS.get(orient)
+            _dot = axis.dot(plane_normal) if axis is not None else None
+            _included = not (axis is not None and abs(_dot) < 0.5)
+            print(f"    [{{name_prefix}}] member={{mid}} orient={{orient}} "
+                  f"dot={{_dot}} {{'INCLUDED' if _included else 'excluded'}}",
+                  flush=True)
+            if not _included:
+                continue
+
+            sections = _slice_wires_to_faces(
+                solid, plane_normal, plane_distance, to_page)
+            if not sections:
+                continue
+
+            for outer_pts, hole_pts in sections:
+                face2d = _face_from_loops(outer_pts, hole_pts)
+                if face2d is None:
+                    continue
+
+                # Each disconnected material island is drawn and hatched
+                # independently. Never combine separate OCC section loops
+                # into one polygon: that is what produced the wedge-shaped
+                # hatch corruption in the Top section.
+                verts = [V(px, py, 0.0) for px, py in outer_pts]
+                verts.append(verts[0])
+                try:
+                    profile_edges.extend(Part.makePolygon(verts).Edges)
+                except Exception:
+                    pass
+
+                for hp in hole_pts:
+                    hverts = [V(px, py, 0.0) for px, py in hp]
+                    hverts.append(hverts[0])
+                    try:
+                        profile_edges.extend(Part.makePolygon(hverts).Edges)
+                    except Exception:
+                        pass
+
+                hatch_edges.extend(
+                    _hatch_lines(face2d, hatch_spacing, hatch_angle))
+
+        print(f"    [{{name_prefix}}] profile_edges={{len(profile_edges)}} "
+              f"hatch_edges={{len(hatch_edges)}}", flush=True)
+
+        if profile_edges:
+            profile_obj = doc.addObject("Part::Feature", f"{{name_prefix}}Profile")
+            profile_obj.Shape = Part.Compound(profile_edges)
+            profile_obj.Label = f"Draft_{{name_prefix}}_Profile"
+            profile_obj.Placement = App.Placement(V(0, 0, _Z_PROFILE), App.Rotation())
+            if App.GuiUp:
+                try:
+                    profile_obj.ViewObject.LineColor = (0.0, 0.0, 0.0)
+                    profile_obj.ViewObject.LineWidth = 2.5
+                except Exception:
+                    pass
+
+        if hatch_edges:
+            hatch_obj = doc.addObject("Part::Feature", f"{{name_prefix}}Hatch")
+            hatch_obj.Shape = Part.Compound(hatch_edges)
+            hatch_obj.Label = f"Draft_{{name_prefix}}_Hatch"
+            hatch_obj.Placement = App.Placement(V(0, 0, _Z_HATCH), App.Rotation())
+
+        doc.recompute()
+
+        if App.GuiUp:
+            try:
+                bg_obj.ViewObject.LineColor = (0.65, 0.65, 0.65)
+                bg_obj.ViewObject.LineWidth = 1.0
+            except Exception:
+                pass
+
+    print(f"    [{{name_prefix}}] hatch_obj={{'created' if hatch_obj is not None else 'NONE'}} "
+          f"({{len(hatch_obj.Shape.Edges) if hatch_obj is not None else 0}} edges in Shape)",
+          flush=True)
+
+    members_out = [o for o in (bg_obj, hatch_obj, profile_obj) if o is not None]
+    grp = doc.addObject("App::DocumentObjectGroup", f"{{name_prefix}}Group")
+    grp.Group = members_out
+    return {{'group': grp, 'bg': bg_obj, 'profile': profile_obj, 'hatch': hatch_obj}}
+
+def _shift_group(gd, dx, dy):
+    for o in gd['group'].Group:
+        b = o.Placement.Base
+        o.Placement.Base = App.Vector(b.x + dx, b.y + dy, b.z)
+
 # ── build each member ────────────────────────────────────────────────
+
 for m in data["members"]:
-    bar    = float(m["bar"])
-    depth  = float(m["depth"])
-    L      = float(m["length"])
-    rings  = m.get("rings") or []
-    path   = m.get("path")
+    bar = float(m["bar"])
+    depth = float(m["depth"])
+    L = float(m["length"])
+    rings = m.get("rings") or []
+    path = m.get("path")
     closed = bool(m.get("closed"))
 
     # World-space position of member (centred coords)
@@ -450,17 +844,18 @@ for m in data["members"]:
             elif m["orientation"] == "horizontal":
                 x_start = min(m["x1"], m["x2"]) - cx
                 box = Part.makeBox(L, bar, depth,
-                                   V(x_start, my - bar/2.0, 0.0))
+                                    V(x_start, my - bar/2.0, 0.0))
             else:
                 y_start = min(m["y1"], m["y2"]) - cy
                 box = Part.makeBox(bar, L, depth,
-                                   V(mx - bar/2.0, y_start, 0.0))
+                                    V(mx - bar/2.0, y_start, 0.0))
             frame_solids.append((m['id'], box))
             print(f"  {{m['id']}} BOX-FALLBACK ({{e}})", flush=True)
         except Exception as e2:
             print(f"  {{m['id']}} FAILED entirely: {{e2}}", flush=True)
 
 # ── glass / panel boxes ──────────────────────────────────────────────
+
 glass_z = float(data.get("glass_z", dep_max * 0.5))
 panel_z = float(data.get("panel_z", dep_max * 0.5))
 for g in data["glass"]:
@@ -481,12 +876,13 @@ for g in data["glass"]:
             gs = face.extrude(V(0, 0, th))
         else:
             gs = Part.makeBox(g["w"], g["h"], th,
-                              V(gx - g["w"]/2, gy - g["h"]/2, z0 - th/2.0))
+                               V(gx - g["w"]/2, gy - g["h"]/2, z0 - th/2.0))
         glass_solids.append((f"Glass{{len(glass_solids)}}", gs))
     except Exception as e:
         print(f"  glass FAILED: {{e}}", flush=True)
 
 # ── export ────────────────────────────────────────────────────────────
+
 all_solids = frame_solids + glass_solids
 if not all_solids:
     print("ERROR: no solids built", flush=True)
@@ -507,12 +903,13 @@ else:
         for label, s in all_solids:
             n = seen_labels.get(label, 0)
             seen_labels[label] = n + 1
-            obj_name = label if n == 0 else f"{{label}}_{{n}}"
+            obj_name = label if n == 0 else f"{{label}}{{n}}"
             feat = doc.addObject("Part::Feature", obj_name)
             feat.Label = obj_name
             feat.Shape = s
             step_objs.append(feat)
         doc.recompute()
+
     if {need_step}:
         Part.export(step_objs, r"{spath}")
         try:
@@ -520,6 +917,7 @@ else:
             print(f"STEP exported ({{_sz}} bytes)", flush=True)
         except Exception as _e:
             print("STEP export check failed:", _e, flush=True)
+
     if {need_stl}:
         if frame_solids:
             fmesh = MeshPart.meshFromShape(
@@ -534,357 +932,100 @@ else:
             gmesh.write(r"{gpath}")
             print("STL (glass) exported", flush=True)
 
-    # ── Native Draft 2D views kept in the document tree (no DXF/STEP) ──
-    # Reuses the SAME solids already built above for the 3D geometry --
-    # the member/glass construction code above this block is untouched.
+    # ── Native 2D orthographic + section views kept in the document tree
+    # (no DXF/STEP). Reuses the SAME solids already built above for the
+    # 3D geometry — the member/glass construction code above is untouched.
+    # Front/Side-section/Top-section all go through build_ortho_view(),
+    # sharing one coordinate convention (VIEW_TO_PAGE), one cut/validate
+    # path (_cut_frame_solids), one hatch-clip path (_hatch_lines), and
+    # one explicit draw-order stack (_Z_BG < _Z_HATCH < _Z_PROFILE).
     if {need_views}:
-        import Draft
-
         solid_objs = [obj for obj in doc.Objects
                       if obj.isDerivedFrom("Part::Feature") and "Draft" not in obj.TypeId]
 
-        # Draft.make_shape2dview() requires a single DocumentObject, not a
-        # list — Part::Compound.Links is a non-destructive *grouping* link
-        # (no fused/copied geometry), so the individual solids above are
-        # untouched; this object only exists to satisfy that API shape.
+        # Part::Compound.Links is a non-destructive *grouping* link (no
+        # fused/copied geometry) — the individual solids above are
+        # untouched; this object only exists to supply one combined
+        # shape for projection.
         view_src = doc.addObject("Part::Compound", "ViewSource")
         view_src.Links = solid_objs
         view_src.Visibility = False
         doc.recompute()
         base_shape = view_src.Shape
 
-        # Draft.make_shape2dview's local 2D X/Y axes are only reliable for
-        # ONE projection direction — (0,-1,0) — which is proven correct by
-        # Front View always rendering with width→X, height→Y. Rather than
-        # guess axis mapping for the Side/Top directions, pre-rotate a
-        # temporary copy of the SAME solids by a known angle so that
-        # every view is produced through that one reliable direction:
-        #   Top:  +90° about X  -> depth (world Y) lands on page-Y, width stays on page-X
-        #   Side: -90° about Z  -> depth (world Y) lands on page-X, height (world Z,
-        #                          unchanged) stays on page-Y -> head/cill never flip
-        #
-        # Shape2DView is a PARAMETRIC object that keeps a live link to its
-        # Base object and recomputes from it — deleting the temp rotated
-        # source right after creating the view left a dangling link that a
-        # later blanket doc.recompute() could re-evaluate incorrectly
-        # (this is why Top previously came out with Side's proportions).
-        # Freezing the computed geometry into a plain, non-parametric
-        # Part::Feature immediately removes that dependency entirely.
-        def _make_view(rot_axis, rot_angle, label):
-            tmp = doc.addObject("Part::Feature", "TmpViewSrc")
-            tmp.Shape = base_shape
-            tmp.Placement = App.Placement(V(0, 0, 0), App.Rotation(rot_axis, rot_angle))
+        # Glass is excluded from the cut-solid list used for section
+        # hatching — a hollow opening can never contribute a hatch face.
+        frame_solid_list = [(o.Name, o.Shape) for o in solid_objs if "Glass" not in o.Name]
+
+        front = build_ortho_view(doc, "Front", base_shape, 'front')
+        if front is None:
+            print("ERROR: Front view produced no geometry", flush=True)
+        else:
+            fbb = front['bg'].Shape.BoundBox
+            _shift_group(front, -fbb.XMin, -fbb.YMin)
             doc.recompute()
-            proj = Draft.make_shape2dview(tmp, App.Vector(0, -1, 0))
-            doc.recompute()
-            frozen = proj.Shape.copy()
-            doc.removeObject(proj.Name)
-            doc.removeObject(tmp.Name)
-            v = doc.addObject("Part::Feature", "View")
-            v.Shape = frozen
-            v.Label = label
-            doc.recompute()
-            return v
+            front_bb = front['bg'].Shape.BoundBox
+            print(f"Draft_Front_View: edges={{len(front['bg'].Shape.Edges)}}", flush=True)
 
-        front_view = _make_view(V(1, 0, 0), 90,  "Draft_Front_View")
-        doc.recompute()
+            spacing = 250.0  # separation gap in mm
+            margin  = 200.0
+            bb_base = base_shape.BoundBox
 
-        # ViewSource only exists to supply base_shape above; delete it now
-        # — it must not appear in the final tree.
-        doc.removeObject(view_src.Name)
-        doc.recompute()
-
-        # NOTE: obj.Placement.Base = Vector(...) is a partial mutation on a
-        # copy returned by the Placement getter. For App::FeaturePython
-        # objects (which is what Draft.make_shape2dview creates), this can
-        # silently fail to persist. Using full Placement reassignment below
-        # instead, which reliably writes back.
-
-        # Front View: hard-normalize orientation. If the projection came
-        # out landscape (wider than tall), the window is lying on its
-        # side — rotate 90 deg about Z so it stands upright before
-        # anchoring at the origin.
-        bb_f = front_view.Shape.BoundBox
-        front_rot = App.Rotation()
-        if (bb_f.XMax - bb_f.XMin) > (bb_f.YMax - bb_f.YMin):
-            front_rot = App.Rotation(App.Vector(0, 0, 1), 90)
-            front_view.Placement = App.Placement(V(0, 0, 0), front_rot)
-            doc.recompute()
-            bb_f = front_view.Shape.BoundBox
-
-        # Front View Anchor: Force bottom-left to (0, 0, 0)
-        front_view.Placement = App.Placement(
-            App.Vector(-bb_f.XMin, -bb_f.YMin, 0), front_rot)
-        bb_f = front_view.Shape.BoundBox
-
-        spacing = 250.0  # Separation gap in mm
-
-        # ── Sectional Side View ─────────────────────────────────────────
-        # Use base_shape (already world-space compound) directly.
-        # Cut it with a half-space box to keep only X <= xmid,
-        # then feed through the IDENTICAL pipeline as _make_view:
-        #   Part::Feature  →  Placement(-90° Z)  →  make_shape2dview((0,-1,0))
-        # This is the only projection path that reliably produces edges.
-        bb_base  = base_shape.BoundBox
-        geo_xmid = (bb_base.XMin + bb_base.XMax) / 2.0
-
-        # Target the cut at a real vertical member (jamb/mullion/stile)
-        # nearest the geometric midpoint instead of an arbitrary geometric
-        # split, which on asymmetric layouts can land in empty glass and
-        # produce a section with no member profile. Falls back to the
-        # geometric midpoint when no vertical member exists (e.g. a
-        # single-pane picture window).
-        vert_centers = [
-            (mm["x1"] + mm["x2"]) / 2.0 - cx
-            for mm in data["members"] if mm.get("orientation") == "vertical"
-        ]
-        xmid = (min(vert_centers, key=lambda v: abs(v - geo_xmid))
-                if vert_centers else geo_xmid)
-
-        margin = 200.0
-        # Cutter removes the RIGHT half (X > xmid)
-        half_space = Part.makeBox(
-            (bb_base.XMax - xmid) + margin,
-            (bb_base.YMax - bb_base.YMin) + 2 * margin,
-            (bb_base.ZMax - bb_base.ZMin) + 2 * margin,
-            V(xmid, bb_base.YMin - margin, bb_base.ZMin - margin))
-
-        print(f"Section: xmid={{xmid:.1f}} (geo_mid={{geo_xmid:.1f}}) "
-              f"bb=[{{bb_base.XMin:.1f}},{{bb_base.XMax:.1f}}]x"
-              f"[{{bb_base.YMin:.1f}},{{bb_base.YMax:.1f}}]x"
-              f"[{{bb_base.ZMin:.1f}},{{bb_base.ZMax:.1f}}]", flush=True)
-
-        HATCH_SPACING = 5.0   # mm, ISO 128 cross-hatch baseline (shared by
-                              # Draft_Side_Section_Hatch and Draft_Top_Section_Hatch)
-        HATCH_ANGLE_DEG = 45.0  # deg, shared line angle for both hatches
-
-        # Component-level section source: frame/sash solids only (reuses
-        # the SAME per-part shapes already built above — no new geometry
-        # invented). Glass panes and any internal void are structurally
-        # absent from this compound, so they can never end up hatched,
-        # regardless of role/door-vs-window — no type-specific branching.
-        section_source_shape = (
-            Part.makeCompound([s for _, s in frame_solids])
-            if frame_solids else base_shape
-        )
-
-        side_section_view = None
-        section_hatch = None
-        try:
-            # Cut the frame-only compound — produces a TopoShape with left-half solids
-            sec_shape = section_source_shape.cut(half_space)
-            print(f"Section cut: valid={{sec_shape.isValid()}} solids={{len(sec_shape.Solids)}} vol={{sec_shape.Volume:.1f}}", flush=True)
-
-            if sec_shape.isValid() and len(sec_shape.Solids) > 0:
-                # Draft.make_shape2dview (ProjectionMode=1) unreliably
-                # returns 0 edges on this multi-solid cut compound in
-                # FreeCAD 1.1.3. Build the wireframe directly from
-                # sec_shape.Edges instead. The head-up-vertical rotation
-                # is baked directly into this (world Y, world Z) -> page
-                # mapping (equivalent to the old +90 deg Z Placement
-                # rotation), so the object's own Placement stays a pure
-                # translation — same pattern as the Top Section below.
-                def _pg_side(pt):
-                    return (-pt.z, pt.y)
-
-                wire_edges = []
-                for e in sec_shape.Edges:
-                    try:
-                        pts3d = e.discretize(Deflection=0.2)
-                        pts2d = [V(px, py, 0.0) for px, py in
-                                 (_pg_side(p) for p in pts3d)]
-                        if len(pts2d) >= 2:
-                            wire_edges.append(Part.makePolygon(pts2d))
-                    except Exception:
-                        continue
-
-                sec_frozen = Part.Compound(wire_edges) if wire_edges else None
-
-                n_edges = len(sec_frozen.Edges) if sec_frozen else 0
-                print(f"Section projection: {{n_edges}} edges", flush=True)
-
-                if n_edges > 0:
-                    side_section_view = doc.addObject("Part::Feature", "SideSection")
-                    side_section_view.Shape = sec_frozen
-                    side_section_view.Label = "Draft_Side_Section_View"
-                    doc.recompute()
-
-                    # Normalize to local (0,0) origin so Placement below
-                    # is a pure, unambiguous translation — no rotation
-                    # needed here since head-up orientation is already
-                    # baked into the page mapping above.
-                    raw_bb = side_section_view.Shape.BoundBox
-                    ss_offset_x, ss_offset_y = raw_bb.XMin, raw_bb.YMin
-                    norm_shape = sec_frozen.copy()
-                    norm_shape.translate(App.Vector(-ss_offset_x, -ss_offset_y, 0))
-                    side_section_view.Shape = norm_shape
-                    doc.recompute()
-
-                    # Relative-vector placement, directly LEFT of
-                    # Draft_Front_View, top/bottom-aligned to it.
-                    f_xmin = front_view.Shape.BoundBox.XMin
-                    f_ymin = front_view.Shape.BoundBox.YMin
-                    ss_xmin = side_section_view.Shape.BoundBox.XMin
-                    ss_xmax = side_section_view.Shape.BoundBox.XMax
-                    ss_ymin = side_section_view.Shape.BoundBox.YMin
-
-                    target_x = f_xmin - spacing - (ss_xmax - ss_xmin)
-                    target_y = f_ymin - ss_ymin
-                    side_rot = App.Rotation()
-                    side_section_view.Placement = App.Placement(
-                        App.Vector(target_x, target_y, 0), side_rot)
-                    doc.recompute()
-                    print(f"Draft_Side_Section_View: x={{target_x:.1f}} y={{target_y:.1f}} edges={{n_edges}}", flush=True)
-
-                    # ── Section hatching ─────────────────────────────────
-                    # Find the faces actually exposed by the cut (planar,
-                    # normal along world X, lying at X == xmid) — the real
-                    # sectioned material, not background/silhouette edges.
-                    # Rebuild each as a 2D face in the SAME (height, depth)
-                    # page frame the projection above uses (world Y->page
-                    # X, world Z->page Y — identical to the -90 deg Z
-                    # rotation + (0,-1,0) projection pipeline), then fill
-                    # with a 45 deg cross-hatch at HATCH_SPACING pitch.
-                    try:
-                        TOL = 0.5
-                        hatch_edges = []
-                        for f in sec_shape.Faces:
-                            try:
-                                u0, u1, v0, v1 = f.ParameterRange
-                                n = f.normalAt((u0 + u1) / 2.0, (v0 + v1) / 2.0)
-                                if abs(abs(n.x) - 1.0) > 0.05:
-                                    continue
-                                if abs(f.CenterOfMass.x - xmid) > TOL:
-                                    continue
-                            except Exception:
-                                continue
-
-                            def _pg(pt):
-                                # Same baked-rotation mapping used for the
-                                # wireframe above, offset-normalized to
-                                # match side_section_view's local origin.
-                                return (-pt.z - ss_offset_x, pt.y - ss_offset_y)
-
-                            def _wire_pts(w):
-                                pts = []
-                                for e in w.OrderedEdges:
-                                    for p in e.discretize(Deflection=0.2)[:-1]:
-                                        pts.append(_pg(p))
-                                return pts
-
-                            def _clean_wire(w):
-                                # Rebuild + fix so only closed,
-                                # non-self-intersecting wires reach the
-                                # hatcher — required for window profile
-                                # slices, which otherwise corrupt into
-                                # self-intersecting loops. MUST use
-                                # OrderedEdges: plain w.Edges is not
-                                # guaranteed to be in traversal order and
-                                # Part.Wire() built from it can fail to
-                                # close even for a perfectly valid loop.
-                                try:
-                                    cw = Part.Wire(w.OrderedEdges)
-                                    cw.fix(1e-4, 1e-4, 1e-4)
-                                except Exception:
-                                    return None
-                                if not cw.isClosed():
-                                    return None
-                                return cw
-
-                            def _mk_2d_face(pts):
-                                verts = [V(px, py, 0.0) for px, py in pts]
-                                verts.append(verts[0])
-                                poly_wire = Part.makePolygon(verts)
-                                poly_wire.fix(1e-4, 1e-4, 1e-4)
-                                if not poly_wire.isClosed():
-                                    return None
-                                face = Part.Face(poly_wire)
-                                face.fix(1e-4, 1e-4, 1e-4)
-                                return face if face.isValid() else None
-
-                            outer_clean = _clean_wire(f.OuterWire)
-                            if outer_clean is None:
-                                continue
-                            outer_pts = _wire_pts(outer_clean)
-                            hole_pts = []
-                            for w in f.Wires:
-                                if w.isSame(f.OuterWire):
-                                    continue
-                                hw_clean = _clean_wire(w)
-                                if hw_clean is not None:
-                                    hole_pts.append(_wire_pts(hw_clean))
-                            if len(outer_pts) < 3:
-                                continue
-                            try:
-                                hf = _mk_2d_face(outer_pts)
-                                if hf is None:
-                                    continue
-                                for hp in hole_pts:
-                                    if len(hp) >= 3:
-                                        hole_face = _mk_2d_face(hp)
-                                        if hole_face is None:
-                                            continue
-                                        hf = hf.cut(hole_face)
-                                if not hf.isValid():
-                                    continue
-                            except Exception:
-                                continue
-
-                            bb2  = hf.BoundBox
-                            diag = ((bb2.XMax - bb2.XMin) ** 2
-                                    + (bb2.YMax - bb2.YMin) ** 2) ** 0.5 + 10.0
-                            ang_rad = math.radians(HATCH_ANGLE_DEG)
-                            dir_x, dir_y = math.cos(ang_rad), math.sin(ang_rad)
-                            step = HATCH_SPACING * (2 ** 0.5)
-                            n_lines = int(diag / step) + 2
-                            cx0, cy0 = bb2.XMin - 5.0, bb2.YMin - 5.0
-                            for i in range(-n_lines, n_lines):
-                                ox = cx0 + i * step
-                                p0 = V(ox - diag * dir_x, cy0 - diag * dir_y, 0.0)
-                                p1 = V(ox + diag * dir_x, cy0 + diag * dir_y, 0.0)
-                                try:
-                                    line = Part.LineSegment(p0, p1).toShape()
-                                    hatch_edges.extend(line.common(hf).Edges)
-                                except Exception:
-                                    continue
-
-                        if hatch_edges:
-                            section_hatch = doc.addObject("Part::Feature", "SectionHatch")
-                            section_hatch.Shape = Part.Compound(hatch_edges)
-                            section_hatch.Label = "Draft_Side_Section_Hatch"
-                            section_hatch.Placement = side_section_view.Placement
-                            doc.recompute()
-                            print(f"Section hatch: {{len(hatch_edges)}} lines", flush=True)
-                        else:
-                            print("WARNING: section hatch produced no lines", flush=True)
-                    except Exception as _hatch_e:
-                        print(f"WARNING: section hatch failed: {{_hatch_e}}", flush=True)
-                else:
-                    print("WARNING: section projection returned no edges", flush=True)
-            else:
-                print("WARNING: section cut returned no solids", flush=True)
-        except Exception as _sec_e:
-            print(f"WARNING: section view failed: {{_sec_e}}", flush=True)
-
-        # ── Sectional Top View (horizontal cut) ─────────────────────────
-        # Same technique as the vertical section above, but cutting along
-        # world Y (height) through the nearest horizontal member (head/
-        # cill/transom) to the vertical midpoint, viewed in Top-view
-        # orientation. Placed BELOW Front View (spacing gap) so none of
-        # the existing Front/Top/Side/SideSection positions are touched.
-        top_section_view = None
-        top_section_hatch = None
-        try:
-            geo_ymid = (bb_base.YMin + bb_base.YMax) / 2.0
-            horiz_centers = [
-                (mm["y1"] + mm["y2"]) / 2.0 - cy
-                for mm in data["members"] if mm.get("orientation") == "horizontal"
+            # ── Sectional Side View: cut plane in X through the real
+            # vertical member (jamb/mullion/stile) nearest the geometric
+            # midpoint, so the section always lands on a member profile
+            # instead of an arbitrary geometric split that can fall in
+            # empty glass.
+            geo_xmid = (bb_base.XMin + bb_base.XMax) / 2.0
+            vert_centers = [
+                (mm["x1"] + mm["x2"]) / 2.0 - cx
+                for mm in data["members"] if mm.get("orientation") == "vertical"
             ]
-            ymid = (min(horiz_centers, key=lambda v: abs(v - geo_ymid))
-                    if horiz_centers else geo_ymid)
+            xmid = (min(vert_centers, key=lambda v: abs(v - geo_xmid))
+                    if vert_centers else geo_xmid)
+            half_x = Part.makeBox(
+                (bb_base.XMax - xmid) + margin,
+                (bb_base.YMax - bb_base.YMin) + 2 * margin,
+                (bb_base.ZMax - bb_base.ZMin) + 2 * margin,
+                V(xmid, bb_base.YMin - margin, bb_base.ZMin - margin))
 
-            # Cutter removes the TOP half (Y > ymid)
-            half_space_t = Part.makeBox(
+            print(f"Section: xmid={{xmid:.1f}} (geo_mid={{geo_xmid:.1f}}) "
+                  f"bb=[{{bb_base.XMin:.1f}},{{bb_base.XMax:.1f}}]x"
+                  f"[{{bb_base.YMin:.1f}},{{bb_base.YMax:.1f}}]x"
+                  f"[{{bb_base.ZMin:.1f}},{{bb_base.ZMax:.1f}}]", flush=True)
+
+            side = build_ortho_view(doc, "SideSection", base_shape, 'side',
+                                     frame_solid_list=frame_solid_list,
+                                     bg_cutter=half_x,
+                                     plane_normal=V(1, 0, 0), plane_distance=xmid)
+            if side is None:
+                print("WARNING: side section produced no geometry", flush=True)
+            else:
+                sbb = side['bg'].Shape.BoundBox
+                target_x = front_bb.XMin - spacing - (sbb.XMax - sbb.XMin)
+                target_y = front_bb.YMin - sbb.YMin
+                _shift_group(side, target_x - sbb.XMin, target_y)
+                doc.recompute()
+                print(f"Draft_SideSection_View: x={{target_x:.1f}} "
+                      f"edges={{len(side['bg'].Shape.Edges)}}", flush=True)
+
+            # ── Sectional Top View: cut plane in Y through the real
+            # horizontal member (head/cill/transom) nearest the geometric
+            # midpoint. Same VIEW_TO_PAGE convention as Side, so width and
+            # depth line up between Top and Side/Front automatically.
+            geo_ymid = (bb_base.YMin + bb_base.YMax) / 2.0
+            # Bug-A fix (Top section) excludes HORIZONTAL members from the
+            # slice/hatch pass — only vertical members (jamb/mullion) are
+            # sliced there, and their transverse cross-section is constant
+            # along the full window height. Snapping ymid to the nearest
+            # horizontal member's center no longer affects which cross-
+            # section is drawn, and previously pushed the background
+            # cutter almost to the bounding-box edge (observed:
+            # ymid=-667.0 vs bbox Y=[-712.5,720.2]), leaving most of the
+            # background silhouette cut away. Use the geometric midpoint
+            # so the background cutter retains a symmetric half instead.
+            ymid = geo_ymid
+            half_y = Part.makeBox(
                 (bb_base.XMax - bb_base.XMin) + 2 * margin,
                 (bb_base.YMax - ymid) + margin,
                 (bb_base.ZMax - bb_base.ZMin) + 2 * margin,
@@ -892,216 +1033,23 @@ else:
 
             print(f"Top section: ymid={{ymid:.1f}} (geo_mid={{geo_ymid:.1f}})", flush=True)
 
-            sec_shape_t = section_source_shape.cut(half_space_t)
-            print(f"Top section cut: valid={{sec_shape_t.isValid()}} "
-                  f"solids={{len(sec_shape_t.Solids)}} vol={{sec_shape_t.Volume:.1f}}",
-                  flush=True)
-
-            if sec_shape_t.isValid() and len(sec_shape_t.Solids) > 0:
-                # Page mapping: raw top-down projection keeps world X
-                # (width) on page-X and world Z (depth) on page-Y, giving
-                # the correct WIDE/short orientation matching Top View
-                # (width is large, depth is small) — no extra rotation.
-                wire_edges_t = []
-                for e in sec_shape_t.Edges:
-                    try:
-                        pts3d = e.discretize(Deflection=0.2)
-                        pts2d = [V(p.x, p.z, 0.0) for p in pts3d]
-                        if len(pts2d) >= 2:
-                            wire_edges_t.append(Part.makePolygon(pts2d))
-                    except Exception:
-                        continue
-
-                ts_frozen = Part.Compound(wire_edges_t) if wire_edges_t else None
-                n_edges_t = len(ts_frozen.Edges) if ts_frozen else 0
-                print(f"Top section projection: {{n_edges_t}} edges", flush=True)
-
-                if n_edges_t > 0:
-                    top_section_view = doc.addObject("Part::Feature", "TopSection")
-                    top_section_view.Shape = ts_frozen
-                    top_section_view.Label = "Draft_Top_Section_View"
-                    doc.recompute()
-
-                    # No rotation: edges were already built with world X on
-                    # page X and world Z on page Y, which is horizontally
-                    # aligned with Front View — keep it that way.
-                    top_rot = App.Rotation()
-                    top_section_view.Placement = App.Placement(V(0, 0, 0), top_rot)
-                    doc.recompute()
-                    bb_ts = top_section_view.Shape.BoundBox
-
-                    # Anchor directly to Draft_Front_View's live bounding
-                    # box, via the live front_view object reference.
-                    # NOTE: doc.getObject() looks up by internal Name,
-                    # not Label — "Draft_Front_View" is only the Label,
-                    # so that lookup returned None and crashed this
-                    # whole try block (also why the hatch never got
-                    # created and the view sat at raw world coords).
-                    front_bb = front_view.Shape.BoundBox
-
-                    # Horizontally aligned with Front View, placed above it,
-                    # compensated for the shape's internal bbox origin.
-                    target_x = front_bb.XMin - bb_ts.XMin
-                    target_y = front_bb.YMax + spacing - bb_ts.YMin
-                    top_section_view.Placement = App.Placement(
-                        App.Vector(target_x, target_y, 0), top_rot)
-                    doc.recompute()
-                    print(f"Draft_Top_Section_View: x={{target_x:.1f}} y={{target_y:.1f}} "
-                          f"edges={{n_edges_t}}", flush=True)
-
-                    # ── Top section hatching (same technique as side) ───
-                    try:
-                        TOL = 0.5
-                        hatch_edges_t = []
-                        profile_edges_t = []
-                        for f in sec_shape_t.Faces:
-                            try:
-                                u0, u1, v0, v1 = f.ParameterRange
-                                n = f.normalAt((u0 + u1) / 2.0, (v0 + v1) / 2.0)
-                                if abs(abs(n.y) - 1.0) > 0.05:
-                                    continue
-                                if abs(f.CenterOfMass.y - ymid) > TOL:
-                                    continue
-                            except Exception:
-                                continue
-
-                            def _pg_t(pt):
-                                return (pt.x, pt.z)
-
-                            def _wire_pts_t(w):
-                                pts = []
-                                for e in w.OrderedEdges:
-                                    for p in e.discretize(Deflection=0.2)[:-1]:
-                                        pts.append(_pg_t(p))
-                                return pts
-
-                            def _clean_wire_t(w):
-                                # Rebuild + fix so only closed,
-                                # non-self-intersecting wires reach the
-                                # hatcher — a raw/degenerate wire here is
-                                # what produces the long diagonal
-                                # hatch artifacts. MUST use OrderedEdges:
-                                # plain w.Edges is not guaranteed to be
-                                # in traversal order and Part.Wire()
-                                # built from it can fail to close, or
-                                # close into a self-intersecting loop,
-                                # even for a perfectly valid source loop.
-                                try:
-                                    cw = Part.Wire(w.OrderedEdges)
-                                    cw.fix(1e-4, 1e-4, 1e-4)
-                                except Exception:
-                                    return None
-                                if not cw.isClosed():
-                                    return None
-                                return cw
-
-                            def _mk_2d_face_t(pts):
-                                verts = [V(px, py, 0.0) for px, py in pts]
-                                verts.append(verts[0])
-                                poly_wire = Part.makePolygon(verts)
-                                poly_wire.fix(1e-4, 1e-4, 1e-4)
-                                if not poly_wire.isClosed():
-                                    return None
-                                face = Part.Face(poly_wire)
-                                face.fix(1e-4, 1e-4, 1e-4)
-                                return face if face.isValid() else None
-
-                            outer_clean = _clean_wire_t(f.OuterWire)
-                            if outer_clean is None:
-                                continue
-                            outer_pts = _wire_pts_t(outer_clean)
-                            hole_pts = []
-                            for w in f.Wires:
-                                if w.isSame(f.OuterWire):
-                                    continue
-                                hw_clean = _clean_wire_t(w)
-                                if hw_clean is not None:
-                                    hole_pts.append(_wire_pts_t(hw_clean))
-                            if len(outer_pts) < 3:
-                                continue
-                            try:
-                                hf = _mk_2d_face_t(outer_pts)
-                                if hf is None:
-                                    continue
-                                for hp in hole_pts:
-                                    if len(hp) >= 3:
-                                        hole_face = _mk_2d_face_t(hp)
-                                        if hole_face is None:
-                                            continue
-                                        hf = hf.cut(hole_face)
-                                if not hf.isValid():
-                                    continue
-                            except Exception:
-                                continue
-
-                            # Bold cut-profile edges: exactly the wires
-                            # already validated above, kept separate from
-                            # the raw background wireframe.
-                            outer_verts = [V(px, py, 0.0) for px, py in outer_pts]
-                            outer_verts.append(outer_verts[0])
-                            profile_edges_t.extend(Part.makePolygon(outer_verts).Edges)
-                            for hp in hole_pts:
-                                if len(hp) >= 3:
-                                    hp_verts = [V(px, py, 0.0) for px, py in hp]
-                                    hp_verts.append(hp_verts[0])
-                                    profile_edges_t.extend(Part.makePolygon(hp_verts).Edges)
-
-                            bb2  = hf.BoundBox
-                            diag = ((bb2.XMax - bb2.XMin) ** 2
-                                    + (bb2.YMax - bb2.YMin) ** 2) ** 0.5 + 10.0
-                            ang_rad_t = math.radians(HATCH_ANGLE_DEG)
-                            dir_x_t, dir_y_t = math.cos(ang_rad_t), math.sin(ang_rad_t)
-                            step = HATCH_SPACING * (2 ** 0.5)
-                            n_lines = int(diag / step) + 2
-                            cx0, cy0 = bb2.XMin - 5.0, bb2.YMin - 5.0
-                            for i in range(-n_lines, n_lines):
-                                ox = cx0 + i * step
-                                p0 = V(ox - diag * dir_x_t, cy0 - diag * dir_y_t, 0.0)
-                                p1 = V(ox + diag * dir_x_t, cy0 + diag * dir_y_t, 0.0)
-                                try:
-                                    line = Part.LineSegment(p0, p1).toShape()
-                                    hatch_edges_t.extend(line.common(hf).Edges)
-                                except Exception:
-                                    continue
-
-                        if hatch_edges_t:
-                            top_section_hatch = doc.addObject("Part::Feature", "TopSectionHatch")
-                            top_section_hatch.Shape = Part.Compound(hatch_edges_t)
-                            top_section_hatch.Label = "Draft_Top_Section_Hatch"
-                            top_section_hatch.Placement = top_section_view.Placement
-                            doc.recompute()
-                            print(f"Top section hatch: {{len(hatch_edges_t)}} lines", flush=True)
-                        else:
-                            print("WARNING: top section hatch produced no lines", flush=True)
-
-                        top_section_profile = None
-                        if profile_edges_t:
-                            top_section_profile = doc.addObject("Part::Feature", "TopSectionProfile")
-                            top_section_profile.Shape = Part.Compound(profile_edges_t)
-                            top_section_profile.Label = "Draft_Top_Section_Profile"
-                            top_section_profile.Placement = top_section_view.Placement
-                            doc.recompute()
-
-                        # Style so only the cut profile + hatch stand out:
-                        # background wireframe thin/gray, profile bold
-                        # black. GUI-only — no-op under freecadcmd.
-                        if App.GuiUp:
-                            try:
-                                top_section_view.ViewObject.LineColor = (0.65, 0.65, 0.65)
-                                top_section_view.ViewObject.LineWidth = 1.0
-                                if top_section_profile is not None:
-                                    top_section_profile.ViewObject.LineColor = (0.0, 0.0, 0.0)
-                                    top_section_profile.ViewObject.LineWidth = 2.5
-                            except Exception:
-                                pass
-                    except Exception as _hatch_te:
-                        print(f"WARNING: top section hatch failed: {{_hatch_te}}", flush=True)
-                else:
-                    print("WARNING: top section projection returned no edges", flush=True)
+            top = build_ortho_view(doc, "TopSection", base_shape, 'top',
+                                    frame_solid_list=frame_solid_list,
+                                    bg_cutter=half_y,
+                                    plane_normal=V(0, 1, 0), plane_distance=ymid)
+            if top is None:
+                print("WARNING: top section produced no geometry", flush=True)
             else:
-                print("WARNING: top section cut returned no solids", flush=True)
-        except Exception as _sec_te:
-            print(f"WARNING: top section view failed: {{_sec_te}}", flush=True)
+                tbb = top['bg'].Shape.BoundBox
+                dx = front_bb.XMin - tbb.XMin
+                dy = front_bb.YMax + spacing - tbb.YMin
+                _shift_group(top, dx, dy)
+                doc.recompute()
+                print(f"Draft_TopSection_View: edges={{len(top['bg'].Shape.Edges)}}",
+                      flush=True)
+
+        doc.removeObject(view_src.Name)
+        doc.recompute()
 
         # Reset viewport camera to a strict top-down orthographic view, so
         # any GUI session opening this file isn't left on a skewed/rotated
@@ -1115,17 +1063,7 @@ else:
         doc.saveAs(r"{fcpath}")
         try:
             _fsz = os.path.getsize(r"{fcpath}")
-            _names = f"{{front_view.Name}}"
-            if side_section_view is not None:
-                _names += f", {{side_section_view.Name}}"
-            if section_hatch is not None:
-                _names += f", {{section_hatch.Name}}"
-            if top_section_view is not None:
-                _names += f", {{top_section_view.Name}}"
-            if top_section_hatch is not None:
-                _names += f", {{top_section_hatch.Name}}"
-            print(f"FCStd with Draft views saved ({{_fsz}} bytes): {{_names}}",
-                  flush=True)
+            print(f"FCStd with ortho views saved ({{_fsz}} bytes)", flush=True)
         except Exception as _e:
             print("FCStd save check failed:", _e, flush=True)
 
@@ -1178,8 +1116,9 @@ print("FREECAD_DONE", flush=True)
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  HELPERS
+# HELPERS
 # ══════════════════════════════════════════════════════════════════════
+
 def _read(path: str) -> bytes:
     if not os.path.exists(path) or os.path.getsize(path) < 100:
         raise RuntimeError(f'FreeCAD output missing or empty: {path}')
@@ -1195,13 +1134,13 @@ def _stl_to_glb(stl_data: bytes, window, glass_data: bytes = None) -> bytes:
     r, g, b = 0.42, 0.42, 0.44
     try:
         h = (getattr(window, 'frame_colour_hex', None) or '#6a6a6c').lstrip('#')
-        r, g, b = int(h[0:2],16)/255, int(h[2:4],16)/255, int(h[4:6],16)/255
+        r, g, b = int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
     except Exception:
         pass
     hh, s, lv = colorsys.rgb_to_hls(r, g, b)
     if lv < 0.18:
         r, g, b = colorsys.hls_to_rgb(hh, 0.28, s)
-    frame.visual.face_colors = [int(r*255), int(g*255), int(b*255), 255]
+    frame.visual.face_colors = [int(r * 255), int(g * 255), int(b * 255), 255]
 
     geoms = [frame]
     if glass_data:
