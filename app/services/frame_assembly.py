@@ -679,11 +679,11 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         if shape == 'arched':
             spring_y = H - arch_rise
             _add_arched_head(A, W, spring_y, p_head, p_head['depth'], arch_rise=arch_rise)
-            jy1, jy2 = bar_c, H  # jambs run full height; arch head fuses at top
+            jy1, jy2 = bar_c, spring_y  # jambs stop at the arch spring line
         elif shape == 'gothic':
             spring_y = H - arch_rise
             _add_gothic_head(A, W, H, spring_y, arch_rise, p_head, p_head['depth'])
-            jy1, jy2 = bar_c, H  # jambs run full height; arch head fuses at top
+            jy1, jy2 = bar_c, spring_y  # jambs stop at the arch spring line
         else:
             # Plain rectangle (default). Head — centre line at
             # y = H - bar_h/2, spanning full width.
@@ -696,7 +696,9 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
                 profile_code=p_head['code']))
             jy1, jy2 = bar_c, H - bar_h
 
-        # Jambs (left / right) — run between cill and head/spring-line.
+        # Jambs (left / right) — run between cill and the head. For arched/gothic
+        # frames the curved head begins at the spring line, so the jambs must
+        # terminate there rather than continuing through the curved opening.
         A.members.append(Member(
             id='F_jambL', role=ROLE_JAMB, orientation=ORI_V,
             x1=bar_j / 2, y1=jy1, x2=bar_j / 2, y2=jy2,
