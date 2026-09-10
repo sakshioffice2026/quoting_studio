@@ -535,6 +535,30 @@ def _gothic_curve_pts(W, H, spring_y, arch_rise, segments=32):
     return pts
 
 
+def _offset_arch_curve(W, spring_y, delta, segments=32):
+    """Semicircular curve concentric with the true head arc (radius W/2),
+    offset inward by `delta`. Used to build a nested curved member (e.g. a
+    sash top rail) that sits inside an arched opening with a uniform gap
+    to the outer curve, instead of a flat top cutting across the arch."""
+    r = max(W / 2.0 - delta, 1.0)
+    return _arc_points(W / 2.0, spring_y, r, 180.0, 0.0, segments=segments)
+
+
+def _offset_gothic_curve(W, H, spring_y, arch_rise, delta, segments=16):
+    """Two-centre pointed curve concentric with the true gothic head,
+    offset inward by `delta` at the apex and both springs. Same nesting
+    purpose as `_offset_arch_curve` but for the gothic profile."""
+    apex = (W / 2.0, H - delta)
+    ctrl_y = spring_y + 0.6 * arch_rise
+    left_spring = (delta, spring_y)
+    left_ctrl = (delta, ctrl_y)
+    right_spring = (W - delta, spring_y)
+    right_ctrl = (W - delta, ctrl_y)
+    pts = _quad_bezier_points(left_spring, left_ctrl, apex, segments)
+    pts += _quad_bezier_points(apex, right_ctrl, right_spring, segments)[1:]
+    return pts
+
+
 def _curve_span_y(x, curve_pts):
     """y of the curve at a given x, via linear interpolation between the two
     nearest sampled points bracketing x. None if x is outside the curve."""
@@ -625,8 +649,7 @@ def _add_arched_head(A: Assembly, W, spring_y, p_head, depth, arch_rise=None):
         id='F_head', role=ROLE_HEAD, orientation=ORI_H,
         x1=0, y1=spring_y, x2=W, y2=spring_y,
         bar_width=bar, depth=depth,
-        joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
-        miter_start_deg=45, miter_end_deg=45,
+        joint_start=JOINT_BUTT, joint_end=JOINT_BUTT,
         profile_code=p_head['code'],
         path=path, closed=False))
 
@@ -651,8 +674,7 @@ def _add_gothic_head(A: Assembly, W, H, spring_y, arch_rise, p_head, depth):
         id='F_head', role=ROLE_HEAD, orientation=ORI_H,
         x1=0, y1=spring_y, x2=W, y2=spring_y,
         bar_width=bar, depth=depth,
-        joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
-        miter_start_deg=45, miter_end_deg=45,
+        joint_start=JOINT_BUTT, joint_end=JOINT_BUTT,
         profile_code=p_head['code'],
         path=path, closed=False))
 
@@ -763,15 +785,19 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             id='F_jambL', role=ROLE_JAMB, orientation=ORI_V,
             x1=bar_j / 2, y1=jy1, x2=bar_j / 2, y2=jy2,
             bar_width=bar_j, depth=p_jamb['depth'],
-            joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
-            miter_start_deg=45, miter_end_deg=45,
+            joint_start=JOINT_MITRE,
+            joint_end=(JOINT_BUTT if shape in ('arched', 'gothic') else JOINT_MITRE),
+            miter_start_deg=45,
+            miter_end_deg=(0 if shape in ('arched', 'gothic') else 45),
             profile_code=p_jamb['code']))
         A.members.append(Member(
             id='F_jambR', role=ROLE_JAMB, orientation=ORI_V,
             x1=W - bar_j / 2, y1=jy1, x2=W - bar_j / 2, y2=jy2,
             bar_width=bar_j, depth=p_jamb['depth'],
-            joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
-            miter_start_deg=45, miter_end_deg=45,
+            joint_start=JOINT_MITRE,
+            joint_end=(JOINT_BUTT if shape in ('arched', 'gothic') else JOINT_MITRE),
+            miter_start_deg=45,
+            miter_end_deg=(0 if shape in ('arched', 'gothic') else 45),
             profile_code=p_jamb['code']))
 
     # ── 2. INTERNAL DIVIDERS (mullions + transoms) ──────────────────
@@ -962,6 +988,8 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
     # between two opening panes, where both gaps land in the same spot).
     sash_insets: dict = {}
     sash_rects: dict = {}
+    sash_curves: dict = {}       # pane idx -> local curved-top points (or None)
+    sash_curve_delta: dict = {}  # pane idx -> inward offset used for that curve
     si = 0
     for r in rects:
         if not _is_opening(r['opening']):
@@ -1035,18 +1063,22 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
                         ah = new_top - ay
         elif shape in ('arched', 'gothic') and on_t:
             # Only the TOP is curved for arched/gothic (sides are straight
-            # jambs, already correctly inset above) — pull the pane's top
-            # edge down to the head curve instead of the flat W x H edge.
-            x_lo_s = min(max(ax, 1e-6), W - 1e-6)
-            x_hi_s = min(max(ax + aw, 1e-6), W - 1e-6)
-            tops = [t for t in (
-                _curve_span_y(x_lo_s, curve_pts),
-                _curve_span_y(x_hi_s, curve_pts),
-                _curve_span_y((x_lo_s + x_hi_s) / 2.0, curve_pts),
-            ) if t is not None]
-            if tops:
-                new_top = min(ay + ah, min(tops))
-                ah = new_top - ay
+            # jambs, already correctly inset above). Previously this
+            # flattened the pane's top down to the LOWEST point the curve
+            # reaches across the span — producing a flat rectangular sash
+            # sitting inside the true arch. Instead, build the sash's own
+            # curve, concentric with the outer head and offset inward by
+            # this pane's own inset (ax), so the sash — and the door —
+            # actually follows the arch all the way up.
+            delta = ax  # assumes symmetric l/r inset (single full-width pane)
+            if shape == 'arched':
+                local_curve = _offset_arch_curve(W, curve_spring_y, delta, segments=32)
+            else:
+                local_curve = _offset_gothic_curve(W, H, curve_spring_y, arch_rise, delta, segments=16)
+            sash_curves[r['i']] = local_curve
+            sash_curve_delta[r['i']] = delta
+            apex_y = max(p[1] for p in local_curve)
+            ah = apex_y - ay
 
         if aw <= 2 * sb or ah <= 2 * sb:
             continue
@@ -1064,8 +1096,13 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             'b': ay - r['y'], 't': (r['y'] + r['h']) - (ay + ah),
         }
         sash_rects[r['i']] = (ax, ay, aw, ah)
-        _add_rect_frame(A, f'S{si}', ROLE_SASH, ax, ay, aw, ah, sb,
-                        p_sash['depth'], p_sash['code'])
+        if r['i'] in sash_curves:
+            _add_rect_frame_curved_top(A, f'S{si}', ROLE_SASH, ax, ay, aw, sb,
+                                        p_sash['depth'], p_sash['code'],
+                                        sash_curves[r['i']])
+        else:
+            _add_rect_frame(A, f'S{si}', ROLE_SASH, ax, ay, aw, ah, sb,
+                            p_sash['depth'], p_sash['code'])
 
     # ── 4. GLASS / PANEL CELLS + GLAZING BEAD ────────────────────────
     p_bead = profiles.get(ROLE_GLAZING_BEAD)
@@ -1099,6 +1136,20 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             rect_poly = [(gx, gy), (gx + gw, gy), (gx + gw, gy + gh), (gx, gy + gh)]
             clipped = _clip_polygon_convex(rect_poly, ellipse_poly)
             if len(clipped) < 3:
+                continue
+            clip_path = clipped
+        elif is_sash and r['i'] in sash_curve_delta:
+            # Glass sits inside the sash's own curved top rail (see
+            # _add_rect_frame_curved_top) — clip it to a curve offset a
+            # further `sb` inward from that rail, not the outer head curve
+            # (which would let the glass poke past the sash's own rail).
+            delta_glass = sash_curve_delta[r['i']] + sb
+            if shape == 'arched':
+                glass_curve = _offset_arch_curve(W, curve_spring_y, delta_glass, segments=48)
+            else:
+                glass_curve = _offset_gothic_curve(W, H, curve_spring_y, arch_rise, delta_glass, segments=24)
+            clipped = _clip_rect_to_curve_top(gx, gy, gw, gh, glass_curve)
+            if not clipped or len(clipped) < 3:
                 continue
             clip_path = clipped
         elif shape in ('arched', 'gothic') and gy + gh > curve_spring_y + 1e-6:
@@ -1197,6 +1248,58 @@ def _add_rect_frame(A: Assembly, prefix, role, x, y, w, h, bar, depth, code):
         bar_width=bar, depth=depth,
         joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
         miter_start_deg=45, miter_end_deg=45, profile_code=code))
+
+
+def _add_rect_frame_curved_top(A: Assembly, prefix, role, x, y, w, bar, depth, code, curve_pts):
+    """Sash sub-frame for an arched/gothic opening: bottom/left/right stay
+    straight, but the TOP rail follows `curve_pts` (the sash's own inset
+    curve, concentric with the outer head) instead of a flat mitred bar.
+    This replaces the old behaviour where the sash was always a plain
+    rectangle, leaving a flat top sitting inside the true arch.
+
+    Springline joints (stile-to-curved-rail) are BUTT, not mitred — the
+    stile is vertical and the curve's tangent at its own spring point is
+    also vertical, so a square cut is correct (same reasoning as the
+    outer jamb-to-arch springline fix)."""
+    # bottom — unchanged, still a flat mitred rail
+    A.members.append(Member(
+        id=f'{prefix}_bot', role=role, orientation=ORI_H,
+        x1=x, y1=y + bar / 2, x2=x + w, y2=y + bar / 2,
+        bar_width=bar, depth=depth,
+        joint_start=JOINT_MITRE, joint_end=JOINT_MITRE,
+        miter_start_deg=45, miter_end_deg=45, profile_code=code))
+
+    left_top = _curve_span_y(x + bar / 2, curve_pts)
+    right_top = _curve_span_y(x + w - bar / 2, curve_pts)
+    if left_top is None or right_top is None:
+        # curve doesn't reach this stile's x — fall back to the curve's
+        # own end height rather than leaving the stile unbuilt.
+        pts_sorted = sorted(curve_pts, key=lambda p: p[0])
+        left_top = left_top if left_top is not None else pts_sorted[0][1]
+        right_top = right_top if right_top is not None else pts_sorted[-1][1]
+
+    # left stile — rises to meet the curve at its own x position
+    A.members.append(Member(
+        id=f'{prefix}_L', role=role, orientation=ORI_V,
+        x1=x + bar / 2, y1=y + bar, x2=x + bar / 2, y2=left_top,
+        bar_width=bar, depth=depth,
+        joint_start=JOINT_MITRE, joint_end=JOINT_BUTT,
+        miter_start_deg=45, miter_end_deg=0, profile_code=code))
+    # right stile
+    A.members.append(Member(
+        id=f'{prefix}_R', role=role, orientation=ORI_V,
+        x1=x + w - bar / 2, y1=y + bar, x2=x + w - bar / 2, y2=right_top,
+        bar_width=bar, depth=depth,
+        joint_start=JOINT_MITRE, joint_end=JOINT_BUTT,
+        miter_start_deg=45, miter_end_deg=0, profile_code=code))
+    # curved top rail — path IS the curve, so the sash's opening follows
+    # the true arch instead of a flat line cutting across it.
+    A.members.append(Member(
+        id=f'{prefix}_top', role=role, orientation=ORI_H,
+        x1=x, y1=max(left_top, right_top), x2=x + w, y2=max(left_top, right_top),
+        bar_width=bar, depth=depth,
+        joint_start=JOINT_BUTT, joint_end=JOINT_BUTT,
+        profile_code=code, path=curve_pts, closed=False))
 
 
 def _add_bead_ring(A: Assembly, prefix, x, y, w, h, il, ir, ib, it, depth, code):

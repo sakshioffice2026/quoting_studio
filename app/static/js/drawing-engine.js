@@ -1588,51 +1588,65 @@ class DrawingCanvas {
   // ---- shaped frame paths (arched / gothic / circular) ----
   // Build the outer path string in screen coords for a given shape.
   _shapePath(o, W, H, shape, inset) {
-    // Geometry matches the reference prototype exactly.
     // inset=0 → outer frame edge; inset=barW → inner glass aperture edge.
-    // Spring line position mirrors reference: sY = iB.y + iB.h (top of rectangular glass area).
-    // In model y-up:  sY_outer = H - Math.round(barW*1.03)
-    //                 sY_inner = H - Math.round(barW*1.03)  (same spring y)
-    // In SVG y-down:  springY_px = o.y + Math.round(barW*1.03)*scale
-    const barW = this.model.frame.thickness;
-    const x0 = o.x + this.mmToPx(inset);
-    const x1 = o.x + this.mmToPx(W - inset);               // right edge
-    const y0 = o.y + this.mmToPx(inset);                   // top edge (SVG top)
-    const y1 = o.y + this.mmToPx(H);                       // bottom edge (outer)
+    //
+    // SPRING-LINE RULE: The spring line is a physical property of the frame
+    // (the height where the curved head begins). It must sit at the same
+    // absolute screen Y for both the outer and inner paths — only the arch
+    // radii and the left/right/bottom edges change with the inset.
+    //
+    // Wrong (old): springY = (o.y + insetPx) + risePx
+    //   → inner spring is shifted DOWN by insetPx, producing a flat horizontal
+    //     rail at the head of every arched/gothic frame.
+    //
+    // Correct (new): springY = o.y + risePx   (anchored to outer top edge)
+    //   → inner arch radii shrink by insetPx so the band has uniform thickness
+    //     all the way round the curve, with no flat rail at the top.
+    const insetPx = this.mmToPx(inset);
+    const x0 = o.x + insetPx;
+    const x1 = o.x + this.mmToPx(W) - insetPx;          // right edge
+    const y0_inner = o.y + insetPx;                      // inset top (inner dome peak)
+    const y1 = o.y + this.mmToPx(H) - insetPx;          // inset bottom edge
     const w  = x1 - x0;
     const cx = x0 + w / 2;
+
     // spring line = where the curved head meets the straight sides.
     // Driven by archRise (mm): how tall the curved head is. Falls back to a
     // sensible default (¼ of width, capped) when unset.
+    // ALWAYS measured from the outer top edge (o.y), not the inset top.
     const rise = Math.max(0, this.model.archRise != null
       ? this.model.archRise : Math.min(W * 0.25, 400));
     const risePx = this.mmToPx(rise);
-    const springY = y0 + risePx;                           // spring in SVG y-down
+    // Spring line is fixed in absolute screen space — same Y for both paths.
+    const springY = o.y + risePx;
 
     if (shape === 'circular') {
-      const h  = y1 - y0;
-      const ry = h / 2;
-      const cy = y0 + ry;
+      const ry = (this.mmToPx(H) - 2 * insetPx) / 2;
       const rx = w / 2;
+      const cy = o.y + this.mmToPx(H) / 2;              // ellipse centre is fixed
       // Two half-ellipses forming a full ellipse (SVG arc can't do 360° in one A command)
       return `M ${cx-rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx+rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx-rx} ${cy} Z`;
     }
     if (shape === 'arched') {
-      // Semicircular/segmental arch head bulging UPWARD to the top edge.
-      const archRy = springY - y0;                    // height of arch head
+      // Semicircular/segmental arch head bulging UPWARD toward the outer top.
+      // archRy: vertical radius of this path's arc from spring line to dome peak.
+      //   outer (inset=0):   archRy = risePx - 0         = risePx
+      //   inner (inset=bar): archRy = risePx - insetPx   (dome peak is insetPx below outer)
+      const archRy = Math.max(0, risePx - insetPx);      // dome peak at y0_inner
       const archRx = w / 2;
-      // In SVG y-down, sweep-flag 1 bulges the arc UP toward y0 (the dome).
-      return `M ${x0} ${y1} `                         // bottom-left
-           + `L ${x0} ${springY} `                    // up to spring line
+      // In SVG y-down, sweep-flag=1 with large-arc=0 gives the upward dome.
+      return `M ${x0} ${y1} `                            // bottom-left (inset)
+           + `L ${x0} ${springY} `                       // up to spring line (shared Y)
            + `A ${archRx} ${archRy} 0 0 1 ${x1} ${springY} ` // dome over the top
-           + `L ${x1} ${y1} Z`;                       // down + close
+           + `L ${x1} ${y1} Z`;                          // down + close
     }
     if (shape === 'gothic') {
-      // Gothic: two quadratic bezier curves meeting at an apex
-      const archH  = springY - y0;                    // head height in px
-      const apexY  = y0;                              // pointed apex at very top
-      const riseF  = 0.6;                             // bezier handle factor (matches reference)
-      const ctrlY  = apexY * riseF + springY * (1 - riseF);   // control point y
+      // Gothic: two quadratic bezier curves meeting at an apex at the outer top.
+      // The apex stays at y0_inner (inset top), matching frame_assembly.py's
+      // gothic path geometry. Control-point factor 0.6 matches the Python backend.
+      const apexY  = y0_inner;
+      const riseF  = 0.6;
+      const ctrlY  = apexY * riseF + springY * (1 - riseF);
       return `M ${x0} ${y1} `
            + `L ${x0} ${springY} `
            + `Q ${x0} ${ctrlY} ${cx} ${apexY} `
@@ -1640,7 +1654,7 @@ class DrawingCanvas {
            + `L ${x1} ${y1} Z`;
     }
     // rectangle fallback
-    return `M ${x0} ${y0} L ${x1} ${y0} L ${x1} ${y1} L ${x0} ${y1} Z`;
+    return `M ${x0} ${y0_inner} L ${x1} ${y0_inner} L ${x1} ${y1} L ${x0} ${y1} Z`;
   }
 
   _renderShapedFrame(o, W, H, bar, col, shape) {
@@ -2762,33 +2776,37 @@ function renderUnitSVG(model, opts = {}) {
 
   // helpers to build path strings in mm coords (y-down within the svg)
   function shapePath(inset) {
-    // Matches _shapePath in DrawingCanvas — arch head driven by archRise (mm).
+    // Matches _shapePath in DrawingCanvas (same spring-line anchoring fix).
+    // Spring line is anchored to the OUTER top edge (oy), not oy+inset.
+    // This prevents a flat horizontal rail appearing at the inner head of
+    // arched/gothic frames.
     const x0 = ox + inset, x1 = ox + W - inset;
-    const y0 = oy + inset;                                 // top edge (SVG y-down)
-    const y1 = oy + H;                                     // bottom edge (outer)
+    const y0_inner = oy + inset;                           // inset top (dome peak)
+    const y1 = oy + H - inset;                            // inset bottom edge
     const w  = x1 - x0;
     const cx = x0 + w / 2;
     const rise = Math.max(0, model.archRise != null
       ? model.archRise : Math.min(W * 0.25, 400));
-    const springY = y0 + rise;                             // spring line (mm coords)
+    // Spring line at fixed absolute Y — anchored to outer top oy, not oy+inset.
+    const springY = oy + rise;
 
     if (shape === 'circular') {
-      const h  = y1 - y0;
-      const ry = h / 2, rx = w / 2;
-      const cy = y0 + ry;
+      const ry = (H - 2 * inset) / 2, rx = w / 2;
+      const cy = oy + H / 2;                              // ellipse centre fixed
       return `M ${cx-rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx+rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx-rx} ${cy} Z`;
     }
     if (shape === 'arched') {
-      const archRy = springY - y0;
+      // archRy shrinks by inset so the band keeps uniform thickness round the curve.
+      const archRy = Math.max(0, rise - inset);
       const archRx = w / 2;
-      // sweep 1 → dome bulges UP toward y0
+      // sweep 1 → dome bulges UP toward y0_inner
       return `M ${x0} ${y1} L ${x0} ${springY} A ${archRx} ${archRy} 0 0 1 ${x1} ${springY} L ${x1} ${y1} Z`;
     }
     if (shape === 'gothic') {
-      const ctrlY = y0 * 0.6 + springY * 0.4;
-      return `M ${x0} ${y1} L ${x0} ${springY} Q ${x0} ${ctrlY} ${cx} ${y0} Q ${x1} ${ctrlY} ${x1} ${springY} L ${x1} ${y1} Z`;
+      const ctrlY = y0_inner * 0.6 + springY * 0.4;
+      return `M ${x0} ${y1} L ${x0} ${springY} Q ${x0} ${ctrlY} ${cx} ${y0_inner} Q ${x1} ${ctrlY} ${x1} ${springY} L ${x1} ${y1} Z`;
     }
-    return `M ${x0} ${y0} L ${x1} ${y0} L ${x1} ${y1} L ${x0} ${y1} Z`;
+    return `M ${x0} ${y0_inner} L ${x1} ${y0_inner} L ${x1} ${y1} L ${x0} ${y1} Z`;
   }
 
   let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">`;

@@ -305,6 +305,16 @@ _member_orientation = {{m["id"]: m.get("orientation") for m in data["members"]}}
 doc = App.newDocument("QS")
 frame_solids = []
 glass_solids = []
+# Faceted fallback shapes for curved (path-swept) members, used ONLY by
+# the 2D orthographic/TechDraw pipeline (need_views / need_techdraw).
+# That pipeline runs real boolean cut/slice/hatch operations against
+# every member; a true curved B-spline surface (the pipe-shell sweep
+# from make_path_solid) makes those booleans dramatically more expensive
+# than flat facets — for an arched/gothic head this was enough to hang
+# the whole draft-views export past its timeout. STEP/STL keep the
+# proper sweep (frame_solids, unaffected); this dict only overrides the
+# shape used to build the 2D-view source compound.
+view_override = {{}}
 dep_max = max((m["depth"] for m in data["members"]), default=65.0)
 
 # ── helper: cross-section face from loops or plain rectangle ─────────
@@ -358,12 +368,64 @@ def make_face_rings(rings, plane, bar, depth):
 
 def make_path_solid(rings, bar, depth, path, closed):
     """Curved member (arched/gothic head, full circular ring): sweep the
-    section along each path segment.
+    section ONCE along the whole path as a single continuous pipe shell.
 
-    The section is already centred on the path centreline. Therefore the
-    segment is translated directly to p0; no additional bar/2 normal
-    offset is applied.
+    Previously this built one straight prism per path segment (cut
+    perpendicular to that segment's own chord) and fused them one by one.
+    Consecutive segments meet at a slight angle — that is what makes the
+    approximation curved — and a perpendicular cut on each side of that
+    angle does not line up with its neighbour. Boolean fuse can leave a
+    thin non-manifold gap at each internal joint, which viewers render as
+    an open back-face patch. A single makePipeShell call sweeps the
+    section continuously along the whole path with mitred transitions at
+    every vertex, producing one watertight shell instead of N fused
+    pieces.
     """
+    if len(path) < 2:
+        return None
+
+    pts = [V(px - cx, py - cy, 0.0) for px, py in path]
+    if closed and (pts[0] - pts[-1]).Length > 1e-6:
+        pts.append(pts[0])
+
+    try:
+        path_wire = Part.makePolygon(pts)
+    except Exception as e:
+        print("path wire build failed:", e, flush=True)
+        return None
+
+    face, holes = make_face_rings(rings, 'H', bar, depth)
+
+    # _mk_face() builds the section in the YZ plane (normal along +X),
+    # already centred on the path centreline — matching the arc's
+    # initial tangent direction by construction (same convention the old
+    # per-segment code relied on). Position it at the path's start point.
+    start = pts[0]
+    face = face.copy()
+    face.translate(start)
+    profile_wires = [face.OuterWire]
+    for hf in holes:
+        hf2 = hf.copy()
+        hf2.translate(start)
+        profile_wires.append(hf2.OuterWire)
+
+    try:
+        # isSolid=True, isFrenet=True, transition=1 (right-corner / mitre)
+        solid = path_wire.makePipeShell(profile_wires, True, True, 1)
+        if solid.isValid() and solid.Volume > 1.0:
+            return solid
+        print("pipe shell invalid, falling back to segmented sweep", flush=True)
+    except Exception as e:
+        print("makePipeShell failed, falling back to segmented sweep:", e, flush=True)
+
+    return _make_path_solid_segments(rings, bar, depth, path, closed)
+
+
+def _make_path_solid_segments(rings, bar, depth, path, closed):
+    """Fallback only: the old per-segment straight-prism sweep, kept in
+    case makePipeShell can't handle a particular profile/path (e.g. very
+    tight curvature). May leave a thin non-manifold joint between
+    segments — prefer make_path_solid()'s single continuous sweep."""
     n = len(path)
     count = n if closed else n - 1
     solids = []
@@ -849,6 +911,13 @@ for m in data["members"]:
             solid = make_path_solid(rings, bar, depth, path, closed)
             if solid is None:
                 raise ValueError("empty path sweep")
+            if {need_views} or {need_techdraw}:
+                try:
+                    alt = _make_path_solid_segments(rings, bar, depth, path, closed)
+                    if alt is not None and alt.isValid() and alt.Volume > 1.0:
+                        view_override[m['id']] = alt
+                except Exception as e:
+                    print(f"  {{m['id']}} view-fallback build failed: {{e}}", flush=True)
         elif m["orientation"] == "horizontal":
             x_start = min(m["x1"], m["x2"]) - cx
             face, holes = make_face_rings(rings, 'H', bar, depth)
@@ -944,13 +1013,14 @@ else:
     step_objs = []
     if {need_step} or {need_techdraw} or {need_views}:
         seen_labels = {{}}
+        use_view_shapes = {need_views} or {need_techdraw}
         for label, s in all_solids:
             n = seen_labels.get(label, 0)
             seen_labels[label] = n + 1
             obj_name = label if n == 0 else f"{{label}}{{n}}"
             feat = doc.addObject("Part::Feature", obj_name)
             feat.Label = obj_name
-            feat.Shape = s
+            feat.Shape = view_override[label] if (use_view_shapes and label in view_override) else s
             step_objs.append(feat)
         doc.recompute()
 
