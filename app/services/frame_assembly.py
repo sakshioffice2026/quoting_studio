@@ -516,6 +516,65 @@ def _ellipse_span_x(y, cx, cy, rx, ry):
     return cx - half, cx + half
 
 
+def _arch_curve_pts(W, spring_y, r, segments=64):
+    """Sampled points along the ARCHED head's inner curve only (left spring
+    -> apex -> right spring), radius `r`, centred at (W/2, spring_y).
+    Mirrors _add_arched_head's own arc so clipping matches the built head
+    member exactly."""
+    return _arc_points(W / 2.0, spring_y, r, 180.0, 0.0, segments=segments)
+
+
+def _gothic_curve_pts(W, H, spring_y, arch_rise, segments=32):
+    """Sampled points along the GOTHIC head's inner curve only (left spring
+    -> apex -> right spring). Mirrors _add_gothic_head's own two-bezier
+    curve exactly."""
+    apex = (W / 2.0, H)
+    ctrl_y = spring_y + 0.6 * arch_rise
+    pts = _quad_bezier_points((0.0, spring_y), (0.0, ctrl_y), apex, segments=segments)
+    pts += _quad_bezier_points(apex, (W, ctrl_y), (W, spring_y), segments=segments)[1:]
+    return pts
+
+
+def _curve_span_y(x, curve_pts):
+    """y of the curve at a given x, via linear interpolation between the two
+    nearest sampled points bracketing x. None if x is outside the curve."""
+    pts = sorted(curve_pts, key=lambda p: p[0])
+    if len(pts) < 2 or x < pts[0][0] or x > pts[-1][0]:
+        return None
+    for i in range(len(pts) - 1):
+        x0, y0 = pts[i]
+        x1, y1 = pts[i + 1]
+        if x0 <= x <= x1:
+            if x1 == x0:
+                return max(y0, y1)
+            t = (x - x0) / (x1 - x0)
+            return y0 + t * (y1 - y0)
+    return None
+
+
+def _clip_rect_to_curve_top(gx, gy, gw, gh, curve_pts):
+    """Clip a glass rectangle's TOP edge to an arched/gothic head curve —
+    straight sides/bottom are already correctly inset by the caller, only
+    the top needs to follow the curve where the pane reaches into the
+    head. Returns a closed polygon, or None if nothing to clip."""
+    top = gy + gh
+
+    def curve_y(x):
+        y = _curve_span_y(x, curve_pts)
+        if y is not None:
+            return y
+        first, last = curve_pts[0], curve_pts[-1]
+        return first[1] if x <= first[0] else last[1]
+
+    poly = [(gx, gy), (gx + gw, gy),
+            (gx + gw, min(top, curve_y(gx + gw)))]
+    for x, y in sorted(curve_pts, key=lambda p: -p[0]):
+        if gx < x < gx + gw:
+            poly.append((x, min(y, top)))
+    poly.append((gx, min(top, curve_y(gx))))
+    return poly
+
+
 def _add_circular_frame_ring(A: Assembly, W, H, p_head, depth):
     """Build the circular/elliptical frame from its true outer envelope.
 
@@ -556,9 +615,10 @@ def _add_circular_frame_ring(A: Assembly, W, H, p_head, depth):
 
 
 def _add_arched_head(A: Assembly, W, spring_y, p_head, depth, arch_rise=None):
-    """Arched head: radius = arch_rise (not W/2) so apex stays at H."""
+    """Arched head: true semicircle, radius = W/2 (matches engineering_dxf.py
+    and arch_geometry.py). arch_rise only sets the spring line height."""
     cx = W / 2.0
-    r = arch_rise if (arch_rise and arch_rise > 0) else W / 2.0
+    r = W / 2.0
     path = _arc_points(cx, spring_y, r, 180.0, 0.0, segments=32)
     bar = p_head['bar']
     A.members.append(Member(
@@ -679,11 +739,11 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         if shape == 'arched':
             spring_y = H - arch_rise
             _add_arched_head(A, W, spring_y, p_head, p_head['depth'], arch_rise=arch_rise)
-            jy1, jy2 = bar_c, H  # jambs run full height; arch head fuses at top
+            jy1, jy2 = bar_c, spring_y  # jambs stop at the arch spring line
         elif shape == 'gothic':
             spring_y = H - arch_rise
             _add_gothic_head(A, W, H, spring_y, arch_rise, p_head, p_head['depth'])
-            jy1, jy2 = bar_c, H  # jambs run full height; arch head fuses at top
+            jy1, jy2 = bar_c, spring_y  # jambs stop at the arch spring line
         else:
             # Plain rectangle (default). Head — centre line at
             # y = H - bar_h/2, spanning full width.
@@ -696,7 +756,9 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
                 profile_code=p_head['code']))
             jy1, jy2 = bar_c, H - bar_h
 
-        # Jambs (left / right) — run between cill and head/spring-line.
+        # Jambs (left / right) — run between cill and the head. For arched/gothic
+        # frames the curved head begins at the spring line, so the jambs must
+        # terminate there rather than continuing through the curved opening.
         A.members.append(Member(
             id='F_jambL', role=ROLE_JAMB, orientation=ORI_V,
             x1=bar_j / 2, y1=jy1, x2=bar_j / 2, y2=jy2,
@@ -726,10 +788,23 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
     # embed added below then pushes it straight through the remaining
     # half-bar-width of material and out past the ring's outer face.
     cx, cy = W / 2.0, H / 2.0
+    curve_spring_y = None
+    curve_pts = None
     if shape == 'circular':
         rx_in = max(W / 2.0 - bar_h, 1.0)
         ry_in = max(H / 2.0 - bar_h, 1.0)
         ellipse_poly = _ellipse_points(cx, cy, rx_in, ry_in, segments=96)
+    elif shape == 'arched':
+        rx_in = ry_in = None
+        ellipse_poly = None
+        curve_spring_y = H - arch_rise
+        r_in = max(W / 2.0 - bar_j, 1.0)
+        curve_pts = _arch_curve_pts(W, curve_spring_y, r_in, segments=64)
+    elif shape == 'gothic':
+        rx_in = ry_in = None
+        ellipse_poly = None
+        curve_spring_y = H - arch_rise
+        curve_pts = _gothic_curve_pts(W, H, curve_spring_y, arch_rise, segments=32)
     else:
         rx_in = ry_in = None
         ellipse_poly = None
@@ -958,6 +1033,20 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
                     if on_t:
                         new_top = min(ay + ah, min(s[1] for s in spans))
                         ah = new_top - ay
+        elif shape in ('arched', 'gothic') and on_t:
+            # Only the TOP is curved for arched/gothic (sides are straight
+            # jambs, already correctly inset above) — pull the pane's top
+            # edge down to the head curve instead of the flat W x H edge.
+            x_lo_s = min(max(ax, 1e-6), W - 1e-6)
+            x_hi_s = min(max(ax + aw, 1e-6), W - 1e-6)
+            tops = [t for t in (
+                _curve_span_y(x_lo_s, curve_pts),
+                _curve_span_y(x_hi_s, curve_pts),
+                _curve_span_y((x_lo_s + x_hi_s) / 2.0, curve_pts),
+            ) if t is not None]
+            if tops:
+                new_top = min(ay + ah, min(tops))
+                ah = new_top - ay
 
         if aw <= 2 * sb or ah <= 2 * sb:
             continue
@@ -986,6 +1075,11 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
         if gw <= 0 or gh <= 0:
             continue
         clip_path = None
+        if shape in ('arched', 'gothic'):
+            logger.info(
+                "GLASS-CLIP-DIAG pane=%s shape=%s gx=%.1f gy=%.1f gw=%.1f "
+                "gh=%.1f top=%.1f spring_y=%.1f",
+                r['i'], shape, gx, gy, gw, gh, gy + gh, curve_spring_y)
         if shape == 'circular':
             # Clip the glass rectangle to the ring's inner-face ellipse so it
             # never pokes past the round frame at the pane's outer corner.
@@ -994,6 +1088,17 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
             if len(clipped) < 3:
                 continue
             clip_path = clipped
+        elif shape in ('arched', 'gothic') and gy + gh > curve_spring_y + 1e-6:
+            # Pane reaches into the curved head — clip its rectangle's top
+            # edge to the arched/gothic curve so the glass follows the arc
+            # instead of poking past it with a flat top.
+            clipped = _clip_rect_to_curve_top(gx, gy, gw, gh, curve_pts)
+            if not clipped or len(clipped) < 3:
+                continue
+            clip_path = clipped
+        if shape in ('arched', 'gothic'):
+            logger.info("GLASS-CLIP-DIAG pane=%s clip_path=%s",
+                        r['i'], 'SET(%d pts)' % len(clip_path) if clip_path else 'None')
         A.glass.append(GlassCell(
             id=f"G{r['i']+1}", x=gx, y=gy, w=gw, h=gh,
             infill=r['infill'], opening=opening,

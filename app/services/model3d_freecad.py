@@ -358,42 +358,79 @@ def make_face_rings(rings, plane, bar, depth):
 
 def make_path_solid(rings, bar, depth, path, closed):
     """Curved member (arched/gothic head, full circular ring): sweep the
-    section along each straight polyline edge of path — the FreeCAD
-    mirror of model3d.py::_member_mesh_path / _member_solid_cq_path, so
-    all three exporters (trimesh/cadquery/FreeCAD) agree on placement."""
+    section along each path segment.
+
+    The section is already centred on the path centreline. Therefore the
+    segment is translated directly to p0; no additional bar/2 normal
+    offset is applied.
+    """
     n = len(path)
     count = n if closed else n - 1
     solids = []
+
     for i in range(count):
         p0 = path[i]
         p1 = path[(i + 1) % n] if closed else path[i + 1]
-        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+
+        dx = p1[0] - p0[0]
+        dy = p1[1] - p0[1]
         seg_len = math.hypot(dx, dy)
+
         if seg_len < 0.5:
             continue
+
         theta_deg = math.degrees(math.atan2(dy, dx))
 
-        face, holes = make_face_rings(rings, 'H', bar, depth)
-        seg = face.extrude(V(seg_len, 0.0, 0.0))
+        face, holes = make_face_rings(
+            rings, 'H', bar, depth
+        )
+
+        seg = face.extrude(
+            V(seg_len, 0.0, 0.0)
+        )
+
         for hf in holes:
-            try:    seg = seg.cut(hf.extrude(V(seg_len, 0.0, 0.0)))
-            except Exception as e: print("path hole cut failed:", e, flush=True)
+            try:
+                seg = seg.cut(
+                    hf.extrude(V(seg_len, 0.0, 0.0))
+                )
+            except Exception as e:
+                print(
+                    "path hole cut failed:",
+                    e,
+                    flush=True
+                )
 
-        seg = seg.rotate(V(0, 0, 0), V(0, 0, 1), theta_deg)
+        # Rotate the already-centred section so its extrusion axis
+        # follows the current path segment.
+        seg = seg.rotate(
+            V(0, 0, 0),
+            V(0, 0, 1),
+            theta_deg
+        )
 
-        theta = math.radians(theta_deg)
-        ux, uy = -math.sin(theta), math.cos(theta)
-        tx = p0[0] - cx - ux * bar / 2.0
-        ty = p0[1] - cy - uy * bar / 2.0
-        seg.translate(V(tx, ty, 0.0))
+        # IMPORTANT:
+        # _mk_face() centres the section around its own centreline.
+        # Translate that centreline directly onto p0.
+        tx = p0[0] - cx
+        ty = p0[1] - cy
+
+        seg.translate(
+            V(tx, ty, 0.0)
+        )
+
         solids.append(seg)
 
     if not solids:
         return None
+
     result = solids[0]
+
     for s in solids[1:]:
         result = result.fuse(s)
+
     return result
+   
 
 # ══════════════════════════════════════════════════════════════════════
 # SHARED ORTHOGRAPHIC SECTION-VIEW PIPELINE
