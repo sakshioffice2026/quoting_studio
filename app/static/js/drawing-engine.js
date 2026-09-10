@@ -230,6 +230,14 @@ class WindowModel {
     if (!m.customExtras) m.customExtras = [];
     if (!m.shape)    m.shape = 'rectangle';
     if (m.archRise == null) m.archRise = 400;
+    // Design data normalization: arched shape with a single pane must be
+    // fully fixed (non-opening) and span the full aperture — removes any
+    // legacy sash split stored in design_json.
+    if (m.shape === 'arched' && m.panes.length === 1) {
+      m.panes[0].x = 0; m.panes[0].y = 0;
+      m.panes[0].w = 1; m.panes[0].h = 1;
+      m.panes[0].opening = 'Fixed';
+    }
     if (!m.unitType) m.unitType = 'window';
     if (!m.door)     m.door = { dtype:'single', leafCount:1, slL:0, slR:0, flH:0 };
     return m;
@@ -1652,37 +1660,50 @@ class DrawingCanvas {
     defs.appendChild(cp);
     svg.appendChild(defs);
 
+    // Single non-opening fully-arched pane: one unified glass area, no sash
+    // split, no transom member, no opener symbols. Multi-pane arched layouts
+    // (archedDouble etc.) keep the existing per-pane + mullion rendering.
+    const isSingleFixedArched = shape === 'arched' && this.model.panes.length === 1
+      && (!this.model.panes[0].opening || this.model.panes[0].opening === 'Fixed');
+
     // glass fill backdrop clipped to the inner shape (so nothing shows outside)
     const glassGroup = document.createElementNS(SVGNS, 'g');
     glassGroup.setAttribute('clip-path', `url(#${clipId})`);
     // solid glass backdrop across whole aperture
     glassGroup.appendChild(this._rect(o.x, o.y, this.mmToPx(W), this.mmToPx(H),
       { fill:'url(#qsGlassSky)', stroke:'none', sw:0 }));
-    for (const p of this.model.panes) {
-      this._paneGlassEls(p, o, W, H, bar).forEach(e => glassGroup.appendChild(e));
+    if (!isSingleFixedArched) {
+      // Multi-pane: draw per-pane glass borders and glazing bars
+      for (const p of this.model.panes) {
+        this._paneGlassEls(p, o, W, H, bar).forEach(e => glassGroup.appendChild(e));
+      }
     }
     svg.appendChild(glassGroup);
 
-    // mullions clipped to the shape
-    const mullGroup = document.createElementNS(SVGNS, 'g');
-    mullGroup.setAttribute('clip-path', `url(#${clipId})`);
-    this._renderMullionsInto(mullGroup, o, W, H, bar);
-    svg.appendChild(mullGroup);
-
-    // openers + handles clipped to shape (drawn on top of glass/mullions)
-    const opGroup = document.createElementNS(SVGNS, 'g');
-    opGroup.setAttribute('clip-path', `url(#${clipId})`);
-    for (const p of this.model.panes) {
-      if (p.infill === 'panel') continue;
-      const b = this._paneBox(p, o, W, H, bar);
-      if (b.w > 0 && b.h > 0) {
-        // temporarily retarget svg to the clip group for opener/handle helpers
-        const realSvg = this.svg; this.svg = opGroup;
-        this._renderOpener(p, b.x, b.y, b.w, b.h);
-        this.svg = realSvg;
-      }
+    // Mullions: skip for single-pane arched (no internal member splits)
+    if (!isSingleFixedArched) {
+      const mullGroup = document.createElementNS(SVGNS, 'g');
+      mullGroup.setAttribute('clip-path', `url(#${clipId})`);
+      this._renderMullionsInto(mullGroup, o, W, H, bar);
+      svg.appendChild(mullGroup);
     }
-    svg.appendChild(opGroup);
+
+    // Openers: skip for single-pane fixed arched (non-opening pane)
+    if (!isSingleFixedArched) {
+      const opGroup = document.createElementNS(SVGNS, 'g');
+      opGroup.setAttribute('clip-path', `url(#${clipId})`);
+      for (const p of this.model.panes) {
+        if (p.infill === 'panel') continue;
+        const b = this._paneBox(p, o, W, H, bar);
+        if (b.w > 0 && b.h > 0) {
+          // temporarily retarget svg to the clip group for opener/handle helpers
+          const realSvg = this.svg; this.svg = opGroup;
+          this._renderOpener(p, b.x, b.y, b.w, b.h);
+          this.svg = realSvg;
+        }
+      }
+      svg.appendChild(opGroup);
+    }
 
     // frame band LAST, on top: outer minus inner (evenodd) — closes the curve cleanly
     const frame = document.createElementNS(SVGNS, 'path');
