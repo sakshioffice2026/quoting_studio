@@ -1050,6 +1050,19 @@ def build_members(window, panes, profiles: ProfileSet | None = None) -> Assembly
 
         if aw <= 2 * sb or ah <= 2 * sb:
             continue
+        # The circular/arched/gothic curve clamp above may have shrunk
+        # ax/ay/aw/ah from the flat il/ir/ib/it insets stored at L988 —
+        # but that stored sash_insets entry was never refreshed. Step 4
+        # (glass/bead) reads sash_insets, not ax/ay/aw/ah, so it was
+        # building glass against the pre-clamp flat edge instead of the
+        # sash's real (curve-clamped) edge — the mismatch that shows up
+        # as a flat rectangle sitting inside the true arch. Recompute the
+        # stored insets from the final ax/ay/aw/ah so glass/bead line up
+        # with the sash frame that was actually drawn.
+        sash_insets[r['i']] = {
+            'l': ax - r['x'], 'r': (r['x'] + r['w']) - (ax + aw),
+            'b': ay - r['y'], 't': (r['y'] + r['h']) - (ay + ah),
+        }
         sash_rects[r['i']] = (ax, ay, aw, ah)
         _add_rect_frame(A, f'S{si}', ROLE_SASH, ax, ay, aw, ah, sb,
                         p_sash['depth'], p_sash['code'])
