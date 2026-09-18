@@ -1,0 +1,937 @@
+"""
+engineering_dxf.py — engineering drawing sheet generator (DXF output).
+FIXED VERSION — All layers, functions, and geometry corrections applied.
+
+Layout (all coords in mm, modelspace 1:1):
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  ELEVATION (0,SHEET_BOT+TB_H+GAP)        │  PANE SCHEDULE      │
+  │                                            │  (right of elev)    │
+  │                                            │                     │
+  ├────────────────────────────────────────────┘                     │
+  │  HORIZONTAL SECTION A-A (plan strip)                             │
+  │  SECTION A-A (vertical, right of elev)                           │
+  ├──────────────────────────────────────────────────────────────────┤
+  │  TITLE BLOCK (bottom full-width strip)                           │
+  └──────────────────────────────────────────────────────────────────┘
+  Sheet border wraps everything with margin.
+"""
+import json, logging, math, io, datetime
+from ezdxf.enums import TextEntityAlignment
+logger = logging.getLogger(__name__)
+
+# FIXED: Corrected layer names per specification
+L_FRAME = 'PROF_OUTLINE'
+L_SASH  = 'PROF_OUTLINE'
+L_GLASS = 'GLASS_OUTLINE'
+L_SECT  = 'PROF_OUTLINE'
+L_DIM   = 'DIM_ANNOTATION'
+L_ANNOT = 'DIM_ANNOTATION'
+L_SWING = 'PROF_OUTLINE'
+L_BORDER= 'PROF_OUTLINE'
+L_HATCH = 'PROF_HATCH'
+L_SEAL  = 'GASKET_SEAL'
+L_HW    = 'HARDWARE'
+L_AXIS  = 'CENTER_AXIS'
+
+TB_H   = 200
+GAP    = 200
+MARGIN = 150
+SCHED_GAP = 350
+DIM_ABOVE = 260
+DIM_LEFT  = 280
+DIM_BELOW = 300
+
+
+def generate_engineering_dxf(window, panes, tenant_id=None) -> bytes:
+    import ezdxf
+    from app.services.dxf_layers import setup_layers, setup_dimstyle, setup_text_styles
+    
+    doc = ezdxf.new('R2010', setup=True)
+    msp = doc.modelspace()
+
+    # FIXED: Use centralized layer setup instead of hardcoded
+    setup_layers(doc)
+    setup_text_styles(doc)
+    
+    W   = float(window.width_mm)
+    H   = float(window.height_mm)
+    prof = _load_profile(tenant_id, getattr(window, 'material', 'Aluminium'))
+    bar  = prof['bar']
+    dep  = prof['depth']
+    
+    setup_dimstyle(doc, bar_width=bar)
+
+    design = _load_design(window)
+    cells  = _cells(panes, design)
+    # design_json['shape'] (written by the Designer) is authoritative — same
+    # source used by canonical_geometry.py for the STEP/3D export — so this
+    # legacy sheet matches. window.shape is only a fallback for old records.
+    shape = str(design.get('shape') or getattr(window, 'shape', 'rectangular') or 'rectangular').lower()
+    if shape == 'rectangular':
+        shape = 'rectangle'
+    arch_rise = design.get('archRise')
+    if arch_rise is None:
+        arch_rise = design.get('archRise_mm')
+    try:
+        arch_rise = float(arch_rise) if arch_rise is not None else None
+    except (TypeError, ValueError):
+        arch_rise = None
+
+    plan_h   = dep + 40
+    plan_y0  = -(dep + 120)
+    plan_y1  = plan_y0 - plan_h
+
+    tb_top = plan_y1 - DIM_BELOW - GAP
+    tb_bot = tb_top - TB_H
+
+    sect_x = W + 300
+    sched_x = sect_x + bar + SCHED_GAP
+
+    # Hatching drawn first so it sits behind frame/glass/swing-line geometry.
+    # Pass shape/arch_rise through so the hatch fill is clipped to the same
+    # curved outline as the glass itself (previously always a plain
+    # rectangle, sticking out past round/arched/gothic frames — the QS-70
+    # round-window issue).
+    if shape == 'circular':
+        # Circular windows: elevation + glass hatch are drawn strictly from
+        # the STEP solid (via FreeCAD projection) instead of the
+        # independently-computed circle/arc math below, so this sheet can
+        # never drift from the exported 3D/STEP model.
+        _elevation_from_step(msp, window, panes, tenant_id, W, H)
+    else:
+        _add_hatching(msp, cells, W, H, bar, shape, arch_rise)
+        _elevation(msp, W, H, bar, cells, shape, arch_rise)
+    _plan_strip(msp, W, bar, dep, cells, prof, plan_y0)
+    _vertical_section(msp, H, bar, dep, prof, sect_x)
+    _pane_schedule(msp, cells, design, sched_x, H, W, H, shape, arch_rise)
+    _dimensions(msp, W, H, cells, plan_y0, plan_y1, sect_x, dep)
+
+    # FIXED: Add missing geometry functions
+    _add_gasket_seals(msp, W, H, bar)
+    _add_hardware_cutouts(msp, W, H, bar, cells)
+    _add_frame_centerlines(msp, W, H, bar)
+    _add_drainage_paths(msp, W, H, bar, prof)
+
+    _add_text(msp, 'ELEVATION',        W / 2, H + 80,  45, L_ANNOT, halign=1)
+    _add_text(msp, 'SCALE 1:1',        W / 2, H + 30,  30, L_ANNOT, halign=1)
+    _add_text(msp, 'HORIZONTAL SECTION A-A',
+              W / 2, plan_y1 - 40,   35, L_ANNOT, halign=1)
+    _add_text(msp, f'PROFILE: {prof["name"]}  ·  '
+              f'{bar:.0f}mm FRAME  ·  {dep:.0f}mm DEPTH',
+              W / 2, plan_y1 - 90,   25, L_ANNOT, halign=1)
+    _add_text(msp, 'SECTION A-A',
+              sect_x + bar / 2, H + 80, 35, L_ANNOT, halign=1)
+
+    content_right = max(sched_x + 900, sect_x + bar + 200)
+    content_left  = -DIM_LEFT
+    sheet_w = content_right - content_left
+    _title_block(msp, window, prof, content_left, tb_bot, sheet_w, TB_H, design)
+
+    bx0 = content_left  - MARGIN
+    bx1 = content_right + MARGIN
+    by0 = tb_bot        - MARGIN
+    by1 = H + DIM_ABOVE + MARGIN
+    
+    msp.add_lwpolyline(
+        [(bx0, by0), (bx1, by0), (bx1, by1), (bx0, by1)],
+        close=True, dxfattribs={'layer': L_BORDER})
+    
+    m2 = 30
+    msp.add_lwpolyline(
+        [(bx0+m2, by0+m2), (bx1-m2, by0+m2),
+         (bx1-m2, by1-m2), (bx0+m2, by1-m2)],
+        close=True, dxfattribs={'layer': L_BORDER})
+
+    buf = io.StringIO()
+    doc.write(buf)
+    return buf.getvalue().encode('utf-8')
+
+
+def _add_text(msp, s, x, y, h, layer, halign=0):
+    import ezdxf
+    t = msp.add_text(s, dxfattribs={'layer': layer, 'height': h})
+    if halign == 1:
+        t.set_placement((x, y), align=ezdxf.enums.TextEntityAlignment.MIDDLE_CENTER)
+    elif halign == 2:
+        t.set_placement((x, y), align=ezdxf.enums.TextEntityAlignment.RIGHT)
+    else:
+        t.set_placement((x, y))
+    return t
+
+
+def _hline(msp, x0, x1, y, layer=L_BORDER):
+    msp.add_line((x0, y), (x1, y), dxfattribs={'layer': layer})
+
+
+def _vline(msp, x, y0, y1, layer=L_BORDER):
+    msp.add_line((x, y0), (x, y1), dxfattribs={'layer': layer})
+
+
+def _title_block(msp, window, prof, ox, oy, sw, th, design):
+    date_str = datetime.date.today().strftime('%d/%m/%Y')
+    label    = getattr(window, 'label', 'Unit') or 'Unit'
+    mat      = getattr(window, 'material', '')
+    colour   = getattr(window, 'frame_colour_name', '')
+    W, H     = float(window.width_mm), float(window.height_mm)
+
+    company = 'QUOTING STUDIO'
+    try:
+        company = (window.project.tenant.name or company).upper()
+    except Exception:
+        pass
+
+    drw_no = f'QS-{window.id}'
+
+    pts = [(ox, oy), (ox+sw, oy), (ox+sw, oy+th), (ox, oy+th)]
+    msp.add_lwpolyline(pts, close=True, dxfattribs={'layer': L_BORDER})
+
+    company_w = sw * 0.22
+    _vline(msp, ox + company_w, oy, oy + th)
+    _add_text(msp, company,
+              ox + company_w / 2, oy + th * 0.55, th * 0.22, L_ANNOT, halign=1)
+    _add_text(msp, 'QUOTING STUDIO',
+              ox + company_w / 2, oy + th * 0.25, th * 0.10, L_ANNOT, halign=1)
+
+    mid_x0 = ox + company_w
+    mid_w  = sw * 0.42
+    mid_x1 = mid_x0 + mid_w
+    _vline(msp, mid_x1, oy, oy + th)
+
+    row_h = th / 4
+    for i in (1, 2, 3):
+        _hline(msp, mid_x0, mid_x1, oy + row_h * i)
+
+    cells_desc = [
+        ('Drawing Title',  label),
+        ('Material',       f'{mat}  ·  {colour}' if colour else mat),
+        ('Size',           f'{W:.0f} × {H:.0f} mm'),
+        ('Drawn',          date_str)
+    ]
+
+    cx = mid_x0
+    for i, (k, v) in enumerate(cells_desc):
+        cy = oy + (3.5 - i) * row_h
+        _add_text(msp, k, cx + 20, cy + row_h * 0.6, th * 0.11, L_ANNOT)
+        _add_text(msp, v, cx + 20, cy + row_h * 0.25, th * 0.10, L_ANNOT)
+
+    right_x0 = mid_x1
+    _vline(msp, right_x0 + (sw - mid_x1) * 0.5, oy, oy + th)
+    _add_text(msp, 'DRAWING NUMBER', right_x0 + 20, oy + th * 0.7, th * 0.10, L_ANNOT)
+    _add_text(msp, drw_no, right_x0 + 20, oy + th * 0.3, th * 0.20, L_ANNOT)
+
+
+def _quad_bezier_points(p0, p1, p2, segments=20):
+    """Sample a quadratic Bezier (p0=start, p1=control, p2=end) into a list
+    of (x, y) points, excluding p0 (the caller already has that point from
+    the previous segment). Used to render the gothic head as a smooth
+    polyline since DXF lwpolyline has no native quadratic-bezier segment."""
+    pts = []
+    for i in range(1, segments + 1):
+        t = i / segments
+        mt = 1 - t
+        x = mt * mt * p0[0] + 2 * mt * t * p1[0] + t * t * p2[0]
+        y = mt * mt * p0[1] + 2 * mt * t * p1[1] + t * t * p2[1]
+        pts.append((x, y))
+    return pts
+
+
+def _clip_polygon(subject, clip):
+    """Sutherland-Hodgman polygon clip: returns `subject` clipped to the
+    inside of convex polygon `clip`. Used to clip mullion bars / glass
+    rectangles to the true curved outline on circular/arched/gothic
+    shapes instead of drawing them as full-width/height rectangles that
+    stick out past the frame (the QS-70 round-window issue)."""
+    def inside(p, a, b):
+        # left side of a->b, given clip polygon is wound CCW
+        return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= -1e-9
+
+    def intersect(p1, p2, a, b):
+        x1, y1 = p1; x2, y2 = p2; x3, y3 = a; x4, y4 = b
+        d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(d) < 1e-12:
+            return p2
+        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / d
+        return (x1 + t * (x2 - x1), y1 + t * (y2 - y1))
+
+    output = list(subject)
+    n = len(clip)
+    for i in range(n):
+        a, b = clip[i], clip[(i + 1) % n]
+        if not output:
+            break
+        input_list = output
+        output = []
+        prev = input_list[-1]
+        prev_in = inside(prev, a, b)
+        for cur in input_list:
+            cur_in = inside(cur, a, b)
+            if cur_in:
+                if not prev_in:
+                    output.append(intersect(prev, cur, a, b))
+                output.append(cur)
+            elif prev_in:
+                output.append(intersect(prev, cur, a, b))
+            prev, prev_in = cur, cur_in
+    return output
+
+
+def _outline_points(shape, W, H, arch_rise, segments=64):
+    """Sample the true frame outline (ellipse / arch / gothic head) into a
+    dense point list for use as a clip polygon. Returns None for
+    'rectangle' since rectangular bars/glass never need clipping."""
+    if shape == 'circular':
+        cx, cy = W / 2.0, H / 2.0
+        rx, ry = W / 2.0, H / 2.0
+        return [(cx + rx * math.cos(2 * math.pi * i / segments),
+                 cy + ry * math.sin(2 * math.pi * i / segments))
+                for i in range(segments)]
+
+    if shape == 'arched':
+        arch_height = arch_rise if arch_rise and arch_rise > 0 else min(W * 0.25, 400)
+        cx, cy = W / 2.0, H - arch_height
+        r = W / 2.0
+        pts = [(0.0, 0.0), (W, 0.0)]
+        arc_n = max(segments // 2, 12)
+        for i in range(arc_n + 1):
+            a = math.radians(i * 180.0 / arc_n)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+        return pts
+
+    if shape == 'gothic':
+        arch_height = arch_rise if arch_rise and arch_rise > 0 else min(W * 0.25, 400)
+        spring_y = H - arch_height
+        apex = (W / 2.0, H)
+        ctrl_y = spring_y + 0.6 * arch_height
+        right_spring = (W, spring_y)
+        right_ctrl = (W, ctrl_y)
+        left_ctrl = (0, ctrl_y)
+        left_spring = (0, spring_y)
+        pts = [(0.0, 0.0), (W, 0.0), right_spring]
+        pts += _quad_bezier_points(right_spring, right_ctrl, apex, segments=segments // 2)
+        pts += _quad_bezier_points(apex, left_ctrl, left_spring, segments=segments // 2)
+        return pts
+
+    return None  # rectangle — no clipping needed
+
+
+def _elevation_from_step(msp, window, panes, tenant_id, W, H):
+    """
+    Circular-window elevation, sourced strictly from the STEP solid.
+
+    Generates (or reuses the cached) STEP file for this window via
+    model3d.generate_3d, projects its FRONT view with headless FreeCAD,
+    and draws the resulting frame/glass edges directly — no independent
+    circle/ellipse recomputation, so the drawing can never disagree with
+    the STEP export.
+    """
+    from .orthographic_dxf import get_step_views
+
+    try:
+        views = get_step_views(window, panes, tenant_id=tenant_id)
+        front = views.get('front') or {}
+        frame_edges = front.get('frame') or front.get('visible') or []
+        glass_by_label = front.get('glass') or {}
+        if not frame_edges and not glass_by_label:
+            raise RuntimeError('empty STEP front projection')
+    except Exception:
+        logger.exception(
+            'STEP-derived circular elevation failed for window=%s — '
+            'falling back to parametric circle geometry',
+            getattr(window, 'id', '?'))
+        _add_hatching(msp, _cells(panes, _load_design(window)), W, H,
+                       _load_profile(tenant_id, getattr(window, 'material', 'Aluminium'))['bar'],
+                       'circular', None)
+        _elevation(msp, W, H,
+                   _load_profile(tenant_id, getattr(window, 'material', 'Aluminium'))['bar'],
+                   _cells(panes, _load_design(window)), 'circular', None)
+        return
+
+    all_pts = [p for e in frame_edges for p in e]
+    for edges in glass_by_label.values():
+        all_pts += [p for e in edges for p in e]
+    x0 = min(p[0] for p in all_pts)
+    y0 = min(p[1] for p in all_pts)
+
+    # Glass hatch first so it sits behind the frame outline, same draw
+    # order as the rectangular/arched path.
+    for label, edges in glass_by_label.items():
+        pts = [(px - x0, py - y0) for e in edges for px, py in e]
+        if len(pts) < 3:
+            continue
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        ordered = sorted(pts, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+        dedup = []
+        for p in ordered:
+            if not dedup or math.hypot(p[0] - dedup[-1][0], p[1] - dedup[-1][1]) > 0.5:
+                dedup.append(p)
+        if len(dedup) >= 3:
+            hatch = msp.add_hatch(color=7)
+            hatch.set_pattern_fill('ANSI31', scale=8)
+            hatch.paths.add_polyline_path(dedup, is_closed=True)
+            hatch.dxf.layer = L_HATCH
+            msp.add_lwpolyline(dedup, close=True, dxfattribs={'layer': L_GLASS})
+
+    for edge in frame_edges:
+        pts = [(px - x0, py - y0) for px, py in edge]
+        if len(pts) >= 2:
+            msp.add_lwpolyline(pts, dxfattribs={'layer': L_FRAME})
+
+
+def _elevation(msp, W, H, bar, cells, shape='rectangle', arch_rise=None):
+    mb = bar * 0.6
+    clip_outline = _outline_points(shape, W, H, arch_rise)
+
+    if shape == 'arched':
+        # Draw arched top window. arch_height (the "spring-to-apex" rise)
+        # comes from the Designer's Arch rise field when available, matching
+        # the 2D designer (drawing-engine.js) and the STEP/3D export
+        # (canonical_geometry.py / model3d.py) exactly instead of guessing.
+        arch_radius = W / 2
+        arch_height = arch_rise if arch_rise and arch_rise > 0 else min(W * 0.25, 400)
+
+        # Bottom rectangle
+        msp.add_lwpolyline(
+            [(0, 0), (W, 0), (W, H - arch_height), (0, H - arch_height)],
+            close=True, dxfattribs={'layer': L_FRAME})
+
+        # Arc for top (center at W/2, height H-arch_height)
+        cx, cy = W / 2, H - arch_height
+        msp.add_arc(
+            center=(cx, cy),
+            radius=arch_radius,
+            start_angle=0,
+            end_angle=180,
+            dxfattribs={'layer': L_FRAME})
+
+        # Left vertical line for arch
+        msp.add_lwpolyline([(0, H - arch_height), (0, cy)], dxfattribs={'layer': L_FRAME})
+        # Right vertical line for arch
+        msp.add_lwpolyline([(W, H - arch_height), (W, cy)], dxfattribs={'layer': L_FRAME})
+
+    elif shape == 'gothic':
+        # Pointed (two-centre) gothic head — mirrors the two quadratic
+        # Beziers used client-side in drawing-engine.js and in the STEP/3D
+        # export (model3d.py::_curved_outer_wire), using the same
+        # spring-line / control-point (0.6 factor) geometry so the DXF
+        # elevation matches the 2D designer and the 3D model instead of
+        # falling back to a plain rectangle.
+        arch_height = arch_rise if arch_rise and arch_rise > 0 else min(W * 0.25, 400)
+        spring_y = H - arch_height          # where the pointed head starts
+        apex = (W / 2.0, H)                 # top of the unit
+        ctrl_y = spring_y + 0.6 * arch_height
+        right_spring = (W, spring_y)
+        right_ctrl = (W, ctrl_y)
+        left_ctrl = (0, ctrl_y)
+        left_spring = (0, spring_y)
+
+        pts = [(0, 0), (W, 0), right_spring]
+        pts += _quad_bezier_points(right_spring, right_ctrl, apex)
+        pts += _quad_bezier_points(apex, left_ctrl, left_spring)
+        msp.add_lwpolyline(pts, close=True, dxfattribs={'layer': L_FRAME})
+
+    elif shape == 'circular':
+        # Full ellipse inscribed in the W x H bounding box (round / porthole
+        # window) — mirrors model3d.py::_curved_outer_wire's "circular"
+        # branch so the DXF elevation matches the 3D STEP export instead of
+        # falling back to a plain rectangle.
+        cx, cy = W / 2.0, H / 2.0
+        half_w, half_h = W / 2.0, H / 2.0
+        if half_w >= half_h:
+            major_axis = (half_w, 0)
+            ratio = (half_h / half_w) if half_w else 1.0
+        else:
+            major_axis = (0, half_h)
+            ratio = (half_w / half_h) if half_h else 1.0
+        msp.add_ellipse(
+            center=(cx, cy),
+            major_axis=major_axis,
+            ratio=ratio,
+            dxfattribs={'layer': L_FRAME})
+        # Internal mullions/transoms/glazing are clipped to this ellipse
+        # below via clip_outline so they don't stick out past the round
+        # aperture (previously drawn as full-width/height rectangles).
+
+    else:
+        # Standard rectangular window
+        msp.add_lwpolyline(
+            [(0, 0), (W, 0), (W, H), (0, H)],
+            close=True, dxfattribs={'layer': L_FRAME})
+
+    def _add_clipped_poly(pts, layer):
+        """Draw `pts` as-is on rectangular windows; on curved shapes clip
+        to the true outline first so bars/glass never poke outside the
+        frame."""
+        if clip_outline is not None:
+            pts = _clip_polygon(pts, clip_outline)
+        if len(pts) >= 3:
+            msp.add_lwpolyline(pts, close=True, dxfattribs={'layer': layer})
+
+    seen_v = set()
+    seen_h = set()
+    for (x, y, w, h, opening) in cells:
+        rx = x + w
+        if 0.001 < rx < 0.999 and round(rx, 3) not in seen_v:
+            seen_v.add(round(rx, 3))
+            mx = rx * W
+            _add_clipped_poly(
+                [(mx - mb/2, 0), (mx + mb/2, 0),
+                 (mx + mb/2, H), (mx - mb/2, H)], L_FRAME)
+
+        gy, gh = y * H, h * H
+        ty = y + h
+        if 0.001 < ty < 0.999 and round(ty, 3) not in seen_h:
+            seen_h.add(round(ty, 3))
+            my = ty * H
+            _add_clipped_poly(
+                [(bar, my - mb/2), (W - bar, my - mb/2),
+                 (W - bar, my + mb/2), (bar, my + mb/2)], L_FRAME)
+
+        gi = bar + 4
+        gx, gw = x * W, w * W
+        glx = gx + (gi if x <= 0.001 else mb/2 + 4)
+        gly = gy + (gi if y <= 0.001 else mb/2 + 4)
+        grx = gx + gw - (gi if x + w >= 0.999 else mb/2 + 4)
+        gry = gy + gh - (gi if y + h >= 0.999 else mb/2 + 4)
+        
+        if grx > glx and gry > gly:
+            if shape == 'circular':
+                # Circular window: draw circle instead of rectangle
+                cx = W / 2.0
+                cy = H / 2.0
+                radius = min(grx - glx, gry - gly) / 2.0
+                msp.add_circle((cx, cy), radius, dxfattribs={'layer': L_GLASS})
+            else:
+                # Rectangle window: original logic
+                glass_pts = [(glx, gly), (grx, gly), (grx, gry), (glx, gry)]
+                if clip_outline is not None:
+                    glass_pts = _clip_polygon(glass_pts, clip_outline)
+                if len(glass_pts) >= 3:
+                    msp.add_lwpolyline(glass_pts, close=True, dxfattribs={'layer': L_GLASS})
+            _opener_symbol(msp, glx, gly, grx - glx, gry - gly, opening)
+
+
+def _opener_symbol(msp, x, y, w, h, opening):
+    if not opening or opening == 'Fixed':
+        return
+    d = {'layer': L_SWING, 'linetype': 'DASHED'}
+    cx, cy = x + w/2, y + h/2
+    op = opening
+    if 'Left' in op or op == 'Casement':
+        msp.add_line((x + w, y),     (x + w*0.1, cy), dxfattribs=d)
+        msp.add_line((x + w, y + h), (x + w*0.1, cy), dxfattribs=d)
+    elif 'Right' in op:
+        msp.add_line((x,     y),     (x + w*0.9, cy), dxfattribs=d)
+        msp.add_line((x,     y + h), (x + w*0.9, cy), dxfattribs=d)
+    elif 'Top' in op:
+        msp.add_line((x,     y),     (cx, y + h*0.9), dxfattribs=d)
+        msp.add_line((x + w, y),     (cx, y + h*0.9), dxfattribs=d)
+    elif 'Slid' in op:
+        msp.add_line((x + w*0.15, cy), (x + w*0.85, cy), dxfattribs=d)
+
+
+def _plan_strip(msp, W, bar, dep, cells, prof, plan_y0):
+    loops = _profile_pts(prof)
+    plan_y1 = plan_y0 - dep
+
+    _place_loops(msp, loops, 0,     plan_y1, rot_deg=0,   mirror_u=False)
+    _place_loops(msp, loops, W,     plan_y1, rot_deg=0,   mirror_u=True)
+
+    for y_edge in (plan_y0, plan_y1):
+        msp.add_line((bar, y_edge), (W - bar, y_edge),
+                     dxfattribs={'layer': L_SECT})
+
+    mb = bar * 0.6
+    seen = set()
+    for (x, y, w, h, opening) in cells:
+        rx = x + w
+        if 0.001 < rx < 0.999 and round(rx, 3) not in seen:
+            seen.add(round(rx, 3))
+            mx = rx * W
+            st_d = dep * 0.55
+            for sx in (mx - mb/2 - 14, mx + mb/2):
+                msp.add_lwpolyline(
+                    [(sx, plan_y0), (sx + 14, plan_y0),
+                     (sx + 14, plan_y0 - st_d), (sx, plan_y0 - st_d)],
+                    close=True, dxfattribs={'layer': L_SASH})
+            
+            msp.add_lwpolyline(
+                [(mx - mb/2, plan_y0), (mx + mb/2, plan_y0),
+                 (mx + mb/2, plan_y1), (mx - mb/2, plan_y1)],
+                close=True, dxfattribs={'layer': L_SECT})
+
+        if opening and opening not in ('Fixed',) and 'Slid' not in opening:
+            gx, gw = x * W, w * W
+            if 'Right' in opening:
+                cx0, a0, a1 = gx + gw, 90, 160
+            else:
+                cx0, a0, a1 = gx, 20, 90
+            r = min(gw * 0.55, 420)
+            msp.add_arc((cx0, plan_y1), r, a0, a1,
+                        dxfattribs={'layer': L_SWING, 'color': 6})
+
+
+def _vertical_section(msp, H, bar, dep, prof, sect_x):
+    loops = _profile_pts(prof)
+    _place_loops(msp, loops, sect_x, 0,   rot_deg=0)
+    _place_loops(msp, loops, sect_x, H,   rot_deg=180, mirror_u=True)
+    gx = sect_x + bar * 0.45
+    for dx in (0, 24):
+        msp.add_line((gx + dx, dep + 6), (gx + dx, H - dep - 6),
+                     dxfattribs={'layer': L_GLASS})
+
+
+def _cell_clipped_bbox(x, y, w, h, W, H, outline):
+    """True bounding box of a cell rectangle after clipping to the curved
+    frame outline. Falls back to the plain rectangle bbox when there is no
+    outline (rectangular windows) or the clip produces nothing (shouldn't
+    happen for cells generated inside the frame)."""
+    x0, y0 = x * W, y * H
+    x1, y1 = (x + w) * W, (y + h) * H
+    rect = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    if not outline:
+        return x1 - x0, y1 - y0, False
+
+    clipped = _clip_polygon(rect, outline)
+    if not clipped:
+        return x1 - x0, y1 - y0, False
+
+    xs = [p[0] for p in clipped]
+    ys = [p[1] for p in clipped]
+    cw, ch = max(xs) - min(xs), max(ys) - min(ys)
+    # A corner cut only touches the raw rectangle at a single tangent point
+    # (e.g. a quadrant cell in a 2x2 grid inside a circle), so its bbox can
+    # still equal the unclipped rectangle's even though the frame outline
+    # did cut it. Compare vertex counts too: clipping a rectangle against a
+    # convex outline that actually trims a corner always adds at least one
+    # extra vertex versus the plain 4-corner rectangle.
+    is_curved = (cw < (x1 - x0) - 0.5) or (ch < (y1 - y0) - 0.5) or (len(clipped) > 4)
+    return cw, ch, is_curved
+
+
+def _pane_schedule(msp, cells, design, ox, top_y, W, H,
+                    shape='rectangle', arch_rise=None):
+    col_w = [80, 200, 300, 240, 100]
+    row_h = 80
+    headers = ['#', 'Opener', 'Glazing', 'Size (env.)', 'Shape']
+
+    outline = _outline_points(shape, W, H, arch_rise) if shape != 'rectangle' else None
+
+    total_w = sum(col_w)
+    n_rows  = len(cells) + 1
+    total_h = n_rows * row_h
+
+    msp.add_lwpolyline(
+        [(ox, top_y - total_h), (ox + total_w, top_y - total_h),
+         (ox + total_w, top_y), (ox, top_y)],
+        close=True, dxfattribs={'layer': L_BORDER})
+
+    cx = ox
+    for cw in col_w[:-1]:
+        cx += cw
+        msp.add_line((cx, top_y - total_h), (cx, top_y),
+                     dxfattribs={'layer': L_BORDER})
+
+    _add_text(msp, 'PANE SCHEDULE',
+              ox + total_w / 2, top_y + 40, 35, L_ANNOT, halign=1)
+    msp.add_line((ox, top_y - row_h), (ox + total_w, top_y - row_h),
+                 dxfattribs={'layer': L_BORDER})
+    cx = ox
+    for i, hdr in enumerate(headers):
+        _add_text(msp, hdr,
+                  cx + col_w[i] * 0.5, top_y - row_h * 0.45,
+                  28, L_ANNOT, halign=1)
+        cx += col_w[i]
+
+    any_curved = False
+    for r_idx, (x, y, w, h, opening) in enumerate(cells):
+        ry = top_y - (r_idx + 2) * row_h
+        msp.add_line((ox, ry), (ox + total_w, ry),
+                     dxfattribs={'layer': L_BORDER})
+        glazing = 'DGU'
+        if design and design.get('panes') and r_idx < len(design['panes']):
+            dp = design['panes'][r_idx]
+            glazing = dp.get('glazing') or dp.get('glazingType') or 'DGU'
+
+        cw, ch, is_curved = _cell_clipped_bbox(x, y, w, h, W, H, outline)
+        any_curved = any_curved or is_curved
+        shape_lbl = 'Curved*' if is_curved else 'Straight'
+
+        cx = ox
+        vals = [str(r_idx + 1), opening or 'Fixed', glazing,
+                f'{cw:.0f}×{ch:.0f}', shape_lbl]
+        for i, val in enumerate(vals):
+            _add_text(msp, val,
+                      cx + col_w[i] * 0.5, ry + row_h * 0.35,
+                      24, L_ANNOT, halign=1)
+            cx += col_w[i]
+
+    if any_curved:
+        _add_text(msp, '* Curved edge on frame side — envelope size shown; cut to curved template.',
+                  ox, top_y - total_h - 30, 22, L_ANNOT, halign=0)
+
+
+def _dimensions(msp, W, H, cells, plan_y0, plan_y1, sect_x, dep):
+    d  = {'layer': L_DIM}
+    ov = {'dimtxt': 45, 'dimasz': 32, 'dimexe': 18, 'dimexo': 12,
+          'dimdec': 0,  'dimclrt': 1, 'dimclrd': 1, 'dimclre': 1,
+          'dimlfac': 1}
+
+    dim = msp.add_aligned_dim(
+        p1=(0, H), p2=(W, H), distance=140, dxfattribs=d, override=ov)
+    dim.render()
+
+    dim = msp.add_aligned_dim(
+        p1=(sect_x + dep + 20, 0), p2=(sect_x + dep + 20, H),
+        distance=110, dxfattribs=d, override=ov)
+    dim.render()
+
+    edges = sorted({round(c[0], 4) for c in cells} |
+                   {round(c[0] + c[2], 4) for c in cells})
+    if len(edges) > 2:
+        for i in range(len(edges) - 1):
+            x1, x2 = edges[i] * W, edges[i + 1] * W
+            dim = msp.add_aligned_dim(
+                p1=(x1, plan_y1), p2=(x2, plan_y1),
+                distance=-110, dxfattribs=d, override=ov)
+            dim.render()
+
+    rows = sorted({round(c[1], 4) for c in cells} |
+                  {round(c[1] + c[3], 4) for c in cells})
+    if len(rows) > 2:
+        for i in range(len(rows) - 1):
+            y1, y2 = rows[i] * H, rows[i + 1] * H
+            dim = msp.add_aligned_dim(
+                p1=(0, y1), p2=(0, y2),
+                distance=-130, dxfattribs=d, override=ov)
+            dim.render()
+
+
+# FIXED: ADD MISSING FUNCTIONS
+
+def _add_hatching(msp, cells, W, H, bar, shape='rectangle', arch_rise=None):
+    # Clip each cell's hatch boundary to the true frame outline on curved
+    # shapes (circular/arched/gothic) — same outline _elevation() uses for
+    # the glass polyline — so the hatch fill never boxes out past the round
+    # aperture as a plain rectangle.
+    clip_outline = _outline_points(shape, W, H, arch_rise) if shape != 'rectangle' else None
+
+    for (x, y, w, h, opening) in cells:
+        gx = x * W + bar + 4
+        gy = y * H + bar + 4
+        gw = w * W - 8
+        gh = h * H - 8
+        
+        if gw > 0 and gh > 0:
+            # CIRCULAR FIX: For circular windows, create circular hatch
+            if shape == 'circular':
+                cx = W / 2.0
+                cy = H / 2.0
+                radius = min(gw, gh) / 2.0
+                hatch = msp.add_hatch()
+                hatch.set_pattern_fill('ANSI31', scale=6)
+                # Create circle path for hatch
+                from math import pi, cos, sin
+                circle_pts = []
+                segments = 64
+                for i in range(segments):
+                    angle = 2 * pi * i / segments
+                    circle_pts.append((cx + radius * cos(angle), cy + radius * sin(angle)))
+                hatch.paths.add_polyline_path(circle_pts, is_closed=True)
+                hatch.dxf.layer = L_HATCH
+                hatch.dxf.color = 9
+                hatch.transparency = 0.75
+            else:
+                # Rectangle/arched/gothic: original logic
+                pts = [(gx, gy), (gx + gw, gy),
+                       (gx + gw, gy + gh), (gx, gy + gh)]
+                if clip_outline is not None:
+                    pts = _clip_polygon(pts, clip_outline)
+                if len(pts) < 3:
+                    continue
+                hatch = msp.add_hatch()
+                hatch.set_pattern_fill('ANSI31', scale=6)
+                hatch.paths.add_polyline_path(pts, is_closed=True)
+                hatch.dxf.layer = L_HATCH
+                hatch.dxf.color = 9          # light gray, not white
+                hatch.transparency = 0.75    # 75% transparent
+
+
+def _add_gasket_seals(msp, W, H, bar):
+    offset = bar + 7
+    x0, x1 = bar + offset, W - bar - offset
+    y0, y1 = bar + offset, H - bar - offset
+    
+    if x1 > x0 and y1 > y0:
+        msp.add_lwpolyline(
+            [(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+            close=True,
+            dxfattribs={'layer': L_SEAL, 'linetype': 'DASHED', 'color': 3}
+        )
+
+
+def _add_hardware_cutouts(msp, W, H, bar, cells):
+    positions = [(bar+30, bar+20), (bar+30, H-bar-20), (W-bar-30, bar+20), (W-bar-30, H-bar-20)]
+    
+    for (hx, hy) in positions:
+        msp.add_lwpolyline(
+            [(hx-10, hy-8), (hx+10, hy-8), (hx+10, hy+8), (hx-10, hy+8)],
+            close=True,
+            dxfattribs={'layer': L_HW, 'color': 1}
+        )
+        msp.add_circle((hx, hy-5), 2.5, dxfattribs={'layer': L_HW, 'color': 1})
+        msp.add_circle((hx, hy+5), 2.5, dxfattribs={'layer': L_HW, 'color': 1})
+    
+    lock_x, lock_y = W - bar - 12, H * 0.75
+    msp.add_lwpolyline(
+        [(lock_x-6, lock_y-10), (lock_x+6, lock_y-10), (lock_x+6, lock_y+10), (lock_x-6, lock_y+10)],
+        close=True,
+        dxfattribs={'layer': L_HW, 'color': 1}
+    )
+
+    # FIXED: handle was previously drawn once for the whole window at a
+    # hardcoded position (W-bar-15, H/2), regardless of how many panes
+    # exist or whether that pane actually opens. Multi-pane windows lost
+    # their handle whenever the rightmost pane was 'Fixed', and openers
+    # elsewhere in the window got no handle at all.
+    #
+    # Now: one handle per OPENING pane, placed on the pane's own edge
+    # opposite its hinge side (so it doesn't collide with the swing line).
+    for (x, y, w, h, opening) in cells:
+        if not opening or opening == 'Fixed':
+            continue
+
+        px, py = x * W, y * H
+        pw, ph = w * W, h * H
+        cy = py + ph / 2
+        op = opening
+
+        if 'Left' in op or op == 'Casement':
+            handle_x, handle_y = px + pw - bar - 15, cy
+        elif 'Right' in op:
+            handle_x, handle_y = px + bar + 15, cy
+        elif 'Slid' in op:
+            handle_x, handle_y = px + pw - bar - 15, cy
+        elif 'Top' in op:
+            handle_x, handle_y = px + pw / 2, py + bar + 15
+        else:
+            handle_x, handle_y = px + pw - bar - 15, cy
+
+        msp.add_circle((handle_x, handle_y), 4, dxfattribs={'layer': L_HW, 'color': 1})
+        msp.add_circle((handle_x, handle_y - 60), 4, dxfattribs={'layer': L_HW, 'color': 1})
+        msp.add_line((handle_x, handle_y), (handle_x, handle_y - 60),
+                     dxfattribs={'layer': L_HW, 'linetype': 'DASHED', 'color': 1})
+
+
+def _add_frame_centerlines(msp, W, H, bar):
+    msp.add_line((0, H/2), (W, H/2),
+                 dxfattribs={'layer': L_AXIS, 'linetype': 'CENTER', 'color': 6})
+    msp.add_line((W/2, 0), (W/2, H),
+                 dxfattribs={'layer': L_AXIS, 'linetype': 'CENTER', 'color': 6})
+
+
+def _add_drainage_paths(msp, W, H, bar, prof):
+    drain_width = prof.get('drainage_width', 8)
+    drain_depth = prof.get('drainage_depth', 6)
+    
+    y_drain = bar + drain_depth
+    msp.add_lwpolyline(
+        [(bar, y_drain), (W-bar, y_drain), (W-bar, y_drain+drain_width), (bar, y_drain+drain_width)],
+        close=True,
+        dxfattribs={'layer': L_FRAME, 'color': 7}
+    )
+    
+    weep_spacing = (W - 2*bar) / 5
+    weep_x = bar + weep_spacing / 2
+    
+    for _ in range(4):
+        msp.add_circle((weep_x, y_drain + drain_width/2), 3,
+                      dxfattribs={'layer': L_FRAME, 'color': 7})
+        weep_x += weep_spacing
+
+
+def _place_loops(msp, loops, ox, oy, rot_deg=0, mirror_u=False, layer=L_SECT):
+    a = math.radians(rot_deg)
+    ca, sa = math.cos(a), math.sin(a)
+    for lp in loops:
+        pts = []
+        for u, v in lp:
+            if mirror_u:
+                u = -u
+            pts.append((ox + u * ca - v * sa,
+                        oy + u * sa + v * ca))
+        if len(pts) >= 3:
+            msp.add_lwpolyline(pts, close=True,
+                               dxfattribs={'layer': layer})
+
+
+def _profile_pts(prof):
+    if prof.get('loops'):
+        allx = [float(x) for lp in prof['loops'] for x, y in lp]
+        ally = [float(y) for lp in prof['loops'] for x, y in lp]
+        if allx and ally:
+            mx, my = min(allx), min(ally)
+            return [[(float(x) - mx, float(y) - my) for x, y in lp]
+                    for lp in prof['loops']]
+    b, d = prof['bar'], prof['depth']
+    min_wall = max(prof.get('wall', 4.0), 1.0)
+    rw = min(prof['rebate_w'], b - min_wall) if 'rebate_w' in prof else 15
+    rd = min(prof['rebate_d'], d - min_wall) if 'rebate_d' in prof else 20
+    rw = max(rw, 0.0)
+    rd = max(rd, 0.0)
+    return [[(0, 0), (b, 0), (b, d - rd), (b - rw, d - rd),
+             (b - rw, d), (0, d)]]
+
+
+def _load_profile(tenant_id, material):
+    prof = {'bar': 58.0, 'depth': 70.0, 'rebate_w': 15.0, 'rebate_d': 20.0,
+            'name': 'DEFAULT', 'loops': None}
+    if not tenant_id:
+        return prof
+    try:
+        from app.models.cad_profile import CadProfile
+        p = (CadProfile.query
+             .filter_by(tenant_id=tenant_id, material=material,
+                        is_active=True, is_default=True).first()
+             or CadProfile.query
+             .filter_by(tenant_id=tenant_id, is_active=True).first())
+        if p:
+            prof.update(bar=float(p.bar_width_mm),
+                        depth=float(p.depth_mm),
+                        rebate_w=float(p.rebate_w_mm or 15),
+                        rebate_d=float(p.rebate_d_mm or 20),
+                        name=p.code or p.name)
+            if p.geometry_json:
+                try:
+                    loops = json.loads(p.geometry_json)
+                    if loops:
+                        prof['loops'] = loops
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.warning('engineering_dxf profile lookup failed: %s', exc)
+    return prof
+
+
+def _load_design(window):
+    try:
+        return json.loads(getattr(window, 'design_json', '{}'))
+    except:
+        return {}
+
+
+def _cells(panes, design):
+    if not panes:
+        return [(0, 0, 1, 1, 'Fixed')]
+    
+    cells = []
+    for pane in panes:
+        cells.append((
+            float(pane.x_norm),
+            float(pane.y_norm),
+            float(pane.w_norm),
+            float(pane.h_norm),
+            pane.opener_type or 'Fixed'
+        ))
+    return cells
