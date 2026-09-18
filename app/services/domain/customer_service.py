@@ -1,5 +1,5 @@
-from ..extensions import db
-from ..repos import customer_repo
+from ...extensions import db
+from ...repositories import customer_repo
 
 
 def get_customer(tenant_id: int, customer_id: int):

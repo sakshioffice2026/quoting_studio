@@ -3,9 +3,9 @@ from flask_login import login_required, current_user
 
 from ...extensions import db
 from ...models import Pane
-from ...services.engineering_dxf import generate_engineering_dxf
-from ...services.orthographic_dxf import generate_orthographic_dxf
-from ...services.canonical_geometry import assert_legacy_panes_match, sync_legacy_panes
+from ...services.cad.engineering_dxf import generate_engineering_dxf
+from ...services.cad.orthographic_dxf import generate_orthographic_dxf
+from ...services.cad.canonical_geometry import assert_legacy_panes_match, sync_legacy_panes
 from ._helpers import _own_window, _validate_or_400
 
 cad_bp = Blueprint('api_v1_cad', __name__)
@@ -15,7 +15,7 @@ cad_bp = Blueprint('api_v1_cad', __name__)
 @cad_bp.route('/oda-status')
 def oda_status():
     try:
-        from ...services.dwg_writer import ODA_AVAILABLE
+        from ...services.cad.dwg_writer import ODA_AVAILABLE
         return jsonify({'available': bool(ODA_AVAILABLE)})
     except Exception:
         return jsonify({'available': False})
@@ -38,7 +38,7 @@ def export_dxf(window_id):
             db.session.commit()
             panes = window.panes.all()
 
-        from ...services.techdraw_export import generate_techdraw
+        from ...services.cad.techdraw_export import generate_techdraw
         data = generate_techdraw(window, panes, tenant_id=current_user.tenant_id, fmt=fmt)
         if not data:
             return jsonify({'error': 'Drawing generation failed'}), 500
@@ -71,7 +71,7 @@ def export_techdraw(window_id, fmt):
             db.session.commit()
             panes = window.panes.all()
 
-        from ...services.techdraw_export import generate_techdraw
+        from ...services.cad.techdraw_export import generate_techdraw
         data = generate_techdraw(window, panes, tenant_id=current_user.tenant_id, fmt=fmt)
         if not data:
             return jsonify({'error': 'TechDraw generation failed'}), 500
@@ -110,7 +110,7 @@ def export_dwg(window_id):
         if not dxf:
             return jsonify({'error': 'Drawing generation failed'}), 500
 
-        from ...services.dwg_writer import dxf_to_dwg
+        from ...services.cad.dwg_writer import dxf_to_dwg
         dwg = dxf_to_dwg(dxf)
 
         if dwg:
@@ -209,7 +209,7 @@ def export_draft_views_fcstd(window_id):
         if bad:
             return bad
 
-        from ...services.model3d_freecad import generate_3d_freecad
+        from ...services.cad.model3d_freecad import generate_3d_freecad
         data = generate_3d_freecad(window, panes, tenant_id=current_user.tenant_id, fmt='fcstd')
         if not data:
             return jsonify({'error': 'Draft views generation failed'}), 500
@@ -241,7 +241,7 @@ def export_techdraw_views_fcstd(window_id):
         if bad:
             return bad
 
-        from ...services.model3d_freecad import generate_3d_freecad
+        from ...services.cad.model3d_freecad import generate_3d_freecad
         data = generate_3d_freecad(window, panes, tenant_id=current_user.tenant_id, fmt='techdraw')
         if not data:
             return jsonify({'error': 'TechDraw views generation failed'}), 500
@@ -281,10 +281,10 @@ def export_3d(window_id, fmt):
             panes = window.panes.all()
 
         if fmt == 'dxf':
-            from ...services.model3d import generate_multiview_dxf
+            from ...services.cad.model3d import generate_multiview_dxf
             data = generate_multiview_dxf(window, panes, tenant_id=current_user.tenant_id)
         else:
-            from ...services.model3d import generate_3d
+            from ...services.cad.model3d import generate_3d
             data = generate_3d(window, panes, tenant_id=current_user.tenant_id,
                                fmt=fmt, method=method, z_up=z_up)
 

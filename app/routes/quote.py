@@ -7,8 +7,8 @@ from flask_login import login_required, current_user
 from ..extensions import db
 from ..models import Project, Window, Pane, Quote, ProjectStatus
 import json
-from ..services.pricing import calculate_price
-from ..services.pdf_quote import generate_quote_pdf
+from ..services.domain.pricing import calculate_price
+from ..services.domain.pdf_quote import generate_quote_pdf
 
 quote_bp = Blueprint('quote', __name__)
 

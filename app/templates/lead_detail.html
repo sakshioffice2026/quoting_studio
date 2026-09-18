@@ -17,7 +17,7 @@
       </div>
     </div>
 
-    <div class="form-card" style="max-width:640px;">
+    <div style="max-width:640px;">
       <p><strong>Phone:</strong> {{ lead.phone or '—' }}</p>
       <p><strong>Email:</strong> {{ lead.email or '—' }}</p>
       <p><strong>Source:</strong> {{ lead.source_channel }}</p>
@@ -27,48 +27,61 @@
 
       {% if not lead.assignee %}
       <form method="POST" action="{{ url_for('leads.assign', lead_id=lead.id) }}" style="margin-top:12px;">
-        <select name="assigned_to" required>
-          {% for u in team %}
-          <option value="{{ u.id }}">{{ u.full_name }}</option>
-          {% endfor %}
-        </select>
+        <div class="form-group">
+          <label class="form-label" for="assigned_to">Assign to</label>
+          <select class="form-control" id="assigned_to" name="assigned_to" required>
+            {% for u in team %}
+            <option value="{{ u.id }}">{{ u.full_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <button type="submit" class="btn btn-primary btn-sm">Assign</button>
       </form>
       {% endif %}
     </div>
 
     <h2 style="margin-top:32px;">Interactions</h2>
-    <form method="POST" action="{{ url_for('leads.add_interaction', lead_id=lead.id) }}" class="form-card" style="max-width:640px;">
-      <label>Type</label>
-      <select name="interaction_type" required>
-        <option value="call">Call</option>
-        <option value="whatsapp">WhatsApp</option>
-        <option value="email">Email</option>
-        <option value="visit">Visit</option>
-      </select>
+    <form method="POST" action="{{ url_for('leads.add_interaction', lead_id=lead.id) }}" style="max-width:640px;">
+      <div class="form-group">
+        <label class="form-label" for="interaction_type">Type</label>
+        <select class="form-control" id="interaction_type" name="interaction_type" required>
+          <option value="call">Call</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="email">Email</option>
+          <option value="visit">Visit</option>
+        </select>
+      </div>
 
-      <label>Outcome</label>
-      <select name="outcome">
-        <option value="">—</option>
-        <option value="connected">Connected</option>
-        <option value="no-answer">No answer</option>
-        <option value="not-interested">Not interested</option>
-        <option value="callback-requested">Callback requested</option>
-      </select>
+      <div class="form-group">
+        <label class="form-label" for="outcome">Outcome</label>
+        <select class="form-control" id="outcome" name="outcome">
+          <option value="">—</option>
+          <option value="connected">Connected</option>
+          <option value="no-answer">No answer</option>
+          <option value="not-interested">Not interested</option>
+          <option value="callback-requested">Callback requested</option>
+        </select>
+      </div>
 
-      <label>Qualification score</label>
-      <select name="qualification_score">
-        <option value="">—</option>
-        <option value="Hot">Hot</option>
-        <option value="Warm">Warm</option>
-        <option value="Cold">Cold</option>
-      </select>
+      <div class="form-group">
+        <label class="form-label" for="qualification_score">Qualification score</label>
+        <select class="form-control" id="qualification_score" name="qualification_score">
+          <option value="">—</option>
+          <option value="Hot">Hot</option>
+          <option value="Warm">Warm</option>
+          <option value="Cold">Cold</option>
+        </select>
+      </div>
 
-      <label>Notes</label>
-      <textarea name="notes" rows="2"></textarea>
+      <div class="form-group">
+        <label class="form-label" for="notes">Notes</label>
+        <textarea class="form-control" id="notes" name="notes" rows="2"></textarea>
+      </div>
 
-      <label>Lost reason (if not interested)</label>
-      <input type="text" name="lost_reason">
+      <div class="form-group">
+        <label class="form-label" for="lost_reason">Lost reason (if not interested)</label>
+        <input class="form-control" type="text" id="lost_reason" name="lost_reason">
+      </div>
 
       <div style="margin-top:12px;">
         <button type="submit" class="btn btn-primary btn-sm">Log interaction</button>

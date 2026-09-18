@@ -2,7 +2,7 @@ from flask import abort, jsonify, current_app
 from flask_login import current_user
 
 from ...models import Window
-from ...services.cad_geometry_validator import validate_before_export
+from ...services.cad.cad_geometry_validator import validate_before_export
 
 
 def _own_window(window_id: int) -> Window:

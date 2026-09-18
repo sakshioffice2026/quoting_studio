@@ -1,8 +1,7 @@
-from ..extensions import db
-from ..repos import interaction_repo, lead_repo
-from ..models.interaction import InteractionType, InteractionOutcome, QualificationScore
-from ..models.lead import FollowUpStatus
-
+from ...extensions import db
+from ...repositories import interaction_repo, lead_repo
+from ...models.interaction import InteractionType, InteractionOutcome, QualificationScore
+from ...models.lead import FollowUpStatus
 
 def list_interactions(tenant_id: int, lead_id: int):
     return interaction_repo.list_for_lead(tenant_id, lead_id)

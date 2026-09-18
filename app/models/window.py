@@ -71,7 +71,7 @@ class Window(db.Model):
         cells = [p.to_dict() for p in self.panes.all()]
         if self.design_json:
             try:
-                from ..services.canonical_geometry import legacy_panes_from_design
+                from ..services.cad.canonical_geometry import legacy_panes_from_design
                 cells = legacy_panes_from_design(self)
             except Exception:
                 # Do not hide a malformed design_json behind stale Pane rows.

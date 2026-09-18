@@ -415,8 +415,7 @@ def delete_profile(profile_id):
 #  PROFILE LIBRARY  (PWQ-style: 16 profiles, 7 categories, DXF upload)
 # ================================================================
 
-from ..services.dxf_parser import process_dxf
-
+from ..services.cad.dxf_parser import process_dxf
 PROFILE_CATEGORIES = ['Frame', 'Sash', 'Sill', 'GlazingBead', 'Mullion', 'Transom', 'Hardware']
 
 # Directory containing the canonical profile section DXFs shipped with the app

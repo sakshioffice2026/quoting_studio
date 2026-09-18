@@ -12,37 +12,49 @@
   <div class="dash-content">
     <div class="page-header"><h1>New Lead</h1></div>
 
-    <form method="POST" class="form-card" style="max-width:520px;">
-      <label>Customer name</label>
-      <input type="text" name="customer_name" required>
+    <form method="POST" style="max-width:520px;">
+      <div class="form-group">
+        <label class="form-label" for="customer_name">Customer name</label>
+        <input class="form-control" type="text" id="customer_name" name="customer_name" required>
+      </div>
 
-      <label>Phone</label>
-      <input type="text" name="phone">
+      <div class="form-group">
+        <label class="form-label" for="phone">Phone</label>
+        <input class="form-control" type="text" id="phone" name="phone">
+      </div>
 
-      <label>Email</label>
-      <input type="email" name="email">
+      <div class="form-group">
+        <label class="form-label" for="email">Email</label>
+        <input class="form-control" type="email" id="email" name="email">
+      </div>
 
-      <label>Source channel</label>
-      <select name="source_channel">
-        <option value="website">Website</option>
-        <option value="call">Call</option>
-        <option value="walk_in">Walk-in</option>
-        <option value="referral">Referral</option>
-        <option value="architect">Architect / Dealer</option>
-        <option value="exhibition">Exhibition</option>
-        <option value="social">Social</option>
-      </select>
+      <div class="form-group">
+        <label class="form-label" for="source_channel">Source channel</label>
+        <select class="form-control" id="source_channel" name="source_channel">
+          <option value="website">Website</option>
+          <option value="call">Call</option>
+          <option value="walk_in">Walk-in</option>
+          <option value="referral">Referral</option>
+          <option value="architect">Architect / Dealer</option>
+          <option value="exhibition">Exhibition</option>
+          <option value="social">Social</option>
+        </select>
+      </div>
 
-      <label>Project city</label>
-      <input type="text" name="project_city">
+      <div class="form-group">
+        <label class="form-label" for="project_city">Project city</label>
+        <input class="form-control" type="text" id="project_city" name="project_city">
+      </div>
 
-      <label>Product interest</label>
-      <select name="product_interest">
-        <option value="">—</option>
-        <option value="doors">Doors</option>
-        <option value="windows">Windows</option>
-        <option value="both">Both</option>
-      </select>
+      <div class="form-group">
+        <label class="form-label" for="product_interest">Product interest</label>
+        <select class="form-control" id="product_interest" name="product_interest">
+          <option value="">—</option>
+          <option value="doors">Doors</option>
+          <option value="windows">Windows</option>
+          <option value="both">Both</option>
+        </select>
+      </div>
 
       <div style="margin-top:16px;">
         <button type="submit" class="btn btn-primary">Capture Lead</button>

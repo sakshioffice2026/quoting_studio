@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request, current_app
 from flask_login import login_required, current_user
 
-from ..services import customer_service, lead_service, interaction_service
+from ...services.domain import customer_service, lead_service, interaction_service
 
 leads_api_bp = Blueprint('leads_api', __name__)
 

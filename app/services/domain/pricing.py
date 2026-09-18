@@ -1,6 +1,6 @@
 import logging
 from decimal import Decimal, InvalidOperation
-from ..models import PricingRule, OpenerPricingRule, GlazingPricingRule
+from ...models import PricingRule, OpenerPricingRule, GlazingPricingRule
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def calculate_price(window, panes, tenant_id: int, design: dict = None) -> dict:
         # Priority 1: the pane's glazing matches a GlassUnit CODE with an explicit
         #             £/m² supply rate (new Glass Library — UK trade convention).
         # Priority 2: legacy GlazingPricingRule multiplier on the base glass rate.
-        from ..models import GlassUnit
+        from ...models import GlassUnit
         glass_area_m2 = Decimal(str(window.width_mm * window.height_mm / 1_000_000))
         glass_base    = glass_rate    # £/m² base rate (already resolved above)
         glass_cost    = Decimal('0')

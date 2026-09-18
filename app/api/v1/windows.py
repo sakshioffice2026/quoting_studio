@@ -5,8 +5,8 @@ from flask_login import login_required, current_user
 
 from ...extensions import db
 from ...models import Pane
-from ...services.pricing import calculate_price
-from ...services.canonical_geometry import assert_legacy_panes_match, sync_legacy_panes
+from ...services.domain.pricing import calculate_price
+from ...services.cad.canonical_geometry import assert_legacy_panes_match, sync_legacy_panes
 from ._helpers import _own_window
 
 windows_bp = Blueprint('api_v1_windows', __name__)

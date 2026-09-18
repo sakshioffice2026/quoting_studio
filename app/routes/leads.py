@@ -3,8 +3,7 @@ from flask_login import login_required, current_user
 
 from ..models import User
 from ..models.lead import LeadStatus
-from ..services import lead_service, interaction_service
-
+from ..services.domain import lead_service, interaction_service
 leads_bp = Blueprint('leads', __name__)
 
 

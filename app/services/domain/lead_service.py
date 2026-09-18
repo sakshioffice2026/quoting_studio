@@ -1,6 +1,6 @@
-from ..extensions import db
-from ..repos import lead_repo
-from ..models.lead import LeadStatus, FollowUpStatus
+from ...extensions import db
+from ...repositories import lead_repo
+from ...models.lead import LeadStatus, FollowUpStatus
 from . import customer_service
 
 

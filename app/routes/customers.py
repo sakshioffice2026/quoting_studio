@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, current_app, request
 from flask_login import login_required, current_user
 
-from ..services import customer_service
+from ..services.domain import customer_service
 
 customers_bp = Blueprint('customers', __name__)
 
