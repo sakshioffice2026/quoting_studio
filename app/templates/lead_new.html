@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}New Lead — Quoting Studio{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  <aside class="dash-sidebar">
+    <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
+    <a href="{{ url_for('leads.index') }}"      class="dash-sidebar-item active">Leads</a>
+    <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item">Customers</a>
+    <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item">Reports</a>
+  </aside>
+
+  <div class="dash-content">
+    <div class="page-header"><h1>New Lead</h1></div>
+
+    <form method="POST" class="form-card" style="max-width:520px;">
+      <label>Customer name</label>
+      <input type="text" name="customer_name" required>
+
+      <label>Phone</label>
+      <input type="text" name="phone">
+
+      <label>Email</label>
+      <input type="email" name="email">
+
+      <label>Source channel</label>
+      <select name="source_channel">
+        <option value="website">Website</option>
+        <option value="call">Call</option>
+        <option value="walk_in">Walk-in</option>
+        <option value="referral">Referral</option>
+        <option value="architect">Architect / Dealer</option>
+        <option value="exhibition">Exhibition</option>
+        <option value="social">Social</option>
+      </select>
+
+      <label>Project city</label>
+      <input type="text" name="project_city">
+
+      <label>Product interest</label>
+      <select name="product_interest">
+        <option value="">—</option>
+        <option value="doors">Doors</option>
+        <option value="windows">Windows</option>
+        <option value="both">Both</option>
+      </select>
+
+      <div style="margin-top:16px;">
+        <button type="submit" class="btn btn-primary">Capture Lead</button>
+        <a href="{{ url_for('leads.index') }}" class="btn btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

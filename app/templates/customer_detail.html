@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}{{ customer.name if customer else 'Customer' }} — Quoting Studio{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  <aside class="dash-sidebar">
+    <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
+    <a href="{{ url_for('leads.index') }}"      class="dash-sidebar-item">Leads</a>
+    <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item active">Customers</a>
+    <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item">Reports</a>
+  </aside>
+
+  <div class="dash-content">
+    {% if customer %}
+    <div class="page-header"><h1>{{ customer.name }}</h1></div>
+    <div class="form-card" style="max-width:640px;">
+      <p><strong>Phone:</strong> {{ customer.phone or '—' }}</p>
+      <p><strong>Email:</strong> {{ customer.email or '—' }}</p>
+      <p><strong>City:</strong> {{ customer.city or '—' }}</p>
+      <p><strong>Address:</strong> {{ customer.address or '—' }}</p>
+    </div>
+
+    <h2 style="margin-top:32px;">Leads</h2>
+    <table class="data-table">
+      <thead><tr><th>Date</th><th>Status</th><th>Follow-up</th><th></th></tr></thead>
+      <tbody>
+        {% for lead in customer.leads %}
+        <tr>
+          <td class="mono" style="font-size:12px;">{{ lead.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>{{ lead.status_label }}</td>
+          <td>{{ lead.follow_up_status_label or '—' }}</td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">View →</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="muted">No leads yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>Customer not found.</p></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

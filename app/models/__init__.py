@@ -11,6 +11,9 @@ from .cad_profile import CadProfile
 from .glass_unit import GlassUnit
 from .product import ProductSeries, WindowStyle
 from .profile_system import ProfileSystem
+from .customer import Customer
+from .lead import Lead, LeadStatus, FollowUpStatus, ProductInterest, SourceChannel
+from .interaction import Interaction, InteractionType, InteractionOutcome, QualificationScore
 
 __all__ = [
     'Tenant',
@@ -26,4 +29,7 @@ __all__ = [
     'GlassUnit',
     'ProductSeries', 'WindowStyle',
     'ProfileSystem',
+    'Customer',
+    'Lead', 'LeadStatus', 'FollowUpStatus', 'ProductInterest', 'SourceChannel',
+    'Interaction', 'InteractionType', 'InteractionOutcome', 'QualificationScore',
 ]
