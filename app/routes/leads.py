@@ -3,7 +3,7 @@ from flask_login import login_required, current_user
 
 from ..models import User
 from ..models.lead import LeadStatus
-from ..services.domain import lead_service, interaction_service
+from ..services.domain import lead_service, interaction_service, preliminary_selection_service
 leads_bp = Blueprint('leads', __name__)
 
 
@@ -49,7 +49,8 @@ def detail(lead_id):
         return redirect(url_for('leads.index'))
     interactions = interaction_service.list_interactions(current_user.tenant_id, lead_id)
     team = User.query.filter_by(tenant_id=current_user.tenant_id, is_active=True).all()
-    return render_template('lead_detail.html', lead=lead, interactions=interactions, team=team)
+    presel = preliminary_selection_service.get_by_lead(current_user.tenant_id, lead_id)
+    return render_template('lead_detail.html', lead=lead, interactions=interactions, team=team, presel=presel)
 
 
 @leads_bp.route('/leads/<int:lead_id>/assign', methods=['POST'])
@@ -60,6 +61,17 @@ def assign(lead_id):
         lead_service.assign_lead(current_user.tenant_id, lead_id, user_id)
         flash('Lead assigned.', 'success')
     except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('leads.detail', lead_id=lead_id))
+
+
+@leads_bp.route('/leads/<int:lead_id>/qualify', methods=['POST'])
+@login_required
+def qualify(lead_id):
+    try:
+        lead_service.qualify_lead(current_user.tenant_id, lead_id)
+        flash('Lead marked as qualified.', 'success')
+    except LookupError as exc:
         flash(str(exc), 'error')
     return redirect(url_for('leads.detail', lead_id=lead_id))
 

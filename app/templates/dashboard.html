@@ -7,6 +7,8 @@
   {# ---- Sidebar ---- #}
   <aside class="dash-sidebar">
     <a href="{{ url_for('dashboard.index') }}" class="dash-sidebar-item active">Projects</a>
+    <a href="{{ url_for('leads.index') }}"
+       class="dash-sidebar-item {{ 'active' if request.endpoint == 'leads.index' }}">Leads</a>
     <a href="{{ url_for('customers.index') }}"
        class="dash-sidebar-item {{ 'active' if request.endpoint == 'customers.index' }}">Customers</a>
     <a href="{{ url_for('reports.index') }}"

@@ -13,6 +13,7 @@
     <div class="page-header"><h1>New Lead</h1></div>
 
     <form method="POST" style="max-width:520px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-group">
         <label class="form-label" for="customer_name">Customer name</label>
         <input class="form-control" type="text" id="customer_name" name="customer_name" required>

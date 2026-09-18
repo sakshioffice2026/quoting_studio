@@ -41,6 +41,7 @@ def create_app(config_name=None):
     from .routes.auth import auth_bp
     from .routes.customers import customers_bp
     from .routes.leads import leads_bp
+    from .routes.preliminary_selection import presel_bp
     from .routes.reports import reports_bp
     from .routes.model3d_route import model3d_bp
     from .routes.settings import settings_bp
@@ -54,6 +55,7 @@ def create_app(config_name=None):
     app.register_blueprint(auth_bp)
     app.register_blueprint(customers_bp)
     app.register_blueprint(leads_bp)
+    app.register_blueprint(presel_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(model3d_bp)
     app.register_blueprint(settings_bp)

@@ -66,6 +66,19 @@ def update_customer(customer_id):
         return _err('Failed to update customer', 500)
 
 
+@leads_api_bp.route('/customers/<int:customer_id>', methods=['DELETE'])
+@login_required
+def delete_customer(customer_id):
+    try:
+        customer_service.delete_customer(current_user.tenant_id, customer_id)
+        return '', 204
+    except LookupError as exc:
+        return _err(exc, 404)
+    except Exception as exc:
+        current_app.logger.exception('delete_customer error: %s', exc)
+        return _err('Failed to delete customer', 500)
+
+
 # ------------------------------------------------------------------ #
 #  Leads
 # ------------------------------------------------------------------ #
@@ -137,6 +150,34 @@ def assign_lead(lead_id):
         return _err(exc, 404 if isinstance(exc, LookupError) else 400)
 
 
+@leads_api_bp.route('/leads/<int:lead_id>', methods=['DELETE'])
+@login_required
+def delete_lead(lead_id):
+    try:
+        lead_service.delete_lead(current_user.tenant_id, lead_id)
+        return '', 204
+    except LookupError as exc:
+        return _err(exc, 404)
+    except Exception as exc:
+        current_app.logger.exception('delete_lead error: %s', exc)
+        return _err('Failed to delete lead', 500)
+
+
+@leads_api_bp.route('/leads/<int:lead_id>/duplicate', methods=['POST'])
+@login_required
+def mark_lead_duplicate(lead_id):
+    data = request.get_json(force=True) or {}
+    try:
+        lead = lead_service.mark_duplicate(
+            current_user.tenant_id, lead_id, int(data.get('duplicate_of_lead_id'))
+        )
+        return jsonify(lead.to_dict())
+    except (ValueError, TypeError) as exc:
+        return _err(exc)
+    except LookupError as exc:
+        return _err(exc, 404)
+
+
 @leads_api_bp.route('/leads/<int:lead_id>/invalidate', methods=['POST'])
 @login_required
 def invalidate_lead(lead_id):
@@ -203,3 +244,16 @@ def create_interaction(lead_id):
     except Exception as exc:
         current_app.logger.exception('create_interaction error: %s', exc)
         return _err('Failed to log interaction', 500)
+
+
+@leads_api_bp.route('/interactions/<int:interaction_id>', methods=['DELETE'])
+@login_required
+def delete_interaction(interaction_id):
+    try:
+        interaction_service.delete_interaction(current_user.tenant_id, interaction_id)
+        return '', 204
+    except LookupError as exc:
+        return _err(exc, 404)
+    except Exception as exc:
+        current_app.logger.exception('delete_interaction error: %s', exc)
+        return _err('Failed to delete interaction', 500)

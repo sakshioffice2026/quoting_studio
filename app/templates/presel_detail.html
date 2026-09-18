@@ -1,0 +1,106 @@
+{% extends 'base.html' %}
+{% block title %}Preliminary Selection — {{ lead.customer_name }}{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  <aside class="dash-sidebar">
+    <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
+    <a href="{{ url_for('leads.index') }}"      class="dash-sidebar-item active">Leads</a>
+    <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item">Customers</a>
+    <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item">Reports</a>
+  </aside>
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div>
+        <h1>Preliminary Selection</h1>
+        <div class="sub mono">
+          {{ lead.customer_name }} · {{ presel.status_label }}
+          {% if presel.project_id %} · Project #{{ presel.project_id }}{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <p><a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">← Back to lead</a></p>
+
+    <form method="POST" action="{{ url_for('presel.update', presel_id=presel.id) }}" style="max-width:640px; margin-top:16px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="form-group">
+        <label class="form-label" for="shortlisted_ranges">Shortlisted ranges</label>
+        <input class="form-control" type="text" id="shortlisted_ranges" name="shortlisted_ranges"
+               value="{{ presel.shortlisted_ranges or '' }}" placeholder="e.g. Teak Classic, uPVC Slide">
+      </div>
+
+      <div style="display:flex; gap:12px;">
+        <div class="form-group" style="flex:1;">
+          <label class="form-label" for="rough_opening_doors">Rough opening count — Doors</label>
+          <input class="form-control" type="number" min="0" id="rough_opening_doors" name="rough_opening_doors"
+                 value="{{ presel.rough_opening_doors if presel.rough_opening_doors is not none else '' }}">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label class="form-label" for="rough_opening_windows">Rough opening count — Windows</label>
+          <input class="form-control" type="number" min="0" id="rough_opening_windows" name="rough_opening_windows"
+                 value="{{ presel.rough_opening_windows if presel.rough_opening_windows is not none else '' }}">
+        </div>
+      </div>
+
+      <div style="display:flex; gap:12px;">
+        <div class="form-group" style="flex:1;">
+          <label class="form-label" for="indicative_price_min">Indicative price — Min</label>
+          <input class="form-control" type="number" step="0.01" min="0" id="indicative_price_min" name="indicative_price_min"
+                 value="{{ presel.indicative_price_min if presel.indicative_price_min is not none else '' }}">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label class="form-label" for="indicative_price_max">Indicative price — Max</label>
+          <input class="form-control" type="number" step="0.01" min="0" id="indicative_price_max" name="indicative_price_max"
+                 value="{{ presel.indicative_price_max if presel.indicative_price_max is not none else '' }}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">
+          <input type="checkbox" name="survey_required" value="1" {{ 'checked' if presel.survey_required }}>
+          Site survey required
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="notes">Notes</label>
+        <textarea class="form-control" id="notes" name="notes" rows="3">{{ presel.notes or '' }}</textarea>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-sm">Save</button>
+    </form>
+
+    <div style="margin-top:24px; max-width:640px; display:flex; gap:8px; flex-wrap:wrap;">
+      {% if presel.status != 'PRESEL-SHORTLISTED' %}
+      <form method="POST" action="{{ url_for('presel.shortlist', presel_id=presel.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Mark shortlisted</button>
+      </form>
+      {% endif %}
+
+      {% if presel.status != 'PRESEL-ON_HOLD' %}
+      <form method="POST" action="{{ url_for('presel.hold', presel_id=presel.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-secondary btn-sm">Put on hold</button>
+      </form>
+      {% endif %}
+
+      {% if presel.status != 'PRESEL-DROPPED' %}
+      <form method="POST" action="{{ url_for('presel.drop', presel_id=presel.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-secondary btn-sm">Drop</button>
+      </form>
+      {% endif %}
+
+      {% if presel.status == 'PRESEL-SHORTLISTED' and presel.survey_required %}
+      <form method="POST" action="{{ url_for('presel.confirm_survey', presel_id=presel.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Confirm survey →</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

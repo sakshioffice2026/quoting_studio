@@ -14,6 +14,7 @@ from .profile_system import ProfileSystem
 from .customer import Customer
 from .lead import Lead, LeadStatus, FollowUpStatus, ProductInterest, SourceChannel
 from .interaction import Interaction, InteractionType, InteractionOutcome, QualificationScore
+from .preliminary_selection import PreliminarySelection, PreselStatus
 
 __all__ = [
     'Tenant',
@@ -32,4 +33,5 @@ __all__ = [
     'Customer',
     'Lead', 'LeadStatus', 'FollowUpStatus', 'ProductInterest', 'SourceChannel',
     'Interaction', 'InteractionType', 'InteractionOutcome', 'QualificationScore',
+    'PreliminarySelection', 'PreselStatus',
 ]
