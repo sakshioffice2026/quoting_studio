@@ -272,11 +272,12 @@
     {% if quotation.status == QuotationStatus.ACCEPTED %}
     <div class="action-panel action-panel-wide action-panel-success">
       <h4 class="action-title text-success">✓ Quotation Accepted</h4>
-      {% if quotation.orders.first() %}
+      {% set active_order = quotation.active_order %}
+      {% if active_order %}
       <p class="action-note" style="margin-bottom:12px;">
-        Order <strong>{{ quotation.orders.first().order_number }}</strong> already raised for this quotation.
+        Order <strong>{{ active_order.order_number }}</strong> already raised for this quotation.
       </p>
-      <a href="{{ url_for('order.detail', order_id=quotation.orders.first().id) }}" class="btn btn-primary btn-sm">View Order →</a>
+      <a href="{{ url_for('order.detail', order_id=active_order.id) }}" class="btn btn-primary btn-sm">View Order →</a>
       {% else %}
       <p class="action-note">
         Proceed to <strong>Section 8 — Order Acceptance</strong> to raise the sales order and collect the advance payment.

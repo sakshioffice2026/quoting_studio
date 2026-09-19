@@ -6,6 +6,7 @@ from flask_login import login_required, current_user
 from ...extensions import db
 from ...models import Pane
 from ...services.domain.pricing import calculate_price
+from ...services.domain import project_lock
 from ...services.cad.canonical_geometry import assert_legacy_panes_match, sync_legacy_panes
 from ._helpers import _own_window
 
@@ -31,6 +32,9 @@ def get_window(window_id):
 def save_panes(window_id):
     try:
         window = _own_window(window_id)
+        lock_reason = project_lock.get_lock_reason(current_user.tenant_id, window.project_id)
+        if lock_reason:
+            return jsonify({'error': lock_reason, 'locked': True}), 409
         data   = request.get_json(force=True)
 
         if not data:
@@ -119,6 +123,9 @@ def get_price(window_id):
 def save_design(window_id):
     try:
         window = _own_window(window_id)
+        lock_reason = project_lock.get_lock_reason(current_user.tenant_id, window.project_id)
+        if lock_reason:
+            return jsonify({'error': lock_reason, 'locked': True}), 409
         data   = request.get_json(force=True) or {}
 
         design = data.get('design_json')

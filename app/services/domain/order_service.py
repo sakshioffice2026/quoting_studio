@@ -15,7 +15,12 @@ def get_order(tenant_id: int, order_id: int) -> Order | None:
 
 
 def get_for_quotation(tenant_id: int, quotation_id: int) -> Order | None:
-    return Order.query.filter_by(tenant_id=tenant_id, quotation_id=quotation_id).first()
+    """Return the active (non-cancelled) order raised from this quotation."""
+    return (Order.query
+            .filter(Order.tenant_id == tenant_id,
+                    Order.quotation_id == quotation_id,
+                    Order.status != OrderStatus.CANCELLED)
+            .first())
 
 
 def list_for_project(tenant_id: int, project_id: int) -> list[Order]:

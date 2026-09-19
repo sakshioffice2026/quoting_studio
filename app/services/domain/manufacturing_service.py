@@ -139,16 +139,25 @@ def advance_stage(tenant_id: int, job_id: int, material_batch_ref: str | None = 
     job = get_job(tenant_id, job_id)
     if not job:
         raise LookupError('Manufacturing job not found')
-    if job.status not in (JobStatus.IN_PROGRESS, JobStatus.QC_HOLD):
-        raise ValueError(f'Job must be MFG-IN_PROGRESS or MFG-QC_HOLD to advance stage; status={job.status}')
+    if job.status == JobStatus.QC_HOLD:
+        raise ValueError('Job is on QC hold — record a new QC result after rework before continuing.')
+    if job.status != JobStatus.IN_PROGRESS:
+        raise ValueError(f'Job must be MFG-IN_PROGRESS to advance stage; status={job.status}')
 
-    order_map = {v: k for k, v in ProductionStage.ORDER.items()}
+    order_map   = {v: k for k, v in ProductionStage.ORDER.items()}
     current_idx = ProductionStage.ORDER.get(job.production_stage, 0)
-    next_idx    = min(current_idx + 1, max(order_map.keys()))
-    job.production_stage = order_map[next_idx]
+    if current_idx >= max(order_map.keys()):
+        raise ValueError('Job is already at the final QC stage — record QC and complete the job.')
+
+    job.production_stage = order_map[current_idx + 1]
+    if job.production_stage == ProductionStage.QC:
+        # QC must be recorded fresh at the QC stage; discard any earlier result
+        job.qc_result     = None
+        job.qc_notes      = None
+        job.qc_checked_by = None
+        job.qc_checked_at = None
     if material_batch_ref:
         job.material_batch_ref = material_batch_ref
-    job.status      = JobStatus.IN_PROGRESS
     job.updated_at  = datetime.utcnow()
     db.session.commit()
     return job
@@ -173,6 +182,11 @@ def record_qc(
         raise LookupError('Manufacturing job not found')
     if job.status not in (JobStatus.IN_PROGRESS, JobStatus.QC_HOLD):
         raise ValueError(f'Job must be MFG-IN_PROGRESS or MFG-QC_HOLD to record QC; status={job.status}')
+    if job.production_stage != ProductionStage.QC:
+        raise ValueError(
+            f'QC can only be recorded at the {ProductionStage.LABELS[ProductionStage.QC]} stage; '
+            f'current stage is {job.stage_label}.'
+        )
 
     now = datetime.utcnow()
     job.qc_result     = qc_result
@@ -202,7 +216,7 @@ def complete_job(tenant_id: int, job_id: int) -> ManufacturingJob:
         raise ValueError(f'Job must be MFG-IN_PROGRESS to complete; status={job.status}')
     if job.production_stage != ProductionStage.QC:
         raise ValueError('Job must reach the QC stage before it can be completed.')
-    if job.qc_result != QcResult.PASS:
+    if job.qc_result != QcResult.PASS or not job.qc_checked_at:
         raise ValueError('Job must have a passing QC result before it can be completed.')
 
     today = date.today()

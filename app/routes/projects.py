@@ -192,6 +192,11 @@ def delete_window(project_id, window_id):
         id=window_id, project_id=project_id,
         tenant_id=current_user.tenant_id).first_or_404()
     label = window.label or f'Window {window_id}'
+    from ..services.domain import project_lock
+    lock_reason = project_lock.get_lock_reason(current_user.tenant_id, project_id)
+    if lock_reason:
+        flash(lock_reason, 'error')
+        return redirect(url_for('projects.detail', project_id=project_id))
     try:
         db.session.delete(window)
         db.session.commit()
@@ -209,6 +214,11 @@ def delete_window(project_id, window_id):
 def delete(project_id):
     try:
         project = _own_project(project_id)
+        from ..services.domain import project_lock
+        lock_reason = project_lock.get_lock_reason(current_user.tenant_id, project_id)
+        if lock_reason:
+            flash(lock_reason, 'error')
+            return redirect(url_for('projects.detail', project_id=project_id))
         db.session.delete(project)
         db.session.commit()
         current_app.logger.info('Project deleted: id=%d tenant=%d', project_id, current_user.tenant_id)
@@ -352,6 +362,11 @@ def add_unit(project_id):
     """Create a window/door from the chosen template, seed design_json, open editor."""
     try:
         project   = _own_project(project_id)
+        from ..services.domain import project_lock
+        lock_reason = project_lock.get_lock_reason(current_user.tenant_id, project_id)
+        if lock_reason:
+            flash(lock_reason, 'error')
+            return redirect(url_for('projects.detail', project_id=project_id))
         unit_type = request.form.get('unit_type', 'window')
         tpl_key   = request.form.get('template_key', 'single')
         tpl_name  = request.form.get('template_name', '').strip()

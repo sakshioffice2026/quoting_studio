@@ -150,6 +150,15 @@ class Quotation(db.Model):
     def discount_approved(self) -> bool:
         return self.discount_approved_by is not None
 
+    @property
+    def active_order(self):
+        """First non-cancelled Order raised from this quotation, else None."""
+        from .order import Order, OrderStatus
+        return (Order.query
+                .filter(Order.quotation_id == self.id,
+                        Order.status != OrderStatus.CANCELLED)
+                .first())
+
     import json as _json
 
     @property
