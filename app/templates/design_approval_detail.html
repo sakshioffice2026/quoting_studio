@@ -9,7 +9,7 @@
       <div>
         <h1>{{ approval.project.customer_name if approval.project else 'Design Approval' }}</h1>
         <div class="sub mono">Revision {{ approval.revision_number }}
-          · <span class="badge badge--{{ approval.status | lower | replace('-','_') }}">{{ approval.status_label }}</span>
+          · <span class="badge">{{ approval.status_label }}</span>
           {% if approval.status == DesignApprovalStatus.APPROVAL_SENT and approval.days_until_expiry is not none %}
             {% if approval.days_until_expiry >= 0 %}
               · <span class="muted" style="font-size:12px;">expires in {{ approval.days_until_expiry }} day{{ 's' if approval.days_until_expiry != 1 }}</span>
@@ -19,10 +19,17 @@
           {% endif %}
         </div>
       </div>
+      <a href="{{ url_for('design_approval.index') }}" class="btn btn-secondary btn-sm">← All Approvals</a>
     </div>
 
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }}" style="margin-bottom:12px;">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
     {# ── Timeline info ── #}
-    <div style="max-width:640px;">
+    <div style="max-width:640px; margin-bottom:24px;">
       <p><strong>Submitted (internal):</strong> {{ approval.submitted_at.strftime('%Y-%m-%d %H:%M') if approval.submitted_at else '—' }}</p>
 
       {% if approval.sent_at %}
@@ -49,26 +56,67 @@
     </div>
 
     {# ══════════════════════════════════════════════
-       ACTION PANELS — one per actionable status
+       ACTION PANELS
        ══════════════════════════════════════════════ #}
+
+    {# ── DRAFT → Submit for internal review ── #}
+    {% if approval.status == DesignApprovalStatus.DRAFT %}
+    <div style="margin-top:8px; max-width:480px; padding:20px; border:1px solid var(--border); border-radius:8px;">
+      <h4 style="margin-bottom:8px;">Submit for Internal Review</h4>
+      <p class="muted" style="font-size:13px; margin-bottom:16px;">
+        This design is in Draft. Submit it to begin the approval workflow.
+      </p>
+      <form method="POST" action="{{ url_for('design_approval.submit', project_id=approval.project_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Submit for Review →</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {# ── REVISION_REQUESTED → Re-submit ── #}
+    {% if approval.status == DesignApprovalStatus.REVISION_REQUESTED %}
+    <div style="margin-top:8px; max-width:480px; padding:20px; border:1px solid var(--orange,#e67e22); border-radius:8px;">
+      <h4 style="margin-bottom:8px;">Revision Requested</h4>
+      <p class="muted" style="font-size:13px; margin-bottom:16px;">
+        Windows are unlocked for edits. Once changes are made, re-submit for review.
+      </p>
+      <form method="POST" action="{{ url_for('design_approval.submit', project_id=approval.project_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Re-submit for Review →</button>
+      </form>
+    </div>
+    {% endif %}
 
     {# ── DESIGN-SUBMITTED → Send to Customer ── #}
     {% if approval.status == DesignApprovalStatus.SUBMITTED %}
-    <div style="margin-top:24px; display:flex; gap:24px; flex-wrap:wrap;">
+    <div style="margin-top:8px; display:flex; gap:24px; flex-wrap:wrap;">
 
       <form method="POST" action="{{ url_for('design_approval.send_to_customer', approval_id=approval.id) }}" style="max-width:400px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 style="margin-bottom:8px;">Send to Customer</h4>
         <div class="form-group">
           <label class="form-label" for="sla_days">SLA days for customer response</label>
           <input type="number" class="form-control" id="sla_days" name="sla_days"
                  value="{{ approval.approval_sla_days or 10 }}" min="1" max="90">
-          <div class="form-hint">Customer will have this many days to respond before the approval expires.</div>
+          <div class="form-hint">Customer has this many days to respond before the approval expires.</div>
         </div>
         <button type="submit" class="btn btn-primary btn-sm">Send to Customer →</button>
       </form>
 
+      <form method="POST" action="{{ url_for('design_approval.approve', approval_id=approval.id) }}" style="max-width:400px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 style="margin-bottom:8px;">Approve Directly</h4>
+        <p class="muted" style="font-size:13px; margin-bottom:12px;">Skip sending to customer and approve internally.</p>
+        <div class="form-group">
+          <label class="form-label" for="customer_signoff_notes_sub">Sign-off notes</label>
+          <textarea class="form-control" id="customer_signoff_notes_sub" name="customer_signoff_notes" rows="2"></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Approve &amp; Lock Design</button>
+      </form>
+
       <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:400px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 style="margin-bottom:8px;">Request Revision</h4>
         <div class="form-group">
           <label class="form-label" for="reason">Internal revision reason</label>
           <textarea class="form-control" id="reason" name="reason" rows="2" required></textarea>
@@ -81,10 +129,11 @@
 
     {# ── APPROVAL-SENT → Approve or Request Revision ── #}
     {% if approval.status == DesignApprovalStatus.APPROVAL_SENT %}
-    <div style="margin-top:24px; display:flex; gap:24px; flex-wrap:wrap;">
+    <div style="margin-top:8px; display:flex; gap:24px; flex-wrap:wrap;">
 
       <form method="POST" action="{{ url_for('design_approval.approve', approval_id=approval.id) }}" style="max-width:480px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 style="margin-bottom:8px;">Customer Approved</h4>
         <div class="form-group">
           <label class="form-label" for="customer_signoff_notes">Customer sign-off notes</label>
           <textarea class="form-control" id="customer_signoff_notes" name="customer_signoff_notes" rows="2"></textarea>
@@ -94,16 +143,16 @@
 
       <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:480px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 style="margin-bottom:8px;">Customer Requested Revision</h4>
         <div class="form-group">
-          <label class="form-label" for="reason">Revision reason (from customer)</label>
-          <textarea class="form-control" id="reason" name="reason" rows="2" required></textarea>
+          <label class="form-label" for="reason_sent">Revision reason</label>
+          <textarea class="form-control" id="reason_sent" name="reason" rows="2" required></textarea>
         </div>
-        <button type="submit" class="btn btn-secondary btn-sm">Customer Requested Revision</button>
+        <button type="submit" class="btn btn-secondary btn-sm">Request Revision</button>
       </form>
 
     </div>
 
-    {# Manual expire for admin use #}
     <div style="margin-top:16px;">
       <form method="POST" action="{{ url_for('design_approval.expire', approval_id=approval.id) }}"
             onsubmit="return confirm('Mark this approval as expired?')">
@@ -117,10 +166,11 @@
 
     {# ── APPROVAL-EXPIRED → Re-send or Revise ── #}
     {% if approval.status == DesignApprovalStatus.APPROVAL_EXPIRED %}
-    <div style="margin-top:24px; display:flex; gap:24px; flex-wrap:wrap;">
+    <div style="margin-top:8px; display:flex; gap:24px; flex-wrap:wrap;">
 
       <form method="POST" action="{{ url_for('design_approval.resend_to_customer', approval_id=approval.id) }}" style="max-width:400px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 style="margin-bottom:8px;">Re-send to Customer</h4>
         <div class="form-group">
           <label class="form-label" for="sla_days_resend">New SLA days</label>
           <input type="number" class="form-control" id="sla_days_resend" name="sla_days"
@@ -131,23 +181,35 @@
 
       <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:400px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 style="margin-bottom:8px;">Request Revision Instead</h4>
         <div class="form-group">
           <label class="form-label" for="reason_expired">Revision reason</label>
           <textarea class="form-control" id="reason_expired" name="reason" rows="2" required></textarea>
         </div>
-        <button type="submit" class="btn btn-secondary btn-sm">Request Revision Instead</button>
+        <button type="submit" class="btn btn-secondary btn-sm">Request Revision</button>
       </form>
 
     </div>
     {% endif %}
 
-    {# ── DESIGN-APPROVED → allow re-opening ── #}
+    {# ── DESIGN-APPROVED ── #}
     {% if approval.status == DesignApprovalStatus.APPROVED %}
-    <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:480px; margin-top:24px;">
+    <div style="padding:16px; border:1px solid var(--green,#27ae60); border-radius:8px; max-width:480px; margin-bottom:24px;">
+      <strong style="color:var(--green,#27ae60);">✓ Design Approved &amp; Locked</strong>
+      <p class="muted" style="font-size:13px; margin-top:8px;">
+        Proceed to <strong>Quotation</strong> — generate a quotation from the project page.
+      </p>
+      <a href="{{ url_for('projects.detail', project_id=approval.project_id) }}" class="btn btn-primary btn-sm" style="margin-top:8px;">
+        Go to Project →
+      </a>
+    </div>
+
+    <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:480px; margin-top:8px;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h4 style="margin-bottom:8px;">Reopen for Revision</h4>
       <div class="form-group">
-        <label class="form-label" for="reason">Reopen for revision — reason</label>
-        <textarea class="form-control" id="reason" name="reason" rows="2" required></textarea>
+        <label class="form-label" for="reason_approved">Reason</label>
+        <textarea class="form-control" id="reason_approved" name="reason" rows="2" required></textarea>
       </div>
       <button type="submit" class="btn btn-secondary btn-sm">Request Revision</button>
     </form>

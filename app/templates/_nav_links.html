@@ -8,6 +8,8 @@
    class="dash-sidebar-item {{ 'active' if _bp == 'customers' }}">Customers</a>
 <a href="{{ url_for('design_approval.index') }}"
    class="dash-sidebar-item {{ 'active' if _bp == 'design_approval' }}">Design Approvals</a>
+<a href="{{ url_for('quotation.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp == 'quotation' }}">Quotations</a>
 <a href="{{ url_for('reports.index') }}"
    class="dash-sidebar-item {{ 'active' if _bp == 'reports' }}">Reports</a>
 {% if current_user.is_admin %}

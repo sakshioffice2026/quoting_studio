@@ -5,6 +5,7 @@ from .window import Window
 from .pane import Pane
 from .visualisation import Visualisation
 from .quote import Quote
+from .quotation import Quotation, QuotationStatus
 from .pricing_rule import PricingRule, OpenerPricingRule, GlazingPricingRule
 from .exception_log import ExceptionLog
 from .cad_profile import CadProfile
@@ -26,6 +27,7 @@ __all__ = [
     'Pane',
     'Visualisation',
     'Quote',
+    'Quotation', 'QuotationStatus',
     'PricingRule', 'OpenerPricingRule', 'GlazingPricingRule',
     'ExceptionLog',
     'CadProfile',
