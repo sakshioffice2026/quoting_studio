@@ -264,4 +264,118 @@ def flow(lead_id):
         },
     ]
 
+    # ---- dates + hover details per stage ------------------------------
+    def fmt_d(d):
+        return d.strftime('%d %b %Y') if d else None
+
+    def fmt_dt(d):
+        return d.strftime('%d %b %Y, %H:%M') if d else None
+
+    interactions = lead.interactions.all()
+    first_contact = interactions[0] if interactions else None
+    last_contact = interactions[-1] if interactions else None
+
+    infos = {}
+
+    infos['lead'] = {
+        'date_label': 'Created',
+        'date': fmt_d(lead.created_at),
+        'tip': [
+            ('Current status', '%s (%s)' % (lead.status_label, lead.status)),
+            ('Created', fmt_dt(lead.created_at)),
+            ('Last updated', fmt_dt(lead.updated_at)),
+            ('Assigned to', getattr(lead.assignee, 'full_name', None) if lead.assignee else None),
+            ('Source', lead.source_channel),
+        ],
+    }
+
+    if lead.follow_up_status or interactions:
+        infos['follow_up'] = {
+            'date_label': 'First contact',
+            'date': fmt_d(first_contact.created_at) if first_contact else None,
+            'tip': [
+                ('Current status', '%s (%s)' % (lead.follow_up_status_label or 'In progress',
+                                                lead.follow_up_status or 'FUP-IN_PROGRESS')),
+                ('First contact', fmt_dt(first_contact.created_at) if first_contact else None),
+                ('Last contact', fmt_dt(last_contact.created_at) if last_contact else None),
+                ('Interactions logged', str(len(interactions))),
+                ('Next action', fmt_d(last_contact.next_action_date) if last_contact else None),
+                ('Qualification', last_contact.qualification_score if last_contact else None),
+                ('Lost reason', lead.lost_reason),
+            ],
+        }
+
+    if presel:
+        infos['presel'] = {
+            'date_label': 'Started',
+            'date': fmt_d(presel.created_at),
+            'tip': [
+                ('Current status', '%s (%s)' % (presel.status_label, presel.status)),
+                ('Started', fmt_dt(presel.created_at)),
+                ('Last updated', fmt_dt(presel.updated_at)),
+                ('Rough openings', str(presel.rough_opening_count)),
+            ],
+        }
+
+    if survey:
+        infos['survey'] = {
+            'date_label': 'Scheduled' if survey.scheduled_date else 'Created',
+            'date': fmt_d(survey.scheduled_date) or fmt_d(survey.created_at),
+            'tip': [
+                ('Current status', '%s (%s)' % (survey.status_label, survey.status)),
+                ('Scheduled', fmt_d(survey.scheduled_date)),
+                ('Completed', fmt_d(survey.completed_date)),
+                ('Surveyor', survey.surveyor_name),
+                ('Openings measured', str(survey.opening_count)),
+                ('Last updated', fmt_dt(survey.updated_at)),
+            ],
+        }
+
+    if design_approval:
+        infos['design'] = {
+            'date_label': 'Created',
+            'date': fmt_d(design_approval.created_at),
+            'tip': [
+                ('Current status', '%s (%s)' % (design_approval.status_label, design_approval.status)),
+                ('Revision', 'Rev %s' % design_approval.revision_number),
+                ('Created', fmt_dt(design_approval.created_at)),
+                ('Last updated', fmt_dt(design_approval.updated_at)),
+            ],
+        }
+        if design_approval.approved_at:
+            appr_label, appr_date = 'Approved', design_approval.approved_at
+        elif design_approval.revision_requested_at:
+            appr_label, appr_date = 'Revision requested', design_approval.revision_requested_at
+        else:
+            appr_label, appr_date = 'Sent', design_approval.submitted_at
+        infos['approval'] = {
+            'date_label': appr_label,
+            'date': fmt_d(appr_date),
+            'tip': [
+                ('Current status', '%s (%s)' % (design_approval.status_label, design_approval.status)),
+                ('Sent to customer', fmt_dt(design_approval.submitted_at)),
+                ('Approved', fmt_dt(design_approval.approved_at)),
+                ('Revision requested', fmt_dt(design_approval.revision_requested_at)),
+                ('Revision reason', design_approval.revision_requested_reason),
+                ('Sign-off notes', design_approval.customer_signoff_notes),
+            ],
+        }
+    elif lead.project_id:
+        infos['design'] = {
+            'date_label': 'In progress',
+            'date': None,
+            'tip': [('Current status', 'In progress')],
+        }
+
+    for s in stages:
+        info = infos.get(s['key']) if s['implemented'] else None
+        if info:
+            s['date'] = info['date']
+            s['date_label'] = info['date_label']
+            s['tip'] = [(k, v) for k, v in info['tip'] if v]
+        else:
+            s['date'] = None
+            s['date_label'] = None
+            s['tip'] = [('Current status', s['status_label'])]
+
     return render_template('project_timeline.html', lead=lead, stages=stages)

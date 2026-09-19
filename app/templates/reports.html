@@ -2,16 +2,7 @@
 {% block title %}Reports — Quoting Studio{% endblock %}
 {% block body %}
 <div class="dash-layout">
-  <aside class="dash-sidebar">
-    <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
-    <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item">Customers</a>
-    <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item active">Reports</a>
-    {% if current_user.is_admin %}
-    <a href="{{ url_for('settings.pricing') }}" class="dash-sidebar-item">Products &amp; pricing</a>
-    <a href="{{ url_for('settings.company') }}" class="dash-sidebar-item">Branding</a>
-    <a href="{{ url_for('settings.team') }}"    class="dash-sidebar-item">Team</a>
-    {% endif %}
-  </aside>
+  {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
     <div class="page-header">

@@ -2,13 +2,7 @@
 {% block title %}Design Approval — Quoting Studio{% endblock %}
 {% block body %}
 <div class="dash-layout">
-  <aside class="dash-sidebar">
-    <a href="{{ url_for('dashboard.index') }}" class="dash-sidebar-item">Projects</a>
-    <a href="{{ url_for('leads.index') }}" class="dash-sidebar-item">Leads</a>
-    <a href="{{ url_for('customers.index') }}" class="dash-sidebar-item">Customers</a>
-    <a href="{{ url_for('design_approval.index') }}" class="dash-sidebar-item active">Design Approvals</a>
-    <a href="{{ url_for('reports.index') }}" class="dash-sidebar-item">Reports</a>
-  </aside>
+  {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
     <div class="page-header">

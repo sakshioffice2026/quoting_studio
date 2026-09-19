@@ -2,12 +2,7 @@
 {% block title %}{{ customer.name if customer else 'Customer' }} — Quoting Studio{% endblock %}
 {% block body %}
 <div class="dash-layout">
-  <aside class="dash-sidebar">
-    <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
-    <a href="{{ url_for('leads.index') }}"      class="dash-sidebar-item">Leads</a>
-    <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item active">Customers</a>
-    <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item">Reports</a>
-  </aside>
+  {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
     {% if customer %}

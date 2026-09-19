@@ -118,16 +118,51 @@
   .flow-card a.flow-card-link { display: block; }
   .flow-card a.flow-card-link:hover { text-decoration: none; }
   .flow-card a.flow-card-link:hover .flow-card-title { color: var(--copper); }
+
+  .flow-card { position: relative; }
+
+  /* date shown beside the timeline dot, opposite the card */
+  .flow-date-side { font-family: var(--font-mono); font-size: 11px; color: var(--steel); line-height: 1.4; }
+  .flow-date-side.left  { text-align: right; padding-right: 8px; }
+  .flow-date-side.right { text-align: left;  padding-left: 8px; }
+  .flow-date-side .flow-date-label { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; opacity: .8; }
+  .flow-date-side .flow-date-value { font-size: 13px; font-weight: 600; color: var(--navy); }
+  .flow-row.pending .flow-date-side .flow-date-value { color: #7A7362; font-weight: 400; }
+
+  /* hover tooltip with current status */
+  .flow-tip {
+    position: absolute;
+    left: 0;
+    top: 100%;
+    margin-top: 6px;
+    min-width: 240px;
+    max-width: 340px;
+    background: var(--navy);
+    color: var(--paper);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 11px;
+    line-height: 1.5;
+    box-shadow: 0 6px 18px rgba(0,0,0,.22);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition: opacity .15s, transform .15s, visibility .15s;
+    pointer-events: none;
+    z-index: 30;
+  }
+  .flow-card:hover .flow-tip,
+  .flow-card:focus-within .flow-tip { opacity: 1; visibility: visible; transform: translateY(0); }
+  .flow-row:hover { z-index: 5; }
+  .flow-tip-title { font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-size: 9px; color: #B7C0CE; margin-bottom: 6px; }
+  .flow-tip-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+  .flow-tip-row span:first-child { color: #9AA4B8; flex-shrink: 0; }
+  .flow-tip-row span:last-child  { text-align: right; word-break: break-word; }
 </style>
 {% endblock %}
 {% block body %}
 <div class="dash-layout">
-  <aside class="dash-sidebar">
-    <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
-    <a href="{{ url_for('leads.index') }}"      class="dash-sidebar-item active">Leads</a>
-    <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item">Customers</a>
-    <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item">Reports</a>
-  </aside>
+  {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
     <div class="page-header">
@@ -139,35 +174,48 @@
 
     <p><a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">← Back to lead</a></p>
 
+    {% macro card(s) %}
+    <div class="flow-card {{ '' if s.implemented else 'pending' }}">
+      {% if s.url %}<a class="flow-card-link" href="{{ s.url }}">{% endif %}
+        <div class="flow-card-label">
+          <span>{{ s.label }}</span>
+          <span class="flow-pill {{ '' if s.implemented else 'pending' }}">{{ s.status_label }}</span>
+        </div>
+        <div class="flow-card-title">{{ s.title }}</div>
+        <div class="flow-card-sub">{{ s.subtitle }}</div>
+      {% if s.url %}</a>{% endif %}
+      <div class="flow-tip" role="tooltip">
+        <div class="flow-tip-title">{{ s.label }}</div>
+        {% for k, v in s.tip %}
+        <div class="flow-tip-row"><span>{{ k }}</span><span>{{ v }}</span></div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endmacro %}
+
+    {% macro date_side(s, side) %}
+    <div class="flow-date-side {{ side }}">
+      {% if s.date %}
+        <div class="flow-date-label">{{ s.date_label }}</div>
+        <div class="flow-date-value">{{ s.date }}</div>
+      {% else %}
+        <div class="flow-date-label">Date</div>
+        <div class="flow-date-value">—</div>
+      {% endif %}
+    </div>
+    {% endmacro %}
+
     <div class="flow-wrap" style="margin-top:20px;">
       {% for s in stages %}
       <div class="flow-row grp-{{ s.group }} {{ 'pending' if not s.implemented }}">
         {% if loop.index0 is even %}
-          <div class="flow-card {{ '' if s.implemented else 'pending' }}">
-            {% if s.url %}<a class="flow-card-link" href="{{ s.url }}">{% endif %}
-              <div class="flow-card-label">
-                <span>{{ s.label }}</span>
-                <span class="flow-pill {{ '' if s.implemented else 'pending' }}">{{ s.status_label }}</span>
-              </div>
-              <div class="flow-card-title">{{ s.title }}</div>
-              <div class="flow-card-sub">{{ s.subtitle }}</div>
-            {% if s.url %}</a>{% endif %}
-          </div>
+          {{ card(s) }}
           <div class="flow-dot">{{ s.number }}</div>
-          <div></div>
+          {{ date_side(s, 'right') }}
         {% else %}
-          <div></div>
+          {{ date_side(s, 'left') }}
           <div class="flow-dot">{{ s.number }}</div>
-          <div class="flow-card {{ '' if s.implemented else 'pending' }}">
-            {% if s.url %}<a class="flow-card-link" href="{{ s.url }}">{% endif %}
-              <div class="flow-card-label">
-                <span>{{ s.label }}</span>
-                <span class="flow-pill {{ '' if s.implemented else 'pending' }}">{{ s.status_label }}</span>
-              </div>
-              <div class="flow-card-title">{{ s.title }}</div>
-              <div class="flow-card-sub">{{ s.subtitle }}</div>
-            {% if s.url %}</a>{% endif %}
-          </div>
+          {{ card(s) }}
         {% endif %}
       </div>
       {% endfor %}

@@ -5,20 +5,7 @@
 <div class="dash-layout">
 
   {# ---- Sidebar ---- #}
-  <aside class="dash-sidebar">
-    <a href="{{ url_for('dashboard.index') }}" class="dash-sidebar-item active">Projects</a>
-    <a href="{{ url_for('leads.index') }}"
-       class="dash-sidebar-item {{ 'active' if request.endpoint == 'leads.index' }}">Leads</a>
-    <a href="{{ url_for('customers.index') }}"
-       class="dash-sidebar-item {{ 'active' if request.endpoint == 'customers.index' }}">Customers</a>
-    <a href="{{ url_for('reports.index') }}"
-       class="dash-sidebar-item {{ 'active' if request.endpoint == 'reports.index' }}">Reports</a>
-    {% if current_user.is_admin %}
-    <a href="{{ url_for('settings.pricing') }}" class="dash-sidebar-item">Products &amp; pricing</a>
-    <a href="{{ url_for('settings.company') }}" class="dash-sidebar-item">Branding</a>
-    <a href="{{ url_for('settings.team') }}"    class="dash-sidebar-item">Team</a>
-    {% endif %}
-  </aside>
+  {% include '_nav_sidebar.html' %}
 
   {# ---- Main content ---- #}
   <div class="dash-content">

@@ -1,0 +1,31 @@
+{% set _bp = request.blueprint %}
+{% set _ep = request.endpoint %}
+<a href="{{ url_for('dashboard.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp in ('dashboard', 'projects', 'editor', 'quote', 'visualiser', 'model3d') }}">Projects</a>
+<a href="{{ url_for('leads.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp in ('leads', 'presel', 'survey') }}">Leads</a>
+<a href="{{ url_for('customers.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp == 'customers' }}">Customers</a>
+<a href="{{ url_for('design_approval.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp == 'design_approval' }}">Design Approvals</a>
+<a href="{{ url_for('reports.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp == 'reports' }}">Reports</a>
+{% if current_user.is_admin %}
+<div class="dash-sidebar-heading">Settings</div>
+<a href="{{ url_for('settings.pricing') }}"
+   class="dash-sidebar-item {{ 'active' if _ep == 'settings.pricing' }}">Products &amp; pricing</a>
+<a href="{{ url_for('settings.company') }}"
+   class="dash-sidebar-item {{ 'active' if _ep == 'settings.company' }}">Branding</a>
+<a href="{{ url_for('settings.team') }}"
+   class="dash-sidebar-item {{ 'active' if _ep == 'settings.team' }}">Team</a>
+<a href="{{ url_for('settings.cad') }}"
+   class="dash-sidebar-item {{ 'active' if _ep == 'settings.cad' }}">CAD profiles</a>
+<a href="{{ url_for('settings.profiles_library') }}"
+   class="dash-sidebar-item {{ 'active' if _ep in ('settings.profiles_library', 'settings.create_profile', 'settings.upload_dxf') }}">Profile Library</a>
+<a href="{{ url_for('settings.profile_systems') }}"
+   class="dash-sidebar-item {{ 'active' if _ep in ('settings.profile_systems', 'settings.edit_profile_system') }}">Profile Systems</a>
+<a href="{{ url_for('settings.glass_library') }}"
+   class="dash-sidebar-item {{ 'active' if _ep in ('settings.glass_library', 'settings.create_glass') }}">Glass Units</a>
+{% endif %}
+<a href="{{ url_for('settings.profile') }}"
+   class="dash-sidebar-item {{ 'active' if _ep == 'settings.profile' }}">My profile</a>
