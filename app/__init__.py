@@ -30,7 +30,7 @@ def create_app(config_name=None):
     with app.app_context():
         from .models import (  # noqa: F401
             Tenant, User, Project, Window, Pane,
-            Visualisation, Quote, PricingRule,
+            Visualisation, Quotation, PricingRule,
             OpenerPricingRule, GlazingPricingRule,
             ExceptionLog,
             CadProfile,
@@ -54,7 +54,7 @@ def create_app(config_name=None):
     from .routes.projects import projects_bp
     from .routes.editor import editor_bp
     from .routes.visualiser import visualiser_bp
-    from .routes.quote import quote_bp
+    from .routes.quotation import quotation_bp
     from .api.v1 import api_v1_bp
 
     app.register_blueprint(auth_bp)
@@ -70,7 +70,7 @@ def create_app(config_name=None):
     app.register_blueprint(projects_bp)
     app.register_blueprint(editor_bp)
     app.register_blueprint(visualiser_bp)
-    app.register_blueprint(quote_bp)
+    app.register_blueprint(quotation_bp)
     app.register_blueprint(api_v1_bp, url_prefix='/api/v1')
 
     # ---- serve uploaded files -------------------------------------

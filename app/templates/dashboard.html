@@ -68,8 +68,8 @@
           <td class="muted">{{ p.address or '—' }}</td>
           <td class="mono" style="font-size:12px;">{{ p.window_count }}</td>
           <td class="mono" style="font-size:12px;">
-            {% if p.latest_quote and p.latest_quote.total %}
-              £{{ '{:,.2f}'.format(p.latest_quote.total) }}
+            {% if p.latest_quote and p.latest_quote.grand_total %}
+              £{{ '{:,.2f}'.format(p.latest_quote.grand_total) }}
             {% else %}
               <span class="muted">—</span>
             {% endif %}

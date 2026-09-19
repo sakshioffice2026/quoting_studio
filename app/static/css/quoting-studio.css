@@ -13,6 +13,7 @@
   --white:  #FFFFFF;
   --error:  #C0392B;
   --success:#2E7D52;
+  --warning:#B7791F;
   --font-display: 'Fraunces', serif;
   --font-body:    'Inter', sans-serif;
   --font-mono:    'IBM Plex Mono', monospace;
@@ -658,4 +659,136 @@ textarea.form-control { resize: vertical; min-height: 80px; }
     background: linear-gradient(135deg, rgba(220, 38, 38, 0.9) 0%, rgba(185, 28, 28, 0.9) 100%);
     box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4), 0 0 1px rgba(255, 255, 255, 0.1);
   }
+}
+
+/* ================================================================
+   QUOTATIONS
+   ================================================================ */
+
+/* flash — warning variant (used by quotation generate / mark lost) */
+.flash-warning {
+  background: #FBF1DC;
+  color: var(--warning);
+  border-left: 3px solid var(--warning);
+}
+
+/* status badges — quotation lifecycle */
+.badge-pending-discount-approval { background: #FBF1DC; color: var(--warning); }
+.badge-negotiation               { background: #E8EEF5; color: var(--navy); }
+.badge-accepted                  { background: var(--navy); color: var(--paper); }
+.badge-expired                   { background: #F0EEEA; color: var(--steel); }
+
+/* text helpers */
+.text-error   { color: var(--error); }
+.text-warning { color: var(--warning); }
+.text-success { color: var(--success); }
+
+.expiry-tag {
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+/* summary cards */
+.info-card-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.info-card {
+  flex: 1 1 160px;
+  min-width: 160px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px 18px;
+  background: white;
+}
+
+.info-card-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--steel);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.info-card-value {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--navy);
+  line-height: 1.2;
+}
+
+.info-card-note {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.info-card-highlight { border: 2px solid var(--copper); }
+.info-card-highlight .info-card-value { font-size: 22px; font-weight: 700; }
+
+/* meta / timeline text */
+.quote-meta { max-width: 640px; margin-bottom: 24px; }
+.quote-meta p { margin: 0 0 6px; font-size: 13px; color: var(--navy); }
+
+.section-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--steel);
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+/* line-items numeric columns */
+.data-table .num-cell { text-align: right; font-family: var(--font-mono); font-size: 12px; }
+
+/* action panels */
+.action-grid {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.action-panel {
+  flex: 1 1 300px;
+  max-width: 360px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px;
+  background: white;
+}
+
+.action-panel-wide     { max-width: 480px; flex-basis: 100%; margin-bottom: 24px; }
+.action-panel-success  { border-color: var(--success); background: #F3FAF6; }
+.action-panel-warning  { border-color: var(--warning); background: #FDF8EC; }
+
+.action-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.action-note {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--steel);
+  line-height: 1.5;
+}
+
+.action-panel .form-group:last-of-type { margin-bottom: 14px; }
+
+@media (max-width: 720px) {
+  .info-card { flex-basis: 100%; }
+  .action-panel { max-width: 100%; }
 }

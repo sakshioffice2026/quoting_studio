@@ -24,12 +24,6 @@
       {% endfor %}
     </div>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}
-        <div class="alert alert-{{ category }}" style="margin-bottom:12px;">{{ message }}</div>
-      {% endfor %}
-    {% endwith %}
-
     {% if quotations %}
     <table class="data-table">
       <thead>
@@ -38,7 +32,7 @@
           <th>Project</th>
           <th>Ver.</th>
           <th>Status</th>
-          <th>Grand Total</th>
+          <th style="text-align:right;">Grand Total</th>
           <th>Valid Until</th>
           <th>Sent</th>
           <th></th>
@@ -48,31 +42,31 @@
         {% for q in quotations %}
         <tr>
           <td class="mono" style="font-size:12px; font-weight:600;">{{ q.quotation_number }}</td>
-          <td style="font-weight:600;">
-            {{ q.project.customer_name if q.project else '—' }}
+          <td class="link-cell">
+            {% if q.project %}
+              <a href="{{ url_for('projects.detail', project_id=q.project_id) }}">{{ q.project.customer_name }}</a>
+            {% else %}—{% endif %}
           </td>
           <td class="mono" style="font-size:12px; text-align:center;">v{{ q.quotation_version }}</td>
           <td>
-            <span class="badge">{{ q.status_label }}</span>
-            {% if q.is_expired %}
-              <span style="color:var(--red,#c0392b); font-size:11px; margin-left:4px;">Expired</span>
-            {% elif q.days_until_expiry is not none and q.days_until_expiry <= 3 and not q.is_expired %}
-              <span style="color:var(--orange,#e67e22); font-size:11px; margin-left:4px;">⚠ {{ q.days_until_expiry }}d left</span>
+            <span class="badge badge-{{ q.status|lower|replace('quote-', '')|replace('_', '-') }}">{{ q.status_label }}</span>
+            {% if q.is_expired and q.status != QuotationStatus.EXPIRED %}
+              <span class="expiry-tag text-error">Expired</span>
+            {% elif q.days_until_expiry is not none and q.days_until_expiry <= 3 and q.status == QuotationStatus.SENT %}
+              <span class="expiry-tag text-warning">⚠ {{ q.days_until_expiry }}d left</span>
             {% endif %}
           </td>
-          <td style="font-weight:600; text-align:right;">
+          <td class="num-cell" style="font-weight:600; color:var(--copper);">
             {% if q.grand_total %}
               ₹{{ '{:,.2f}'.format(q.grand_total|float) }}
             {% else %}—{% endif %}
           </td>
-          <td class="muted" style="font-size:12px;">
+          <td class="muted mono" style="font-size:12px;">
             {% if q.validity_date %}
-              <span style="{{ 'color:var(--red,#c0392b);' if q.is_expired else '' }}">
-                {{ q.validity_date.strftime('%Y-%m-%d') }}
-              </span>
+              <span class="{{ 'text-error' if q.is_expired else '' }}">{{ q.validity_date.strftime('%Y-%m-%d') }}</span>
             {% else %}—{% endif %}
           </td>
-          <td class="muted" style="font-size:12px;">
+          <td class="muted mono" style="font-size:12px;">
             {{ q.sent_at.strftime('%Y-%m-%d') if q.sent_at else '—' }}
           </td>
           <td style="text-align:right;">
