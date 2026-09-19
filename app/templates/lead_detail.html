@@ -25,11 +25,35 @@
       <p><strong>Product interest:</strong> {{ lead.product_interest or '—' }}</p>
       <p><strong>Assigned to:</strong> {{ lead.assignee.full_name if lead.assignee else 'Unassigned' }}</p>
 
-      {% if lead.follow_up_status != 'FUP-QUALIFIED' and lead.status not in ['LEAD-DUPLICATE', 'LEAD-INVALID'] %}
-      <form method="POST" action="{{ url_for('leads.qualify', lead_id=lead.id) }}" style="margin-top:8px;">
+      {% if not lead.follow_up_status and lead.status not in ['LEAD-DUPLICATE', 'LEAD-INVALID'] %}
+      <form method="POST" action="{{ url_for('leads.follow_up', lead_id=lead.id) }}" style="margin-top:8px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-primary btn-sm">Mark Qualified</button>
+        <button type="submit" class="btn btn-primary btn-sm">Follow Up</button>
       </form>
+      {% endif %}
+
+      {% if lead.follow_up_status not in ['FUP-QUALIFIED', 'FUP-LOST'] and lead.status not in ['LEAD-DUPLICATE', 'LEAD-INVALID'] %}
+      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <form method="POST" action="{{ url_for('leads.qualify', lead_id=lead.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary btn-sm">Mark Qualified</button>
+        </form>
+
+        {% if lead.follow_up_status != 'FUP-NURTURE' %}
+        <form method="POST" action="{{ url_for('leads.nurture', lead_id=lead.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-secondary btn-sm">Move to Nurture</button>
+        </form>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('leads.lost', lead_id=lead.id) }}"
+              onsubmit="return this.lost_reason.value.trim().length > 0 || alert('A lost reason is required.');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input class="form-control" style="display:inline-block; width:auto;" type="text"
+                 name="lost_reason" placeholder="Lost reason" required>
+          <button type="submit" class="btn btn-danger btn-sm">Mark Lost</button>
+        </form>
+      </div>
       {% endif %}
 
       {% if not lead.assignee %}
@@ -104,6 +128,11 @@
       </div>
 
       <div class="form-group">
+        <label class="form-label" for="next_action_date">Next action date</label>
+        <input class="form-control" type="date" id="next_action_date" name="next_action_date">
+      </div>
+
+      <div class="form-group">
         <label class="form-label" for="notes">Notes</label>
         <textarea class="form-control" id="notes" name="notes" rows="2"></textarea>
       </div>
@@ -120,7 +149,7 @@
 
     <table class="data-table" style="margin-top:16px;">
       <thead>
-        <tr><th>When</th><th>Type</th><th>Outcome</th><th>Score</th><th>Notes</th></tr>
+        <tr><th>When</th><th>Type</th><th>Outcome</th><th>Score</th><th>Next action</th><th>Notes</th></tr>
       </thead>
       <tbody>
         {% for i in interactions %}
@@ -129,10 +158,11 @@
           <td>{{ i.interaction_type }}</td>
           <td>{{ i.outcome or '—' }}</td>
           <td>{{ i.qualification_score or '—' }}</td>
+          <td class="mono" style="font-size:12px;">{{ i.next_action_date.strftime('%Y-%m-%d') if i.next_action_date else '—' }}</td>
           <td class="muted" style="font-size:12px;">{{ i.notes or '' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="5" class="muted">No interactions logged yet.</td></tr>
+        <tr><td colspan="6" class="muted">No interactions logged yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

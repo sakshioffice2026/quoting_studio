@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, current_app, request, redirect, ur
 from flask_login import login_required, current_user
 
 from ..models import User
-from ..models.lead import LeadStatus
+from ..models.lead import LeadStatus, FollowUpStatus
 from ..services.domain import lead_service, interaction_service, preliminary_selection_service
 leads_bp = Blueprint('leads', __name__)
 
@@ -65,6 +65,17 @@ def assign(lead_id):
     return redirect(url_for('leads.detail', lead_id=lead_id))
 
 
+@leads_bp.route('/leads/<int:lead_id>/follow-up', methods=['POST'])
+@login_required
+def follow_up(lead_id):
+    try:
+        lead_service.set_follow_up_status(current_user.tenant_id, lead_id, FollowUpStatus.IN_PROGRESS)
+        flash('Follow-up started.', 'success')
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('leads.detail', lead_id=lead_id))
+
+
 @leads_bp.route('/leads/<int:lead_id>/qualify', methods=['POST'])
 @login_required
 def qualify(lead_id):
@@ -72,6 +83,29 @@ def qualify(lead_id):
         lead_service.qualify_lead(current_user.tenant_id, lead_id)
         flash('Lead marked as qualified.', 'success')
     except LookupError as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('leads.detail', lead_id=lead_id))
+
+
+@leads_bp.route('/leads/<int:lead_id>/nurture', methods=['POST'])
+@login_required
+def nurture(lead_id):
+    try:
+        lead_service.set_follow_up_status(current_user.tenant_id, lead_id, FollowUpStatus.NURTURE)
+        flash('Lead moved to nurture.', 'success')
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('leads.detail', lead_id=lead_id))
+
+
+@leads_bp.route('/leads/<int:lead_id>/lost', methods=['POST'])
+@login_required
+def lost(lead_id):
+    try:
+        reason = request.form.get('lost_reason') or ''
+        lead_service.set_follow_up_status(current_user.tenant_id, lead_id, FollowUpStatus.LOST, reason)
+        flash('Lead closed as lost.', 'success')
+    except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
     return redirect(url_for('leads.detail', lead_id=lead_id))
 
@@ -87,6 +121,7 @@ def add_interaction(lead_id):
             created_by=current_user.id,
             outcome=request.form.get('outcome') or None,
             notes=request.form.get('notes') or None,
+            next_action_date=request.form.get('next_action_date') or None,
             qualification_score=request.form.get('qualification_score') or None,
             lost_reason=request.form.get('lost_reason') or None,
         )

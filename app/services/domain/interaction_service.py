@@ -33,14 +33,15 @@ def log_interaction(tenant_id: int, lead_id: int, interaction_type: str, created
         lost_reason=lost_reason,
     )
 
-    # keep Lead.follow_up_status in sync with the latest touchpoint outcome
+    # Keep Lead.follow_up_status in sync with the latest touchpoint outcome.
+    # NOTE: FUP-QUALIFIED is only ever set via the explicit qualify_lead() gate
+    # (Section 2 approval gate), since that path also creates/dedupes the
+    # Customer record. A "Hot" score here is a signal for the sales exec, not
+    # itself a qualification event, so it must not bypass that gate.
     if outcome == InteractionOutcome.NOT_INTERESTED:
         lead.follow_up_status = FollowUpStatus.LOST
         lead.lost_reason = lost_reason or 'Not interested'
-    elif qualification_score:
-        lead.follow_up_status = FollowUpStatus.QUALIFIED if qualification_score == QualificationScore.HOT \
-            else FollowUpStatus.IN_PROGRESS
-    elif lead.follow_up_status is None:
+    elif lead.follow_up_status in (None, FollowUpStatus.NURTURE):
         lead.follow_up_status = FollowUpStatus.IN_PROGRESS
 
     db.session.commit()
