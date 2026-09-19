@@ -23,9 +23,9 @@ def index():
         win_rate = round((won / total * 100) if total else 0)
 
         pipeline = sum(
-            float(p.latest_quote.total)
+            float(p.latest_quote.grand_total)
             for p in projects
-            if p.latest_quote and p.latest_quote.total
+            if p.latest_quote and p.latest_quote.grand_total
             and p.status != ProjectStatus.LOST
         )
 

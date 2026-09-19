@@ -39,22 +39,24 @@ class Project(db.Model):
         cascade='all, delete-orphan',
         order_by='Window.sequence_order'
     )
-    quotes = db.relationship(
-        'Quote', backref='project', lazy='dynamic',
-        cascade='all, delete-orphan'
-    )
+    # `quotations` relationship is provided by the backref declared on
+    # Quotation.project (see app/models/quotation.py).
 
     @property
     def window_count(self) -> int:
         return self.windows.count()
 
     @property
+    def quotes(self):
+        return self.quotations
+
+    @property
     def latest_quote(self):
-        from ..models.quote import Quote
+        from ..models.quotation import Quotation
         from sqlalchemy import desc
-        return (Quote.query
+        return (Quotation.query
                 .filter_by(project_id=self.id)
-                .order_by(desc(Quote.created_at))
+                .order_by(desc(Quotation.created_at))
                 .first())
 
     @property

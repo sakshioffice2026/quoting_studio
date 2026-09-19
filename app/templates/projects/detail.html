@@ -45,7 +45,7 @@
     </div>
     {% elif latest_design_approval.status == 'DESIGN-APPROVED' %}
     <div style="background:#eef7ee; border:1px solid var(--sage); border-radius:8px; padding:14px 18px; margin-bottom:20px;">
-      ✓ Design approved and locked (revision {{ latest_design_approval.revision_number }}). Quotation is the next phase — not yet available.
+      ✓ Design approved and locked (revision {{ latest_design_approval.revision_number }}). Ready to generate a quotation.
     </div>
     {% endif %}
   {% else %}
@@ -120,24 +120,25 @@
   {# ---- Danger zone ---- #}
   <div class="divider" style="margin-top:40px;"></div>
 
-  {# ---- Quotes ---- #}
+  {# ---- Quotations ---- #}
   <div style="margin-bottom:32px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
       <div style="font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);font-weight:600;">
-        Quotes ({{ project.quotes.count() }})
+        Quotations ({{ quotes|length }})
       </div>
-      <form method="POST" action="{{ url_for('quote.generate', project_id=project.id) }}">
+      <form method="POST" action="{{ url_for('quotation.generate', project_id=project.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-primary btn-sm">+ Generate Quote</button>
+        <button type="submit" class="btn btn-primary btn-sm">+ Generate Quotation</button>
       </form>
     </div>
 
-    {# quotes passed from route, already sorted by created_at desc #}
+    {# quotations passed from route, already sorted by created_at desc #}
     {% if quotes %}
     <table class="data-table">
       <thead>
         <tr>
-          <th>Quote #</th>
+          <th>Quotation #</th>
+          <th>Version</th>
           <th>Date</th>
           <th>Total</th>
           <th>Status</th>
@@ -145,20 +146,27 @@
         </tr>
       </thead>
       <tbody>
+        {% set badge_map = {
+          'QUOTE-SENT': 'sent',
+          'QUOTE-NEGOTIATION': 'sent',
+          'QUOTE-ACCEPTED': 'won',
+          'QUOTE-LOST': 'lost'
+        } %}
         {% for q in quotes %}
         <tr>
-          <td class="mono" style="font-size:12px;font-weight:600;">{{ q.quote_number }}</td>
-          <td class="muted" style="font-size:12px;">{{ q.issued_date.strftime('%d %b %Y') }}</td>
+          <td class="mono" style="font-size:12px;font-weight:600;">{{ q.quotation_number }}</td>
+          <td class="mono muted" style="font-size:12px;">v{{ q.quotation_version }}</td>
+          <td class="muted" style="font-size:12px;">{{ q.created_at.strftime('%d %b %Y') }}</td>
           <td class="mono" style="font-size:13px;font-weight:600;color:var(--copper);">
-            £{{ '%.2f'|format(q.total) if q.total else '—' }}
+            £{{ '%.2f'|format(q.grand_total) if q.grand_total else '—' }}
           </td>
           <td>
-            <span class="badge badge-{{ 'sent' if q.is_sent else 'draft' }}">
-              {{ 'Sent' if q.is_sent else 'Draft' }}
+            <span class="badge badge-{{ badge_map.get(q.status, 'draft') }}">
+              {{ q.status_label }}
             </span>
           </td>
           <td style="text-align:right;">
-            <a href="{{ url_for('quote.view', project_id=project.id, quote_id=q.id) }}"
+            <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}"
                class="btn btn-secondary btn-sm">View →</a>
           </td>
         </tr>
@@ -167,7 +175,7 @@
     </table>
     {% else %}
     <div style="font-size:13px;color:var(--steel);padding:16px 0;">
-      No quotes yet. Add your windows then click Generate Quote.
+      No quotations yet. Get your design approved then click Generate Quotation.
     </div>
     {% endif %}
   </div>

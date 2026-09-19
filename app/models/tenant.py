@@ -21,7 +21,11 @@ class Tenant(db.Model):
     pricing_rules = db.relationship('PricingRule',     backref='tenant', lazy='dynamic')
     opener_rules  = db.relationship('OpenerPricingRule',  backref='tenant', lazy='dynamic')
     glazing_rules = db.relationship('GlazingPricingRule', backref='tenant', lazy='dynamic')
-    quotes        = db.relationship('Quote',           backref='tenant', lazy='dynamic')
+    quotations    = db.relationship('Quotation',       backref='tenant', lazy='dynamic')
+
+    @property
+    def quotes(self):
+        return self.quotations
 
     @staticmethod
     def generate_slug(name: str) -> str:

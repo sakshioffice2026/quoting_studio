@@ -57,14 +57,14 @@ def new():
 @login_required
 def detail(project_id):
     try:
-        from ..models import Quote
+        from ..models import Quotation
         from sqlalchemy import desc
         from ..services.domain import design_approval_service
         project = _own_project(project_id)
         windows = project.windows.all()
-        quotes  = (Quote.query
+        quotes  = (Quotation.query
                    .filter_by(project_id=project_id, tenant_id=current_user.tenant_id)
-                   .order_by(desc(Quote.created_at))
+                   .order_by(desc(Quotation.created_at))
                    .all())
         latest_design_approval = design_approval_service.get_latest_for_project(
             current_user.tenant_id, project_id)

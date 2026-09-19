@@ -85,7 +85,10 @@ class Quotation(db.Model):
     updated_at           = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # Relationships
-    project         = db.relationship('Project', backref=db.backref('quotations', lazy='dynamic'))
+    project         = db.relationship(
+        'Project',
+        backref=db.backref('quotations', lazy='dynamic', cascade='all, delete-orphan'),
+    )
     design_approval = db.relationship('DesignApproval', backref=db.backref('quotations', lazy='dynamic'))
 
     parent = db.relationship(
