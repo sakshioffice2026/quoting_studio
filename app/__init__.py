@@ -38,6 +38,9 @@ def create_app(config_name=None):
             Customer, Lead, Interaction,
             PreliminarySelection, Survey, SurveyOpening,
             DesignApproval,
+            Order,
+            Payment,
+            ManufacturingJob,
         )
 
     # register blueprints
@@ -55,6 +58,9 @@ def create_app(config_name=None):
     from .routes.editor import editor_bp
     from .routes.visualiser import visualiser_bp
     from .routes.quotation import quotation_bp
+    from .routes.order import order_bp
+    from .routes.payment import payment_bp
+    from .routes.manufacturing import manufacturing_bp
     from .api.v1 import api_v1_bp
 
     app.register_blueprint(auth_bp)
@@ -71,6 +77,9 @@ def create_app(config_name=None):
     app.register_blueprint(editor_bp)
     app.register_blueprint(visualiser_bp)
     app.register_blueprint(quotation_bp)
+    app.register_blueprint(order_bp)
+    app.register_blueprint(payment_bp)
+    app.register_blueprint(manufacturing_bp)
     app.register_blueprint(api_v1_bp, url_prefix='/api/v1')
 
     # ---- serve uploaded files -------------------------------------

@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% block title %}Orders — Quoting Studio{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div>
+        <h1>Orders</h1>
+        <div class="sub mono">{{ orders|length }} record{{ 's' if orders|length != 1 }}</div>
+      </div>
+    </div>
+
+    {# Status filter pills #}
+    <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:6px;">
+      <a href="{{ url_for('order.index') }}"
+         class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
+      {% for code in OrderStatus.ALL %}
+      <a href="{{ url_for('order.index', status=code) }}"
+         class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">
+        {{ OrderStatus.LABELS[code] }}
+      </a>
+      {% endfor %}
+    </div>
+
+    {% if orders %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Order #</th>
+          <th>Project</th>
+          <th>Quotation</th>
+          <th>Status</th>
+          <th style="text-align:right;">Total</th>
+          <th>Promised Delivery</th>
+          <th>Confirmed</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in orders %}
+        <tr>
+          <td class="mono" style="font-size:12px; font-weight:600;">{{ o.order_number }}</td>
+          <td class="link-cell">
+            {% if o.project %}
+              <a href="{{ url_for('projects.detail', project_id=o.project_id) }}">{{ o.project.customer_name }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td class="mono" style="font-size:12px;">
+            {% if o.quotation %}
+              <a href="{{ url_for('quotation.detail', quotation_id=o.quotation_id) }}">{{ o.quotation.quotation_number }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            <span class="badge badge-{{ o.status|lower|replace('order-', '')|replace('_', '-') }}">{{ o.status_label }}</span>
+          </td>
+          <td class="num-cell" style="font-weight:600; color:var(--copper);">
+            {% if o.total_amount %}
+              ₹{{ '{:,.2f}'.format(o.total_amount|float) }}
+            {% else %}—{% endif %}
+          </td>
+          <td class="muted mono" style="font-size:12px;">
+            {{ o.promised_delivery_date.strftime('%Y-%m-%d') if o.promised_delivery_date else '—' }}
+          </td>
+          <td class="muted mono" style="font-size:12px;">
+            {{ o.order_confirmed_at.strftime('%Y-%m-%d') if o.order_confirmed_at else '—' }}
+          </td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('order.detail', order_id=o.id) }}" class="btn btn-secondary btn-sm">View →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% else %}
+    <div class="empty-state">
+      <div class="icon">📦</div>
+      <p>No orders yet. Raise one from an accepted quotation.</p>
+      <a href="{{ url_for('quotation.index') }}" class="btn btn-primary">Go to Quotations</a>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

@@ -51,6 +51,58 @@
       </div>
     </div>
 
+    <!-- Orders / Payments / Manufacturing overview -->
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+                color:var(--steel);font-weight:600;margin:24px 0 12px;">Order Fulfilment</div>
+    <div class="stat-row" style="flex-wrap:wrap;gap:12px;margin-bottom:24px;">
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('orders_confirmed',0) }}</div>
+        <div class="stat-label">Orders confirmed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('orders_pending',0) }}</div>
+        <div class="stat-label">Orders pending signature</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="font-size:20px;">
+          ₹{{ '{:,.0f}'.format(stats.get('order_value',0)) }}
+        </div>
+        <div class="stat-label">Confirmed order value</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="font-size:20px;">
+          ₹{{ '{:,.0f}'.format(stats.get('payments_received_total',0)) }}
+        </div>
+        <div class="stat-label">Payments received</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="font-size:20px;">
+          ₹{{ '{:,.0f}'.format(stats.get('payments_outstanding',0)) }}
+        </div>
+        <div class="stat-label">Payments outstanding</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('payments_overdue',0) }}</div>
+        <div class="stat-label">Payments overdue</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('jobs_queued',0) }}</div>
+        <div class="stat-label">Jobs queued</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('jobs_in_progress',0) }}</div>
+        <div class="stat-label">Jobs in progress</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('jobs_qc_hold',0) }}</div>
+        <div class="stat-label">Jobs on QC hold</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('jobs_completed',0) }}</div>
+        <div class="stat-label">Jobs completed</div>
+      </div>
+    </div>
+
     <!-- Status breakdown -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:24px;">
       {% for status, label, cls in [

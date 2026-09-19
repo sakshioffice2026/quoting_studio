@@ -10,6 +10,12 @@
    class="dash-sidebar-item {{ 'active' if _bp == 'design_approval' }}">Design Approvals</a>
 <a href="{{ url_for('quotation.index') }}"
    class="dash-sidebar-item {{ 'active' if _bp == 'quotation' }}">Quotations</a>
+<a href="{{ url_for('order.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp == 'order' }}">Orders</a>
+<a href="{{ url_for('payment.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp == 'payment' }}">Payments</a>
+<a href="{{ url_for('manufacturing.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp == 'manufacturing' }}">Manufacturing</a>
 <a href="{{ url_for('reports.index') }}"
    class="dash-sidebar-item {{ 'active' if _bp == 'reports' }}">Reports</a>
 {% if current_user.is_admin %}

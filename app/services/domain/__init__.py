@@ -6,3 +6,6 @@ from . import preliminary_selection_service  # noqa: F401
 from . import pricing                   # noqa: F401
 from . import survey_service            # noqa: F401
 from . import quotation_service         # noqa: F401
+from . import order_service             # noqa: F401
+from . import payment_service           # noqa: F401
+from . import manufacturing_service     # noqa: F401

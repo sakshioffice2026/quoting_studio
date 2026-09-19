@@ -272,9 +272,28 @@
     {% if quotation.status == QuotationStatus.ACCEPTED %}
     <div class="action-panel action-panel-wide action-panel-success">
       <h4 class="action-title text-success">✓ Quotation Accepted</h4>
-      <p class="action-note" style="margin-bottom:0;">
-        Proceed to <strong>Section 8 — Order Acceptance</strong> to confirm the order and collect the advance payment.
+      {% if quotation.orders.first() %}
+      <p class="action-note" style="margin-bottom:12px;">
+        Order <strong>{{ quotation.orders.first().order_number }}</strong> already raised for this quotation.
       </p>
+      <a href="{{ url_for('order.detail', order_id=quotation.orders.first().id) }}" class="btn btn-primary btn-sm">View Order →</a>
+      {% else %}
+      <p class="action-note">
+        Proceed to <strong>Section 8 — Order Acceptance</strong> to raise the sales order and collect the advance payment.
+      </p>
+      <form method="POST" action="{{ url_for('order.create', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label class="form-label" for="contract_ref">Contract reference (optional)</label>
+          <input type="text" class="form-control" id="contract_ref" name="contract_ref">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="promised_delivery_date">Promised delivery date (optional)</label>
+          <input type="date" class="form-control" id="promised_delivery_date" name="promised_delivery_date">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Raise Order →</button>
+      </form>
+      {% endif %}
     </div>
     {% endif %}
 

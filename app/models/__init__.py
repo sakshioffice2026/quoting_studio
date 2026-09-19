@@ -17,6 +17,9 @@ from .interaction import Interaction, InteractionType, InteractionOutcome, Quali
 from .preliminary_selection import PreliminarySelection, PreselStatus
 from .survey import Survey, SurveyOpening, SurveyStatus
 from .design_approval import DesignApproval, DesignApprovalStatus
+from .order import Order, OrderStatus
+from .payment import Payment, PaymentStatus, PaymentStage
+from .manufacturing_job import ManufacturingJob, JobStatus, ProductionStage, QcResult
 
 __all__ = [
     'Tenant',
@@ -38,4 +41,7 @@ __all__ = [
     'PreliminarySelection', 'PreselStatus',
     'Survey', 'SurveyOpening', 'SurveyStatus',
     'DesignApproval', 'DesignApprovalStatus',
+    'Order', 'OrderStatus',
+    'Payment', 'PaymentStatus', 'PaymentStage',
+    'ManufacturingJob', 'JobStatus', 'ProductionStage', 'QcResult',
 ]

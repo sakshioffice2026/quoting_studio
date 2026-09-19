@@ -1,0 +1,166 @@
+{% extends 'base.html' %}
+{% block title %}{{ payment.payment_number }} — Quoting Studio{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    {# ── Page header ── #}
+    <div class="page-header">
+      <div>
+        <h1>{{ payment.order.project.customer_name if payment.order and payment.order.project else 'Payment' }}</h1>
+        <div class="sub mono">
+          {{ payment.payment_number }} · {{ payment.stage_label }}
+          · <span class="badge badge-{{ payment.status|lower|replace('pay-', '')|replace('_', '-') }}">{{ payment.status_label }}</span>
+          {% if payment.is_overdue and payment.status != PaymentStatus.OVERDUE %}
+            · <span class="expiry-tag text-error">Overdue</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="flex gap-8">
+        {% if payment.order %}
+        <a href="{{ url_for('order.detail', order_id=payment.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+        {% endif %}
+        <a href="{{ url_for('payment.index') }}" class="btn btn-secondary btn-sm">← All Payments</a>
+      </div>
+    </div>
+
+    {# ── Summary cards ── #}
+    <div class="info-card-row">
+
+      <div class="info-card">
+        <div class="info-card-label">Invoice Amount</div>
+        <div class="info-card-value">{{ '₹{:,.2f}'.format(payment.invoice_amount|float) if payment.invoice_amount else '—' }}</div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-card-label">Received</div>
+        <div class="info-card-value">{{ '₹{:,.2f}'.format(payment.amount_received|float) if payment.amount_received else '—' }}</div>
+      </div>
+
+      <div class="info-card info-card-highlight">
+        <div class="info-card-label">Balance</div>
+        <div class="info-card-value">{{ '₹{:,.2f}'.format(payment.balance|float) if payment.balance else '—' }}</div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-card-label">Due Date</div>
+        <div class="info-card-value {{ 'text-error' if payment.is_overdue else '' }}">
+          {{ payment.due_date.strftime('%Y-%m-%d') if payment.due_date else '—' }}
+        </div>
+      </div>
+
+    </div>
+
+    {# ── Timeline info ── #}
+    <div class="quote-meta">
+      {% if payment.received_at %}
+        <p><strong>Last receipt:</strong> {{ payment.received_at.strftime('%Y-%m-%d %H:%M') }}
+          via {{ payment.payment_mode }}{% if payment.transaction_ref %} (ref: {{ payment.transaction_ref }}){% endif %}</p>
+      {% endif %}
+      {% if payment.hold_flag %}
+        <p><strong>On hold:</strong> {{ payment.hold_reason }}</p>
+      {% endif %}
+    </div>
+
+    {# ══════════════════════════════════════════════
+       ACTION PANELS
+       ══════════════════════════════════════════════ #}
+
+    {# ── INVOICED / PARTIAL / OVERDUE → Record Receipt / Hold ── #}
+    {% if payment.status in (PaymentStatus.INVOICED, PaymentStatus.PARTIAL, PaymentStatus.OVERDUE) %}
+    <div class="action-grid">
+
+      <form method="POST" class="action-panel"
+            action="{{ url_for('payment.record_receipt', payment_id=payment.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 class="action-title">Record Receipt</h4>
+        <div class="form-group">
+          <label class="form-label" for="amount_received">Amount received</label>
+          <input type="number" step="0.01" class="form-control" id="amount_received" name="amount_received" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="payment_mode">Payment mode</label>
+          <select class="form-control" id="payment_mode" name="payment_mode" required>
+            <option value="bank_transfer">Bank Transfer</option>
+            <option value="card">Card</option>
+            <option value="cheque">Cheque</option>
+            <option value="financing">Financing</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="transaction_ref">Transaction ref (optional)</label>
+          <input type="text" class="form-control" id="transaction_ref" name="transaction_ref">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Record Receipt</button>
+      </form>
+
+      <form method="POST" class="action-panel"
+            action="{{ url_for('payment.apply_hold', payment_id=payment.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 class="action-title">Apply Hold</h4>
+        <div class="form-group">
+          <label class="form-label" for="hold_reason">Reason</label>
+          <textarea class="form-control" id="hold_reason" name="hold_reason" rows="2" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Apply Hold</button>
+      </form>
+
+    </div>
+    {% endif %}
+
+    {# ── HOLD_APPLIED → Release Hold ── #}
+    {% if payment.status == PaymentStatus.HOLD_APPLIED %}
+    <div class="action-panel action-panel-wide action-panel-warning">
+      <h4 class="action-title">Payment On Hold</h4>
+      <p class="action-note">{{ payment.hold_reason }}</p>
+      <form method="POST" action="{{ url_for('payment.release_hold', payment_id=payment.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Release Hold</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {# ── RECEIVED → Close ── #}
+    {% if payment.status == PaymentStatus.RECEIVED %}
+    <div class="action-panel action-panel-wide action-panel-success">
+      <h4 class="action-title text-success">✓ Payment Received</h4>
+      {% if payment.payment_stage == 'Advance' %}
+      <p class="action-note">
+        Order released to Manufacturing. Close this milestone once reconciled, or generate the work orders now.
+      </p>
+      {% if not payment.order.manufacturing_jobs.first() %}
+      <form method="POST" action="{{ url_for('manufacturing.generate', order_id=payment.order_id) }}" style="margin-bottom:16px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label class="form-label" for="planned_completion_date">Planned completion date (optional)</label>
+          <input type="date" class="form-control" id="planned_completion_date" name="planned_completion_date">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Generate Manufacturing Jobs →</button>
+      </form>
+      {% else %}
+      <a href="{{ url_for('manufacturing.index') }}" class="btn btn-secondary btn-sm" style="margin-bottom:16px; display:inline-block;">View Manufacturing Jobs →</a>
+      {% endif %}
+      {% else %}
+      <p class="action-note">
+        Close this milestone once reconciled.
+      </p>
+      {% endif %}
+      <form method="POST" action="{{ url_for('payment.close', payment_id=payment.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-secondary btn-sm">Close Payment</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {# ── CLOSED — terminal ── #}
+    {% if payment.status == PaymentStatus.CLOSED %}
+    <div class="action-panel action-panel-wide action-panel-success">
+      <h4 class="action-title text-success">✓ Payment Closed</h4>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

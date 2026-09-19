@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+{% block title %}{{ job.job_number }} — Quoting Studio{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    {# ── Page header ── #}
+    <div class="page-header">
+      <div>
+        <h1>{{ job.opening.label if job.opening else 'Manufacturing Job' }}</h1>
+        <div class="sub mono">
+          {{ job.job_number }} · {{ job.stage_label }}
+          · <span class="badge badge-{{ job.status|lower|replace('mfg-', '')|replace('_', '-') }}">{{ job.status_label }}</span>
+        </div>
+      </div>
+      <div class="flex gap-8">
+        {% if job.order %}
+        <a href="{{ url_for('order.detail', order_id=job.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+        {% endif %}
+        <a href="{{ url_for('manufacturing.index') }}" class="btn btn-secondary btn-sm">← All Jobs</a>
+      </div>
+    </div>
+
+    {# ── Summary cards ── #}
+    <div class="info-card-row">
+
+      <div class="info-card info-card-highlight">
+        <div class="info-card-label">Current Stage</div>
+        <div class="info-card-value">{{ job.stage_label }}</div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-card-label">Material Batch</div>
+        <div class="info-card-value">{{ job.material_batch_ref or '—' }}</div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-card-label">Planned Completion</div>
+        <div class="info-card-value">
+          {{ job.planned_completion_date.strftime('%Y-%m-%d') if job.planned_completion_date else '—' }}
+        </div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-card-label">QC Result</div>
+        <div class="info-card-value">{{ job.qc_result or '—' }}</div>
+      </div>
+
+    </div>
+
+    {# ── Profile codes ── #}
+    {% set codes = job.profile_codes %}
+    {% if codes %}
+    <div class="section-title">Profile Codes Consumed</div>
+    <div style="overflow-x:auto; margin-bottom:32px;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Profile Code</th>
+          <th>Qty</th>
+          <th>Length (mm)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in codes %}
+        <tr>
+          <td class="mono" style="font-size:12px;">{{ c.profile_code or '—' }}</td>
+          <td class="mono" style="font-size:12px;">{{ c.qty or '—' }}</td>
+          <td class="mono" style="font-size:12px;">{{ c.length_mm or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% endif %}
+
+    {# ── Timeline info ── #}
+    <div class="quote-meta">
+      {% if job.qc_checked_at %}
+        <p><strong>Last QC:</strong> {{ job.qc_checked_at.strftime('%Y-%m-%d %H:%M') }}
+          — {{ job.qc_result }}{% if job.qc_notes %} ({{ job.qc_notes }}){% endif %}</p>
+      {% endif %}
+      {% if job.actual_completion_date %}
+        <p><strong>Completed:</strong> {{ job.actual_completion_date.strftime('%Y-%m-%d') }}</p>
+      {% endif %}
+    </div>
+
+    {# ══════════════════════════════════════════════
+       ACTION PANELS
+       ══════════════════════════════════════════════ #}
+
+    {# ── QUEUED → Start ── #}
+    {% if job.status == JobStatus.QUEUED %}
+    <div class="action-panel action-panel-wide">
+      <h4 class="action-title">Start Job</h4>
+      <form method="POST" action="{{ url_for('manufacturing.start', job_id=job.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Start Production →</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {# ── IN_PROGRESS / QC_HOLD → Advance Stage / Record QC ── #}
+    {% if job.status in (JobStatus.IN_PROGRESS, JobStatus.QC_HOLD) %}
+    <div class="action-grid">
+
+      <form method="POST" class="action-panel"
+            action="{{ url_for('manufacturing.advance', job_id=job.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 class="action-title">Advance Stage</h4>
+        <p class="action-note">Current: {{ job.stage_label }}</p>
+        <div class="form-group">
+          <label class="form-label" for="material_batch_ref">Material batch ref (optional)</label>
+          <input type="text" class="form-control" id="material_batch_ref" name="material_batch_ref">
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Advance to Next Stage →</button>
+      </form>
+
+      <form method="POST" class="action-panel"
+            action="{{ url_for('manufacturing.qc', job_id=job.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 class="action-title">Record QC</h4>
+        <div class="form-group">
+          <label class="form-label" for="qc_result">Result</label>
+          <select class="form-control" id="qc_result" name="qc_result" required>
+            {% for r in QcResult.ALL %}
+            <option value="{{ r }}">{{ r }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="qc_notes">Notes</label>
+          <textarea class="form-control" id="qc_notes" name="qc_notes" rows="2"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Record QC Result</button>
+      </form>
+
+    </div>
+
+    {% if job.production_stage == ProductionStage.QC and job.qc_result == QcResult.PASS %}
+    <div class="action-panel action-panel-wide action-panel-success">
+      <h4 class="action-title text-success">✓ QC Passed</h4>
+      <form method="POST" action="{{ url_for('manufacturing.complete', job_id=job.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Mark as Completed →</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if job.status == JobStatus.QC_HOLD %}
+    <div class="action-panel action-panel-wide action-panel-warning">
+      <h4 class="action-title">QC Hold — {{ job.qc_result }}</h4>
+      <p class="action-note" style="margin-bottom:0;">{{ job.qc_notes or 'Rework required before proceeding.' }}</p>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {# ── COMPLETED — terminal ── #}
+    {% if job.status == JobStatus.COMPLETED %}
+    <div class="action-panel action-panel-wide action-panel-success">
+      <h4 class="action-title text-success">✓ Manufacturing Completed</h4>
+      <p class="action-note" style="margin-bottom:0;">
+        Proceed to <strong>Section 12 — Delivery</strong> once all openings on this order are completed.
+      </p>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

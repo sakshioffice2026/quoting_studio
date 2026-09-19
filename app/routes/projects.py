@@ -58,6 +58,7 @@ def new():
 def detail(project_id):
     try:
         from ..models import Quotation
+        from ..models import Order
         from sqlalchemy import desc
         from ..services.domain import design_approval_service
         project = _own_project(project_id)
@@ -66,12 +67,16 @@ def detail(project_id):
                    .filter_by(project_id=project_id, tenant_id=current_user.tenant_id)
                    .order_by(desc(Quotation.created_at))
                    .all())
+        orders  = (Order.query
+                   .filter_by(project_id=project_id, tenant_id=current_user.tenant_id)
+                   .order_by(desc(Order.created_at))
+                   .all())
         latest_design_approval = design_approval_service.get_latest_for_project(
             current_user.tenant_id, project_id)
-        current_app.logger.debug('Project detail: id=%d tenant=%d windows=%d quotes=%d',
-                                  project_id, current_user.tenant_id, len(windows), len(quotes))
+        current_app.logger.debug('Project detail: id=%d tenant=%d windows=%d quotes=%d orders=%d',
+                                  project_id, current_user.tenant_id, len(windows), len(quotes), len(orders))
         return render_template('projects/detail.html',
-                               project=project, windows=windows, quotes=quotes,
+                               project=project, windows=windows, quotes=quotes, orders=orders,
                                latest_design_approval=latest_design_approval)
     except Exception as exc:
         current_app.logger.exception('Error loading project detail id=%d: %s', project_id, exc)
