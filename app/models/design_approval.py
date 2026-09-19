@@ -9,15 +9,25 @@ class DesignApprovalStatus:
     REVISION_REQUESTED  = 'DESIGN-REVISION_REQUESTED'
     APPROVED            = 'DESIGN-APPROVED'
     SUPERSEDED          = 'DESIGN-SUPERSEDED'
+    # Customer-facing approval states (Section 6 of workflow doc)
+    APPROVAL_SENT       = 'APPROVAL-SENT'
+    APPROVAL_EXPIRED    = 'APPROVAL-EXPIRED'
 
-    ALL = [DRAFT, SUBMITTED, REVISION_REQUESTED, APPROVED, SUPERSEDED]
+    ALL = [DRAFT, SUBMITTED, APPROVAL_SENT, REVISION_REQUESTED, APPROVED, APPROVAL_EXPIRED, SUPERSEDED]
     LABELS = {
         DRAFT:              'Draft',
-        SUBMITTED:          'Submitted for Approval',
+        SUBMITTED:          'Internal Review',
+        APPROVAL_SENT:      'Sent to Customer',
         REVISION_REQUESTED: 'Revision Requested',
         APPROVED:           'Approved',
+        APPROVAL_EXPIRED:   'Approval Expired',
         SUPERSEDED:         'Superseded',
     }
+
+    # statuses where the customer is actively expected to respond
+    AWAITING_CUSTOMER = {APPROVAL_SENT}
+    # statuses where downstream actions (quote) are unlocked
+    LOCKED_STATUSES   = {APPROVED}
 
 
 class DesignApproval(db.Model):
@@ -49,6 +59,16 @@ class DesignApproval(db.Model):
     revision_requested_at     = db.Column(db.DateTime, nullable=True)
     revision_requested_reason = db.Column(db.Text, nullable=True)
 
+    # Customer-approval SLA tracking (APPROVAL-SENT / APPROVAL-EXPIRED)
+    sent_at          = db.Column(db.DateTime, nullable=True)
+    sent_by          = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    expires_at       = db.Column(db.DateTime, nullable=True)   # sent_at + sla_days
+    approval_sla_days = db.Column(db.Integer, nullable=False, server_default='10')  # tenant default
+
+    # re-send tracking
+    resent_at  = db.Column(db.DateTime, nullable=True)
+    resent_by  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow,
@@ -71,6 +91,23 @@ class DesignApproval(db.Model):
         except (ValueError, TypeError):
             return {}
 
+    @property
+    def is_expired(self) -> bool:
+        """True when APPROVAL-SENT and the SLA deadline has passed."""
+        if self.status != DesignApprovalStatus.APPROVAL_SENT:
+            return False
+        if not self.expires_at:
+            return False
+        return datetime.utcnow() > self.expires_at
+
+    @property
+    def days_until_expiry(self) -> int | None:
+        """Signed days remaining; negative means already past deadline."""
+        if not self.expires_at:
+            return None
+        delta = self.expires_at - datetime.utcnow()
+        return delta.days
+
     def to_dict(self) -> dict:
         return {
             'id':                        self.id,
@@ -88,6 +125,15 @@ class DesignApproval(db.Model):
             'revision_requested_by':     self.revision_requested_by,
             'revision_requested_at':     self.revision_requested_at.isoformat() if self.revision_requested_at else None,
             'revision_requested_reason': self.revision_requested_reason,
+            # SLA / customer-approval fields
+            'sent_by':                   self.sent_by,
+            'sent_at':                   self.sent_at.isoformat() if self.sent_at else None,
+            'expires_at':                self.expires_at.isoformat() if self.expires_at else None,
+            'approval_sla_days':         self.approval_sla_days,
+            'is_expired':                self.is_expired,
+            'days_until_expiry':         self.days_until_expiry,
+            'resent_at':                 self.resent_at.isoformat() if self.resent_at else None,
+            'resent_by':                 self.resent_by,
             'created_at':                self.created_at.isoformat() if self.created_at else None,
         }
 

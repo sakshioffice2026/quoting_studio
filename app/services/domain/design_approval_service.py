@@ -1,10 +1,13 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ...extensions import db
 from ...repositories import design_approval_repo
 from ...models import Project, Window
-from ...models.design_approval import DesignApprovalStatus
+from ...models.design_approval import DesignApproval, DesignApprovalStatus
+
+# Default SLA if not overridden per-approval (matches doc: auto-reminder day 5 and day 9)
+DEFAULT_APPROVAL_SLA_DAYS = 10
 
 
 def get_approval(tenant_id: int, approval_id: int):
@@ -44,8 +47,9 @@ def submit_for_approval(tenant_id: int, project_id: int, submitted_by: int, surv
     prior = design_approval_repo.get_latest_for_project(tenant_id, project_id)
     next_revision = (prior.revision_number + 1) if prior else 1
 
-    if prior and prior.status in (DesignApprovalStatus.SUBMITTED, DesignApprovalStatus.APPROVED):
-        # supersede the currently active cycle before opening a new one
+    _ACTIVE = (DesignApprovalStatus.SUBMITTED, DesignApprovalStatus.APPROVAL_SENT,
+               DesignApprovalStatus.APPROVED)
+    if prior and prior.status in _ACTIVE:
         design_approval_repo.update(prior, status=DesignApprovalStatus.SUPERSEDED)
 
     snapshot = {str(w.id): w.design_json for w in windows}
@@ -59,16 +63,119 @@ def submit_for_approval(tenant_id: int, project_id: int, submitted_by: int, surv
         design_snapshot_json=json.dumps(snapshot),
         submitted_by=submitted_by,
         submitted_at=datetime.utcnow(),
+        approval_sla_days=DEFAULT_APPROVAL_SLA_DAYS,
     )
     db.session.commit()
     return approval
+
+
+def send_to_customer(
+    tenant_id: int,
+    approval_id: int,
+    sent_by: int,
+    sla_days: int | None = None,
+):
+    """Transition DESIGN-SUBMITTED → APPROVAL-SENT and stamp the SLA deadline."""
+    approval = design_approval_repo.get_by_id(tenant_id, approval_id)
+    if not approval:
+        raise LookupError('Design approval not found')
+    if approval.status != DesignApprovalStatus.SUBMITTED:
+        raise ValueError(
+            f'Only an internally-reviewed design (DESIGN-SUBMITTED) can be sent to the customer; '
+            f'current status is {approval.status}'
+        )
+
+    effective_sla = sla_days or approval.approval_sla_days or DEFAULT_APPROVAL_SLA_DAYS
+    now = datetime.utcnow()
+
+    design_approval_repo.update(
+        approval,
+        status=DesignApprovalStatus.APPROVAL_SENT,
+        sent_by=sent_by,
+        sent_at=now,
+        expires_at=now + timedelta(days=effective_sla),
+        approval_sla_days=effective_sla,
+    )
+    db.session.commit()
+    return approval
+
+
+def resend_to_customer(
+    tenant_id: int,
+    approval_id: int,
+    resent_by: int,
+    sla_days: int | None = None,
+):
+    """Re-open an APPROVAL-EXPIRED approval and restart the SLA clock."""
+    approval = design_approval_repo.get_by_id(tenant_id, approval_id)
+    if not approval:
+        raise LookupError('Design approval not found')
+    if approval.status != DesignApprovalStatus.APPROVAL_EXPIRED:
+        raise ValueError(
+            f'Only an expired approval (APPROVAL-EXPIRED) can be re-sent; '
+            f'current status is {approval.status}'
+        )
+
+    effective_sla = sla_days or approval.approval_sla_days or DEFAULT_APPROVAL_SLA_DAYS
+    now = datetime.utcnow()
+
+    design_approval_repo.update(
+        approval,
+        status=DesignApprovalStatus.APPROVAL_SENT,
+        resent_by=resent_by,
+        resent_at=now,
+        sent_at=now,
+        expires_at=now + timedelta(days=effective_sla),
+        approval_sla_days=effective_sla,
+    )
+    db.session.commit()
+    return approval
+
+
+def expire_approval(tenant_id: int, approval_id: int):
+    """Manually mark a single APPROVAL-SENT record as APPROVAL-EXPIRED."""
+    approval = design_approval_repo.get_by_id(tenant_id, approval_id)
+    if not approval:
+        raise LookupError('Design approval not found')
+    if approval.status != DesignApprovalStatus.APPROVAL_SENT:
+        raise ValueError(
+            f'Only an APPROVAL-SENT record can be expired; current status is {approval.status}'
+        )
+    design_approval_repo.update(approval, status=DesignApprovalStatus.APPROVAL_EXPIRED)
+    db.session.commit()
+    return approval
+
+
+def expire_overdue(tenant_id: int | None = None) -> int:
+    """Batch job: flip every APPROVAL-SENT record past its expires_at to APPROVAL-EXPIRED.
+    Pass tenant_id=None to run across all tenants (cron use-case).
+    Returns the count of records expired.
+    """
+    now = datetime.utcnow()
+    q = DesignApproval.query.filter(
+        DesignApproval.status == DesignApprovalStatus.APPROVAL_SENT,
+        DesignApproval.expires_at.isnot(None),
+        DesignApproval.expires_at < now,
+    )
+    if tenant_id is not None:
+        q = q.filter(DesignApproval.tenant_id == tenant_id)
+
+    overdue = q.all()
+    for approval in overdue:
+        approval.status = DesignApprovalStatus.APPROVAL_EXPIRED
+
+    if overdue:
+        db.session.commit()
+    return len(overdue)
 
 
 def approve(tenant_id: int, approval_id: int, approved_by: int, customer_signoff_notes: str | None = None):
     approval = design_approval_repo.get_by_id(tenant_id, approval_id)
     if not approval:
         raise LookupError('Design approval not found')
-    if approval.status != DesignApprovalStatus.SUBMITTED:
+
+    _approvable = (DesignApprovalStatus.SUBMITTED, DesignApprovalStatus.APPROVAL_SENT)
+    if approval.status not in _approvable:
         raise ValueError(f'Cannot approve a design in status {approval.status}')
 
     design_approval_repo.update(
@@ -79,7 +186,6 @@ def approve(tenant_id: int, approval_id: int, approved_by: int, customer_signoff
         customer_signoff_notes=customer_signoff_notes,
     )
 
-    # version lock: freeze every window's design at this revision
     for window in _project_windows(tenant_id, approval.project_id):
         window.design_locked = True
         window.design_revision = approval.revision_number
@@ -95,7 +201,14 @@ def request_revision(tenant_id: int, approval_id: int, requested_by: int, reason
     approval = design_approval_repo.get_by_id(tenant_id, approval_id)
     if not approval:
         raise LookupError('Design approval not found')
-    if approval.status not in (DesignApprovalStatus.SUBMITTED, DesignApprovalStatus.APPROVED):
+
+    _revisable = (
+        DesignApprovalStatus.SUBMITTED,
+        DesignApprovalStatus.APPROVAL_SENT,
+        DesignApprovalStatus.APPROVAL_EXPIRED,
+        DesignApprovalStatus.APPROVED,
+    )
+    if approval.status not in _revisable:
         raise ValueError(f'Cannot request revision on a design in status {approval.status}')
 
     design_approval_repo.update(
@@ -106,7 +219,6 @@ def request_revision(tenant_id: int, approval_id: int, requested_by: int, reason
         revision_requested_reason=reason.strip(),
     )
 
-    # unlock windows so the design team can edit again
     for window in _project_windows(tenant_id, approval.project_id):
         window.design_locked = False
 

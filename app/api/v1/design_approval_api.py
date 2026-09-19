@@ -87,3 +87,54 @@ def request_revision(approval_id):
         return jsonify(approval.to_dict())
     except (ValueError, LookupError) as exc:
         return _err(exc, 404 if isinstance(exc, LookupError) else 400)
+
+
+@design_approval_api_bp.route('/design-approvals/<int:approval_id>/send', methods=['POST'])
+@login_required
+def send_to_customer(approval_id):
+    """DESIGN-SUBMITTED → APPROVAL-SENT. Optionally pass sla_days to override the default."""
+    data = request.get_json(force=True) or {}
+    try:
+        approval = design_approval_service.send_to_customer(
+            current_user.tenant_id, approval_id, current_user.id,
+            sla_days=data.get('sla_days'),
+        )
+        return jsonify(approval.to_dict())
+    except (ValueError, LookupError) as exc:
+        return _err(exc, 404 if isinstance(exc, LookupError) else 400)
+
+
+@design_approval_api_bp.route('/design-approvals/<int:approval_id>/resend', methods=['POST'])
+@login_required
+def resend_to_customer(approval_id):
+    """APPROVAL-EXPIRED → APPROVAL-SENT (restart SLA clock)."""
+    data = request.get_json(force=True) or {}
+    try:
+        approval = design_approval_service.resend_to_customer(
+            current_user.tenant_id, approval_id, current_user.id,
+            sla_days=data.get('sla_days'),
+        )
+        return jsonify(approval.to_dict())
+    except (ValueError, LookupError) as exc:
+        return _err(exc, 404 if isinstance(exc, LookupError) else 400)
+
+
+@design_approval_api_bp.route('/design-approvals/<int:approval_id>/expire', methods=['POST'])
+@login_required
+def expire(approval_id):
+    """Manually mark an APPROVAL-SENT record as APPROVAL-EXPIRED."""
+    try:
+        approval = design_approval_service.expire_approval(current_user.tenant_id, approval_id)
+        return jsonify(approval.to_dict())
+    except (ValueError, LookupError) as exc:
+        return _err(exc, 404 if isinstance(exc, LookupError) else 400)
+
+
+@design_approval_api_bp.route('/design-approvals/expire-overdue', methods=['POST'])
+@login_required
+def expire_overdue():
+    """Batch: flip all APPROVAL-SENT records past their SLA deadline to APPROVAL-EXPIRED.
+    Intended for a cron/scheduler to call — scoped to current tenant.
+    """
+    count = design_approval_service.expire_overdue(current_user.tenant_id)
+    return jsonify({'expired_count': count})

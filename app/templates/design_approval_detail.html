@@ -8,23 +8,81 @@
     <div class="page-header">
       <div>
         <h1>{{ approval.project.customer_name if approval.project else 'Design Approval' }}</h1>
-        <div class="sub mono">Revision {{ approval.revision_number }} · {{ approval.status_label }}</div>
+        <div class="sub mono">Revision {{ approval.revision_number }}
+          · <span class="badge badge--{{ approval.status | lower | replace('-','_') }}">{{ approval.status_label }}</span>
+          {% if approval.status == DesignApprovalStatus.APPROVAL_SENT and approval.days_until_expiry is not none %}
+            {% if approval.days_until_expiry >= 0 %}
+              · <span class="muted" style="font-size:12px;">expires in {{ approval.days_until_expiry }} day{{ 's' if approval.days_until_expiry != 1 }}</span>
+            {% else %}
+              · <span style="color:var(--red, #c0392b); font-size:12px;">overdue by {{ (approval.days_until_expiry * -1) }} day{{ 's' if approval.days_until_expiry != -1 }}</span>
+            {% endif %}
+          {% endif %}
+        </div>
       </div>
     </div>
 
+    {# ── Timeline info ── #}
     <div style="max-width:640px;">
-      <p><strong>Submitted:</strong> {{ approval.submitted_at.strftime('%Y-%m-%d %H:%M') if approval.submitted_at else '—' }}</p>
-      <p><strong>Approved:</strong> {{ approval.approved_at.strftime('%Y-%m-%d %H:%M') if approval.approved_at else '—' }}</p>
+      <p><strong>Submitted (internal):</strong> {{ approval.submitted_at.strftime('%Y-%m-%d %H:%M') if approval.submitted_at else '—' }}</p>
+
+      {% if approval.sent_at %}
+      <p><strong>Sent to customer:</strong> {{ approval.sent_at.strftime('%Y-%m-%d %H:%M') }}
+        {% if approval.expires_at %} · <strong>SLA deadline:</strong> {{ approval.expires_at.strftime('%Y-%m-%d') }} ({{ approval.approval_sla_days }} days){% endif %}
+      </p>
+      {% endif %}
+
+      {% if approval.resent_at %}
+      <p><strong>Re-sent to customer:</strong> {{ approval.resent_at.strftime('%Y-%m-%d %H:%M') }}</p>
+      {% endif %}
+
+      {% if approval.approved_at %}
+      <p><strong>Approved:</strong> {{ approval.approved_at.strftime('%Y-%m-%d %H:%M') }}</p>
+      {% endif %}
+
       {% if approval.revision_requested_reason %}
       <p><strong>Revision requested:</strong> {{ approval.revision_requested_reason }}</p>
       {% endif %}
+
       {% if approval.customer_signoff_notes %}
       <p><strong>Sign-off notes:</strong> {{ approval.customer_signoff_notes }}</p>
       {% endif %}
     </div>
 
-    {% if approval.status == 'DESIGN-SUBMITTED' %}
-    <div style="margin-top:24px; display:flex; gap:24px;">
+    {# ══════════════════════════════════════════════
+       ACTION PANELS — one per actionable status
+       ══════════════════════════════════════════════ #}
+
+    {# ── DESIGN-SUBMITTED → Send to Customer ── #}
+    {% if approval.status == DesignApprovalStatus.SUBMITTED %}
+    <div style="margin-top:24px; display:flex; gap:24px; flex-wrap:wrap;">
+
+      <form method="POST" action="{{ url_for('design_approval.send_to_customer', approval_id=approval.id) }}" style="max-width:400px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label class="form-label" for="sla_days">SLA days for customer response</label>
+          <input type="number" class="form-control" id="sla_days" name="sla_days"
+                 value="{{ approval.approval_sla_days or 10 }}" min="1" max="90">
+          <div class="form-hint">Customer will have this many days to respond before the approval expires.</div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Send to Customer →</button>
+      </form>
+
+      <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:400px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label class="form-label" for="reason">Internal revision reason</label>
+          <textarea class="form-control" id="reason" name="reason" rows="2" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Request Internal Revision</button>
+      </form>
+
+    </div>
+    {% endif %}
+
+    {# ── APPROVAL-SENT → Approve or Request Revision ── #}
+    {% if approval.status == DesignApprovalStatus.APPROVAL_SENT %}
+    <div style="margin-top:24px; display:flex; gap:24px; flex-wrap:wrap;">
+
       <form method="POST" action="{{ url_for('design_approval.approve', approval_id=approval.id) }}" style="max-width:480px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
@@ -37,13 +95,54 @@
       <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:480px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
-          <label class="form-label" for="reason">Revision reason</label>
+          <label class="form-label" for="reason">Revision reason (from customer)</label>
           <textarea class="form-control" id="reason" name="reason" rows="2" required></textarea>
         </div>
-        <button type="submit" class="btn btn-secondary btn-sm">Request Revision</button>
+        <button type="submit" class="btn btn-secondary btn-sm">Customer Requested Revision</button>
+      </form>
+
+    </div>
+
+    {# Manual expire for admin use #}
+    <div style="margin-top:16px;">
+      <form method="POST" action="{{ url_for('design_approval.expire', approval_id=approval.id) }}"
+            onsubmit="return confirm('Mark this approval as expired?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-secondary btn-sm" style="font-size:11px; opacity:0.7;">
+          Mark as Expired (admin)
+        </button>
       </form>
     </div>
-    {% elif approval.status == 'DESIGN-APPROVED' %}
+    {% endif %}
+
+    {# ── APPROVAL-EXPIRED → Re-send or Revise ── #}
+    {% if approval.status == DesignApprovalStatus.APPROVAL_EXPIRED %}
+    <div style="margin-top:24px; display:flex; gap:24px; flex-wrap:wrap;">
+
+      <form method="POST" action="{{ url_for('design_approval.resend_to_customer', approval_id=approval.id) }}" style="max-width:400px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label class="form-label" for="sla_days_resend">New SLA days</label>
+          <input type="number" class="form-control" id="sla_days_resend" name="sla_days"
+                 value="{{ approval.approval_sla_days or 10 }}" min="1" max="90">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Re-send to Customer →</button>
+      </form>
+
+      <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:400px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label class="form-label" for="reason_expired">Revision reason</label>
+          <textarea class="form-control" id="reason_expired" name="reason" rows="2" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Request Revision Instead</button>
+      </form>
+
+    </div>
+    {% endif %}
+
+    {# ── DESIGN-APPROVED → allow re-opening ── #}
+    {% if approval.status == DesignApprovalStatus.APPROVED %}
     <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:480px; margin-top:24px;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-group">
@@ -53,6 +152,7 @@
       <button type="submit" class="btn btn-secondary btn-sm">Request Revision</button>
     </form>
     {% endif %}
+
   </div>
 </div>
 {% endblock %}
