@@ -403,6 +403,11 @@ body { overflow:hidden; }
       <a href="{{ url_for('editor.edit', project_id=project.id, window_id=next_window.id) }}"
          class="btn btn-primary btn-sm"
          onclick="event.preventDefault();saveAndNext(this.href)">Save &amp; Next →</a>
+      {% else %}
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}"
+         class="btn btn-primary btn-sm"
+         style="background:var(--sage);"
+         onclick="event.preventDefault();saveAndNext(this.href)">✓ Save &amp; Finish — Back to Project</a>
       {% endif %}
       <button class="btn btn-primary btn-sm" onclick="sendToVisualiser()"
               style="background:var(--sage);">→ Visualise</button>

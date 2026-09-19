@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}Design Approvals — Quoting Studio{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  <aside class="dash-sidebar">
+    <a href="{{ url_for('dashboard.index') }}" class="dash-sidebar-item">Projects</a>
+    <a href="{{ url_for('leads.index') }}" class="dash-sidebar-item">Leads</a>
+    <a href="{{ url_for('customers.index') }}" class="dash-sidebar-item">Customers</a>
+    <a href="{{ url_for('design_approval.index') }}" class="dash-sidebar-item active">Design Approvals</a>
+    <a href="{{ url_for('reports.index') }}" class="dash-sidebar-item">Reports</a>
+  </aside>
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div>
+        <h1>Design Approvals</h1>
+        <div class="sub mono">{{ approvals|length }} record{{ 's' if approvals|length != 1 }}</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <a href="{{ url_for('design_approval.index') }}" class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
+      {% for code in DesignApprovalStatus.ALL %}
+      <a href="{{ url_for('design_approval.index', status=code) }}"
+         class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">{{ DesignApprovalStatus.LABELS[code] }}</a>
+      {% endfor %}
+    </div>
+
+    {% if approvals %}
+    <table class="data-table">
+      <thead>
+        <tr><th>Project</th><th>Revision</th><th>Status</th><th>Submitted</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for a in approvals %}
+        <tr>
+          <td style="font-weight:600;">{{ a.project.customer_name if a.project else '—' }}</td>
+          <td class="mono" style="font-size:12px;">Rev {{ a.revision_number }}</td>
+          <td><span class="badge">{{ a.status_label }}</span></td>
+          <td class="muted" style="font-size:12px;">{{ a.submitted_at.strftime('%Y-%m-%d') if a.submitted_at else '—' }}</td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('design_approval.detail', approval_id=a.id) }}" class="btn btn-secondary btn-sm">View →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+      <div class="icon">◱</div>
+      <p>No design approvals yet. Submit a project's design from its project page.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

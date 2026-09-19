@@ -6,6 +6,7 @@
     <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
     <a href="{{ url_for('leads.index') }}"      class="dash-sidebar-item active">Leads</a>
     <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item">Customers</a>
+    <a href="{{ url_for('design_approval.index') }}" class="dash-sidebar-item">Design Approvals</a>
     <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item">Reports</a>
   </aside>
 
@@ -19,6 +20,28 @@
           {% if survey.scheduled_date %} · Scheduled {{ survey.scheduled_date.strftime('%Y-%m-%d') }}{% endif %}
         </div>
       </div>
+      {% if survey.project_id %}
+      <div class="flex gap-8">
+        {% if latest_design_approval %}
+        <a href="{{ url_for('design_approval.detail', approval_id=latest_design_approval.id) }}" class="btn btn-secondary btn-sm">
+          Design: {{ latest_design_approval.status_label }}
+        </a>
+        {% if latest_design_approval.status in ('DESIGN-REVISION_REQUESTED', 'DESIGN-SUPERSEDED') %}
+        <form method="POST" action="{{ url_for('design_approval.submit', project_id=survey.project_id) }}" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="survey_id" value="{{ survey.id }}">
+          <button type="submit" class="btn btn-primary btn-sm">Resubmit for Design Approval</button>
+        </form>
+        {% endif %}
+        {% else %}
+        <form method="POST" action="{{ url_for('design_approval.submit', project_id=survey.project_id) }}" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="survey_id" value="{{ survey.id }}">
+          <button type="submit" class="btn btn-primary btn-sm">Submit for Design Approval</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
 
     <p>
@@ -62,7 +85,11 @@
             </td>
             <td class="muted" style="font-size:12px;">{{ o.site_condition_notes or '' }}</td>
             <td>
-              <form method="POST" action="{{ url_for('survey.delete_opening', survey_id=survey.id, opening_id=o.id) }}">
+              {% if survey.project_id %}
+              <a href="{{ url_for('projects.choose_unit', project_id=survey.project_id, opening_id=o.id) }}"
+                 class="btn btn-primary btn-sm">+ Add unit</a>
+              {% endif %}
+              <form method="POST" action="{{ url_for('survey.delete_opening', survey_id=survey.id, opening_id=o.id) }}" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-secondary btn-sm">Remove</button>
               </form>

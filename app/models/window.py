@@ -30,6 +30,12 @@ class Window(db.Model):
     frame_colour_name= db.Column(db.String(80), nullable=False, default='Anthracite')
     sequence_order   = db.Column(db.Integer, nullable=False, default=0)
     design_json      = db.Column(db.Text, nullable=True)
+    design_locked    = db.Column(db.Boolean, nullable=False, default=False)
+    design_revision  = db.Column(db.Integer, nullable=False, default=0)
+    survey_opening_id = db.Column(
+        db.Integer, db.ForeignKey('survey_openings.id'), nullable=True, index=True)
+    survey_opening    = db.relationship('SurveyOpening',
+                                        backref=db.backref('windows', lazy='dynamic'))
     # Optional: pin a specific ProfileSystem for this window/door.
     # NULL → frame_assembly falls back to role-default lookup.
     profile_system_id = db.Column(

@@ -139,8 +139,12 @@ def flow(lead_id):
         flash('Lead not found.', 'error')
         return redirect(url_for('leads.index'))
 
+    from ..services.domain import design_approval_service
+
     presel = preliminary_selection_service.get_by_lead(current_user.tenant_id, lead_id)
     survey = survey_service.get_by_lead(current_user.tenant_id, lead_id)
+    design_approval = (design_approval_service.get_latest_for_project(current_user.tenant_id, lead.project_id)
+                        if lead.project_id else None)
 
     def not_started():
         return {'implemented': False, 'status_label': 'Not started', 'group': 'pending', 'url': None}
@@ -186,13 +190,29 @@ def flow(lead_id):
             'number': 5, 'key': 'design', 'group': 'design',
             'label': 'Design & Specs', 'title': 'Configurator & BOM',
             'subtitle': 'Select Profiles, Generate Drawings, BOM',
-            **not_started(),
+            **({
+                'implemented': True,
+                'status_label': design_approval.status_label,
+                'url': url_for('design_approval.detail', approval_id=design_approval.id),
+            } if design_approval else (
+                {
+                    'implemented': True,
+                    'status_label': 'In Progress',
+                    'url': url_for('projects.detail', project_id=lead.project_id),
+                } if lead.project_id else not_started()
+            )),
         },
         {
             'number': 6, 'key': 'approval', 'group': 'design',
             'label': 'Customer Approval', 'title': 'Design Sign-off',
             'subtitle': 'Share Drawings & BOM, Get Customer Approval',
-            **not_started(),
+            **({
+                'implemented': True,
+                'status_label': design_approval.status_label,
+                'url': url_for('design_approval.detail', approval_id=design_approval.id),
+            } if design_approval and design_approval.status in (
+                'DESIGN-SUBMITTED', 'DESIGN-APPROVED', 'DESIGN-REVISION_REQUESTED'
+            ) else not_started()),
         },
         {
             'number': 7, 'key': 'quotation', 'group': 'design',

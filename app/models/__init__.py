@@ -16,6 +16,7 @@ from .lead import Lead, LeadStatus, FollowUpStatus, ProductInterest, SourceChann
 from .interaction import Interaction, InteractionType, InteractionOutcome, QualificationScore
 from .preliminary_selection import PreliminarySelection, PreselStatus
 from .survey import Survey, SurveyOpening, SurveyStatus
+from .design_approval import DesignApproval, DesignApprovalStatus
 
 __all__ = [
     'Tenant',
@@ -36,4 +37,5 @@ __all__ = [
     'Interaction', 'InteractionType', 'InteractionOutcome', 'QualificationScore',
     'PreliminarySelection', 'PreselStatus',
     'Survey', 'SurveyOpening', 'SurveyStatus',
+    'DesignApproval', 'DesignApprovalStatus',
 ]

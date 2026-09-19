@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Design Approval — Quoting Studio{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  <aside class="dash-sidebar">
+    <a href="{{ url_for('dashboard.index') }}" class="dash-sidebar-item">Projects</a>
+    <a href="{{ url_for('leads.index') }}" class="dash-sidebar-item">Leads</a>
+    <a href="{{ url_for('customers.index') }}" class="dash-sidebar-item">Customers</a>
+    <a href="{{ url_for('design_approval.index') }}" class="dash-sidebar-item active">Design Approvals</a>
+    <a href="{{ url_for('reports.index') }}" class="dash-sidebar-item">Reports</a>
+  </aside>
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div>
+        <h1>{{ approval.project.customer_name if approval.project else 'Design Approval' }}</h1>
+        <div class="sub mono">Revision {{ approval.revision_number }} · {{ approval.status_label }}</div>
+      </div>
+    </div>
+
+    <div style="max-width:640px;">
+      <p><strong>Submitted:</strong> {{ approval.submitted_at.strftime('%Y-%m-%d %H:%M') if approval.submitted_at else '—' }}</p>
+      <p><strong>Approved:</strong> {{ approval.approved_at.strftime('%Y-%m-%d %H:%M') if approval.approved_at else '—' }}</p>
+      {% if approval.revision_requested_reason %}
+      <p><strong>Revision requested:</strong> {{ approval.revision_requested_reason }}</p>
+      {% endif %}
+      {% if approval.customer_signoff_notes %}
+      <p><strong>Sign-off notes:</strong> {{ approval.customer_signoff_notes }}</p>
+      {% endif %}
+    </div>
+
+    {% if approval.status == 'DESIGN-SUBMITTED' %}
+    <div style="margin-top:24px; display:flex; gap:24px;">
+      <form method="POST" action="{{ url_for('design_approval.approve', approval_id=approval.id) }}" style="max-width:480px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label class="form-label" for="customer_signoff_notes">Customer sign-off notes</label>
+          <textarea class="form-control" id="customer_signoff_notes" name="customer_signoff_notes" rows="2"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Approve &amp; Lock Design</button>
+      </form>
+
+      <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:480px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label class="form-label" for="reason">Revision reason</label>
+          <textarea class="form-control" id="reason" name="reason" rows="2" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Request Revision</button>
+      </form>
+    </div>
+    {% elif approval.status == 'DESIGN-APPROVED' %}
+    <form method="POST" action="{{ url_for('design_approval.request_revision', approval_id=approval.id) }}" style="max-width:480px; margin-top:24px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label class="form-label" for="reason">Reopen for revision — reason</label>
+        <textarea class="form-control" id="reason" name="reason" rows="2" required></textarea>
+      </div>
+      <button type="submit" class="btn btn-secondary btn-sm">Request Revision</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

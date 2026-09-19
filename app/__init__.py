@@ -37,6 +37,7 @@ def create_app(config_name=None):
             ProductSeries, WindowStyle,
             Customer, Lead, Interaction,
             PreliminarySelection, Survey, SurveyOpening,
+            DesignApproval,
         )
 
     # register blueprints
@@ -45,6 +46,7 @@ def create_app(config_name=None):
     from .routes.leads import leads_bp
     from .routes.preliminary_selection import presel_bp
     from .routes.survey import survey_bp
+    from .routes.design_approval import design_approval_bp
     from .routes.reports import reports_bp
     from .routes.model3d_route import model3d_bp
     from .routes.settings import settings_bp
@@ -60,6 +62,7 @@ def create_app(config_name=None):
     app.register_blueprint(leads_bp)
     app.register_blueprint(presel_bp)
     app.register_blueprint(survey_bp)
+    app.register_blueprint(design_approval_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(model3d_bp)
     app.register_blueprint(settings_bp)

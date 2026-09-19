@@ -44,13 +44,17 @@ def schedule(presel_id):
 @survey_bp.route('/surveys/<int:survey_id>')
 @login_required
 def detail(survey_id):
+    from ..services.domain import design_approval_service
     survey = survey_service.get_survey(current_user.tenant_id, survey_id)
     if not survey:
         flash('Survey not found.', 'error')
         return redirect(url_for('leads.index'))
     lead = lead_service.get_lead(current_user.tenant_id, survey.lead_id)
     openings = survey.openings.all()
-    return render_template('survey_detail.html', survey=survey, lead=lead, openings=openings)
+    latest_design_approval = design_approval_service.get_latest_for_project(
+        current_user.tenant_id, survey.project_id)
+    return render_template('survey_detail.html', survey=survey, lead=lead, openings=openings,
+                           latest_design_approval=latest_design_approval)
 
 
 @survey_bp.route('/surveys/<int:survey_id>/reschedule', methods=['POST'])
@@ -116,8 +120,10 @@ def accept_issues(survey_id):
 @login_required
 def complete(survey_id):
     try:
-        survey_service.complete_survey(current_user.tenant_id, survey_id)
-        flash('Survey completed. Ready to move to Design & Specs.', 'success')
+        survey = survey_service.complete_survey(current_user.tenant_id, survey_id)
+        flash('Survey completed. Add windows/doors, then submit for design approval.', 'success')
+        if survey.project_id:
+            return redirect(url_for('projects.detail', project_id=survey.project_id))
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
     return redirect(url_for('survey.detail', survey_id=survey_id))

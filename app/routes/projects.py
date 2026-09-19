@@ -59,16 +59,20 @@ def detail(project_id):
     try:
         from ..models import Quote
         from sqlalchemy import desc
+        from ..services.domain import design_approval_service
         project = _own_project(project_id)
         windows = project.windows.all()
         quotes  = (Quote.query
                    .filter_by(project_id=project_id, tenant_id=current_user.tenant_id)
                    .order_by(desc(Quote.created_at))
                    .all())
+        latest_design_approval = design_approval_service.get_latest_for_project(
+            current_user.tenant_id, project_id)
         current_app.logger.debug('Project detail: id=%d tenant=%d windows=%d quotes=%d',
                                   project_id, current_user.tenant_id, len(windows), len(quotes))
         return render_template('projects/detail.html',
-                               project=project, windows=windows, quotes=quotes)
+                               project=project, windows=windows, quotes=quotes,
+                               latest_design_approval=latest_design_approval)
     except Exception as exc:
         current_app.logger.exception('Error loading project detail id=%d: %s', project_id, exc)
         flash('Could not load project.', 'error')
@@ -219,7 +223,13 @@ def delete(project_id):
 def choose_unit(project_id):
     """Step 1/2 page: pick window vs door, then a template."""
     project = _own_project(project_id)
-    return render_template('projects/choose_unit.html', project=project)
+    opening = None
+    opening_id = request.args.get('opening_id', type=int)
+    if opening_id:
+        from ..models import SurveyOpening
+        opening = SurveyOpening.query.filter_by(
+            tenant_id=current_user.tenant_id, id=opening_id).first()
+    return render_template('projects/choose_unit.html', project=project, opening=opening)
 
 
 # Template pane layouts (server mirror of drawing-engine.js TEMPLATES).
@@ -340,9 +350,21 @@ def add_unit(project_id):
         unit_type = request.form.get('unit_type', 'window')
         tpl_key   = request.form.get('template_key', 'single')
         tpl_name  = request.form.get('template_name', '').strip()
+        opening_id = request.form.get('opening_id', type=int)
+
+        opening = None
+        if opening_id:
+            from ..models import SurveyOpening
+            opening = SurveyOpening.query.filter_by(
+                tenant_id=current_user.tenant_id, id=opening_id).first()
 
         seq = project.windows.count()
-        default_label = ('Door' if unit_type == 'door' else 'Window') + f' {seq + 1}'
+        if opening:
+            default_label = opening.opening_label
+            if opening.location_room:
+                default_label += f' ({opening.location_room})'
+        else:
+            default_label = ('Door' if unit_type == 'door' else 'Window') + f' {seq + 1}'
         label = tpl_name and f'{default_label} · {tpl_name}' or default_label
 
         # sensible default sizes: doors are taller/narrower than windows
@@ -350,6 +372,12 @@ def add_unit(project_id):
             width, height = 900, 2100
         else:
             width, height = 1200, 1400
+
+        # surveyed measurements override defaults when this unit comes from an Opening
+        if opening and opening.measured_width_mm:
+            width = opening.measured_width_mm
+        if opening and opening.measured_height_mm:
+            height = opening.measured_height_mm
 
         material   = 'Aluminium'
         colour_hex = '#2B2F33'
@@ -365,6 +393,7 @@ def add_unit(project_id):
             frame_colour_hex=colour_hex,
             frame_colour_name=colour_nm,
             sequence_order=seq,
+            survey_opening_id=opening.id if opening else None,
             design_json=_build_design_json(tpl_key, width, height,
                                            material, colour_hex, colour_nm),
         )

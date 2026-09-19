@@ -7,8 +7,22 @@ from ...services.cad.engineering_dxf import generate_engineering_dxf
 from ...services.cad.orthographic_dxf import generate_orthographic_dxf
 from ...services.cad.canonical_geometry import assert_legacy_panes_match, sync_legacy_panes
 from ._helpers import _own_window, _validate_or_400
+from ...services.domain import design_approval_service
 
 cad_bp = Blueprint('api_v1_cad', __name__)
+
+
+def _require_design_approved(window):
+    """Gate: final engineering/manufacturing output requires an APPROVED
+    design_approval on the window's project. Preview formats (svg/pdf
+    techdraw, plain dxf) stay open for internal design review."""
+    if not design_approval_service.is_project_approved(current_user.tenant_id, window.project_id):
+        return jsonify({
+            'error': 'Design not approved',
+            'message': 'This project\'s design must be approved before manufacturing-grade '
+                       'output (DXF/DWG/3D) can be exported.',
+        }), 409
+    return None
 
 
 # GET /api/v1/oda-status
@@ -94,6 +108,9 @@ def export_techdraw(window_id, fmt):
 def export_dwg(window_id):
     try:
         window = _own_window(window_id)
+        gate = _require_design_approved(window)
+        if gate:
+            return gate
         panes  = window.panes.all()
         try:
             assert_legacy_panes_match(window, panes)
@@ -135,6 +152,9 @@ def export_dwg(window_id):
 def export_engineering_dxf(window_id):
     try:
         window = _own_window(window_id)
+        gate = _require_design_approved(window)
+        if gate:
+            return gate
         panes  = window.panes.all()
         try:
             assert_legacy_panes_match(window, panes)
@@ -166,6 +186,9 @@ def export_engineering_dxf(window_id):
 def export_orthographic_dxf(window_id):
     try:
         window = _own_window(window_id)
+        gate = _require_design_approved(window)
+        if gate:
+            return gate
         panes  = window.panes.all()
         try:
             assert_legacy_panes_match(window, panes)
@@ -272,6 +295,9 @@ def export_3d(window_id, fmt):
 
     try:
         window = _own_window(window_id)
+        gate = _require_design_approved(window)
+        if gate:
+            return gate
         panes  = window.panes.all()
         try:
             assert_legacy_panes_match(window, panes)
