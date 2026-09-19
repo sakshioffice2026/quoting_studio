@@ -15,6 +15,7 @@ from .customer import Customer
 from .lead import Lead, LeadStatus, FollowUpStatus, ProductInterest, SourceChannel
 from .interaction import Interaction, InteractionType, InteractionOutcome, QualificationScore
 from .preliminary_selection import PreliminarySelection, PreselStatus
+from .survey import Survey, SurveyOpening, SurveyStatus
 
 __all__ = [
     'Tenant',
@@ -34,4 +35,5 @@ __all__ = [
     'Lead', 'LeadStatus', 'FollowUpStatus', 'ProductInterest', 'SourceChannel',
     'Interaction', 'InteractionType', 'InteractionOutcome', 'QualificationScore',
     'PreliminarySelection', 'PreselStatus',
+    'Survey', 'SurveyOpening', 'SurveyStatus',
 ]

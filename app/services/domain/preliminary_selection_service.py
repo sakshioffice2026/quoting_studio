@@ -115,8 +115,10 @@ def drop(tenant_id: int, presel_id: int, notes: str | None = None):
     return presel
 
 
-def confirm_survey(tenant_id: int, presel_id: int):
-    """Approval gate: customer agrees to a paid/scheduled site survey -> moves to Survey (Phase 3).
+def confirm_survey(tenant_id: int, presel_id: int, created_by: int,
+                    scheduled_date=None, surveyor_name=None, notes=None):
+    """Approval gate: customer agrees to a paid/scheduled site survey -> creates
+    the Survey record and moves to Survey (Phase 3).
     Requires PRESEL-SHORTLISTED and survey_required=True."""
     presel = preliminary_selection_repo.get_by_id(tenant_id, presel_id)
     if not presel:
@@ -125,7 +127,16 @@ def confirm_survey(tenant_id: int, presel_id: int):
         raise ValueError('Preliminary selection must be PRESEL-SHORTLISTED before survey can be scheduled')
     if not presel.survey_required:
         raise ValueError('This preliminary selection does not require a survey')
-    return presel
+
+    from . import survey_service
+    return survey_service.schedule_survey(
+        tenant_id=tenant_id,
+        presel_id=presel_id,
+        created_by=created_by,
+        scheduled_date=scheduled_date,
+        surveyor_name=surveyor_name,
+        notes=notes,
+    )
 
 
 def delete_preselection(tenant_id: int, presel_id: int):

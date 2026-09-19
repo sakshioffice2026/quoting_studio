@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, current_app, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 
-from ..services.domain import preliminary_selection_service, lead_service
+from ..services.domain import preliminary_selection_service, lead_service, survey_service
 
 presel_bp = Blueprint('presel', __name__)
 
@@ -31,7 +31,8 @@ def detail(presel_id):
         flash('Preliminary selection not found.', 'error')
         return redirect(url_for('leads.index'))
     lead = lead_service.get_lead(current_user.tenant_id, presel.lead_id)
-    return render_template('presel_detail.html', presel=presel, lead=lead)
+    latest_survey = survey_service.get_by_presel(current_user.tenant_id, presel.id)
+    return render_template('presel_detail.html', presel=presel, lead=lead, latest_survey=latest_survey)
 
 
 @presel_bp.route('/preliminary-selections/<int:presel_id>/update', methods=['POST'])
@@ -91,8 +92,15 @@ def drop(presel_id):
 @login_required
 def confirm_survey(presel_id):
     try:
-        preliminary_selection_service.confirm_survey(current_user.tenant_id, presel_id)
-        flash('Survey confirmed. Ready to move to Survey stage.', 'success')
+        survey = preliminary_selection_service.confirm_survey(
+            current_user.tenant_id, presel_id,
+            created_by=current_user.id,
+            scheduled_date=None,
+            surveyor_name=request.form.get('surveyor_name') or None,
+            notes=None,
+        )
+        flash('Survey confirmed and scheduled.', 'success')
+        return redirect(url_for('survey.detail', survey_id=survey.id))
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
-    return redirect(url_for('presel.detail', presel_id=presel_id))
+        return redirect(url_for('presel.detail', presel_id=presel_id))

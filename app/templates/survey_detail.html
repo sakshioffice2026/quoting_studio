@@ -1,0 +1,160 @@
+{% extends 'base.html' %}
+{% block title %}Survey — {{ lead.customer_name }}{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  <aside class="dash-sidebar">
+    <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
+    <a href="{{ url_for('leads.index') }}"      class="dash-sidebar-item active">Leads</a>
+    <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item">Customers</a>
+    <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item">Reports</a>
+  </aside>
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div>
+        <h1>Survey</h1>
+        <div class="sub mono">
+          {{ lead.customer_name }} · {{ survey.status_label }}
+          {% if survey.project_id %} · Project #{{ survey.project_id }}{% endif %}
+          {% if survey.scheduled_date %} · Scheduled {{ survey.scheduled_date.strftime('%Y-%m-%d') }}{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <p>
+      <a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">← Back to lead</a>
+      {% if survey.presel_id %}
+      <a href="{{ url_for('presel.detail', presel_id=survey.presel_id) }}" class="btn btn-secondary btn-sm">← Preliminary selection</a>
+      {% endif %}
+    </p>
+
+    {% if survey.status == 'SURVEY-ISSUES_FOUND' %}
+    <div class="alert" style="background:#fff3cd; padding:10px 14px; border-radius:6px; margin:12px 0; max-width:800px;">
+      Site issues flagged on one or more openings. Resolve on-site or have the customer accept them before completing the survey.
+    </div>
+    {% endif %}
+
+    <div style="max-width:800px; margin-top:16px;">
+      <h3>Openings ({{ survey.opening_count }})</h3>
+      <table class="table" style="width:100%;">
+        <thead>
+          <tr>
+            <th>Label</th><th>Room</th><th>W×H (mm)</th><th>Wall (mm)</th><th>Sill (mm)</th>
+            <th>Issues</th><th>Notes</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in openings %}
+          <tr>
+            <td class="mono">{{ o.opening_label }}</td>
+            <td>{{ o.location_room or '—' }}</td>
+            <td class="mono">
+              {{ o.measured_width_mm if o.measured_width_mm is not none else '—' }}
+              ×
+              {{ o.measured_height_mm if o.measured_height_mm is not none else '—' }}
+            </td>
+            <td class="mono">{{ o.wall_thickness_mm if o.wall_thickness_mm is not none else '—' }}</td>
+            <td class="mono">{{ o.sill_height_mm if o.sill_height_mm is not none else '—' }}</td>
+            <td>
+              {% if o.site_issue_flag_list %}
+              <span style="color:#b45309;">{{ o.site_issue_flag_list | join(', ') }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="muted" style="font-size:12px;">{{ o.site_condition_notes or '' }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('survey.delete_opening', survey_id=survey.id, opening_id=o.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-secondary btn-sm">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="muted">No openings measured yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <h3 style="margin-top:24px;">Add opening</h3>
+      <form method="POST" action="{{ url_for('survey.add_opening', survey_id=survey.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div style="display:flex; gap:12px;">
+          <div class="form-group" style="flex:1;">
+            <label class="form-label" for="opening_label">Opening label</label>
+            <input class="form-control" type="text" id="opening_label" name="opening_label" placeholder="e.g. L16" required>
+          </div>
+          <div class="form-group" style="flex:2;">
+            <label class="form-label" for="location_room">Location / room</label>
+            <input class="form-control" type="text" id="location_room" name="location_room">
+          </div>
+        </div>
+
+        <div style="display:flex; gap:12px;">
+          <div class="form-group" style="flex:1;">
+            <label class="form-label" for="measured_width_mm">Measured width (mm)</label>
+            <input class="form-control" type="number" min="0" id="measured_width_mm" name="measured_width_mm">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label class="form-label" for="measured_height_mm">Measured height (mm)</label>
+            <input class="form-control" type="number" min="0" id="measured_height_mm" name="measured_height_mm">
+          </div>
+        </div>
+
+        <div style="display:flex; gap:12px;">
+          <div class="form-group" style="flex:1;">
+            <label class="form-label" for="wall_thickness_mm">Wall thickness (mm)</label>
+            <input class="form-control" type="number" min="0" id="wall_thickness_mm" name="wall_thickness_mm">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label class="form-label" for="sill_height_mm">Sill height (mm)</label>
+            <input class="form-control" type="number" min="0" id="sill_height_mm" name="sill_height_mm">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="site_condition_notes">Site condition notes</label>
+          <textarea class="form-control" id="site_condition_notes" name="site_condition_notes" rows="2"
+                    placeholder="Masonry type, existing frame, access constraints, services nearby..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="site_issue_flags">Site issue flags (comma-separated)</label>
+          <input class="form-control" type="text" id="site_issue_flags" name="site_issue_flags"
+                 placeholder="e.g. out-of-square, damp, structural">
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-sm">Add opening</button>
+      </form>
+
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:24px;">
+        {% if survey.status == 'SURVEY-ISSUES_FOUND' %}
+        <form method="POST" action="{{ url_for('survey.accept_issues', survey_id=survey.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-secondary btn-sm">Customer accepts issues as-is</button>
+        </form>
+        {% endif %}
+
+        {% if survey.status != 'SURVEY-COMPLETED' %}
+        <form method="POST" action="{{ url_for('survey.complete', survey_id=survey.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary btn-sm">Complete survey →</button>
+        </form>
+        {% endif %}
+
+        <details style="margin-left:auto;">
+          <summary class="btn btn-secondary btn-sm" style="display:inline-block; cursor:pointer;">Reschedule</summary>
+          <form method="POST" action="{{ url_for('survey.reschedule', survey_id=survey.id) }}"
+                style="margin-top:8px; display:flex; gap:8px; align-items:end;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+              <label class="form-label" for="scheduled_date">New date</label>
+              <input class="form-control" type="date" id="scheduled_date" name="scheduled_date">
+            </div>
+            <button type="submit" class="btn btn-secondary btn-sm">Save new date</button>
+          </form>
+        </details>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

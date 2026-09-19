@@ -112,9 +112,16 @@ def drop_preselection(presel_id):
 @presel_api_bp.route('/preliminary-selections/<int:presel_id>/confirm-survey', methods=['POST'])
 @login_required
 def confirm_survey(presel_id):
+    data = request.get_json(silent=True) or {}
     try:
-        presel = preliminary_selection_service.confirm_survey(current_user.tenant_id, presel_id)
-        return jsonify(presel.to_dict())
+        survey = preliminary_selection_service.confirm_survey(
+            current_user.tenant_id, presel_id,
+            created_by=current_user.id,
+            scheduled_date=None,
+            surveyor_name=data.get('surveyor_name'),
+            notes=data.get('notes'),
+        )
+        return jsonify(survey.to_dict())
     except ValueError as exc:
         return _err(exc)
     except LookupError as exc:

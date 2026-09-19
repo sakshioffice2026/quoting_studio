@@ -41,7 +41,7 @@
           <th>Status</th>
           <th>Follow-up</th>
           <th>Assigned</th>
-          <th></th>
+          <th style="width:1%;"></th>
         </tr>
       </thead>
       <tbody>
@@ -53,7 +53,8 @@
           <td><span class="badge">{{ lead.status_label }}</span></td>
           <td class="mono" style="font-size:12px;">{{ lead.follow_up_status_label or '—' }}</td>
           <td class="muted" style="font-size:12px;">{{ lead.assignee.full_name if lead.assignee else 'Unassigned' }}</td>
-          <td style="text-align:right;">
+          <td style="text-align:right; white-space:nowrap;">
+            <a href="{{ url_for('leads.flow', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">Timeline</a>
             <a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">View →</a>
           </td>
         </tr>

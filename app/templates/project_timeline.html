@@ -1,0 +1,177 @@
+{% extends 'base.html' %}
+{% block title %}Timeline — {{ lead.customer_name }}{% endblock %}
+{% block head %}
+<style>
+  .flow-wrap { max-width: 980px; margin: 0 auto; padding-bottom: 60px; }
+
+  .flow-line-col { position: relative; width: 100%; }
+  .flow-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 56px 1fr;
+    align-items: center;
+    min-height: 96px;
+  }
+  .flow-row::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: 50%;
+    width: 2px;
+    background: var(--line);
+    transform: translateX(-1px);
+    z-index: 0;
+  }
+  .flow-row:first-child::before { top: 50%; }
+  .flow-row:last-child::before  { bottom: 50%; }
+
+  .flow-dot {
+    position: relative;
+    z-index: 1;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--white);
+    margin: 0 auto;
+    border: 3px solid var(--paper);
+  }
+
+  .flow-card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--steel);
+    border-radius: 8px;
+    padding: 14px 16px;
+    max-width: 400px;
+  }
+  .flow-card.pending { opacity: 0.55; }
+  .flow-row .flow-card:nth-of-type(1) { justify-self: end; }
+  .flow-row .flow-card:nth-of-type(2) { justify-self: start; }
+
+  .flow-card-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--steel);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .flow-card-title {
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--navy);
+    margin-bottom: 4px;
+  }
+  .flow-card-sub {
+    font-size: 12px;
+    color: var(--steel);
+    line-height: 1.4;
+  }
+  .flow-pill {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--white);
+  }
+  .flow-pill.pending { background: #D8D2C4; color: #7A7362; }
+
+  /* group colours — mapped to the site's own palette */
+  .grp-lead         .flow-dot { background: var(--navy); }
+  .grp-lead         .flow-card { border-left-color: var(--navy); }
+  .grp-lead         .flow-pill { background: var(--navy); }
+
+  .grp-presel       .flow-dot { background: var(--copper); }
+  .grp-presel       .flow-card { border-left-color: var(--copper); }
+  .grp-presel       .flow-pill { background: var(--copper); }
+
+  .grp-design       .flow-dot { background: #6B5B95; }
+  .grp-design       .flow-card { border-left-color: #6B5B95; }
+  .grp-design       .flow-pill { background: #6B5B95; }
+
+  .grp-payment      .flow-dot { background: var(--sage); }
+  .grp-payment      .flow-card { border-left-color: var(--sage); }
+  .grp-payment      .flow-pill { background: var(--sage); }
+
+  .grp-manufacturing .flow-dot { background: #B8863B; }
+  .grp-manufacturing .flow-card { border-left-color: #B8863B; }
+  .grp-manufacturing .flow-pill { background: #B8863B; }
+
+  .grp-amc          .flow-dot { background: #8A5A7C; }
+  .grp-amc          .flow-card { border-left-color: #8A5A7C; }
+  .grp-amc          .flow-pill { background: #8A5A7C; }
+
+  .flow-row.pending .flow-dot { background: #D8D2C4 !important; color: #7A7362; }
+  .flow-row.pending .flow-card { border-left-color: #D8D2C4; }
+
+  .flow-card a.flow-card-link { display: block; }
+  .flow-card a.flow-card-link:hover { text-decoration: none; }
+  .flow-card a.flow-card-link:hover .flow-card-title { color: var(--copper); }
+</style>
+{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  <aside class="dash-sidebar">
+    <a href="{{ url_for('dashboard.index') }}"  class="dash-sidebar-item">Projects</a>
+    <a href="{{ url_for('leads.index') }}"      class="dash-sidebar-item active">Leads</a>
+    <a href="{{ url_for('customers.index') }}"  class="dash-sidebar-item">Customers</a>
+    <a href="{{ url_for('reports.index') }}"    class="dash-sidebar-item">Reports</a>
+  </aside>
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div>
+        <h1>Timeline</h1>
+        <div class="sub mono">{{ lead.customer_name }}</div>
+      </div>
+    </div>
+
+    <p><a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">← Back to lead</a></p>
+
+    <div class="flow-wrap" style="margin-top:20px;">
+      {% for s in stages %}
+      <div class="flow-row grp-{{ s.group }} {{ 'pending' if not s.implemented }}">
+        {% if loop.index0 is even %}
+          <div class="flow-card {{ '' if s.implemented else 'pending' }}">
+            {% if s.url %}<a class="flow-card-link" href="{{ s.url }}">{% endif %}
+              <div class="flow-card-label">
+                <span>{{ s.label }}</span>
+                <span class="flow-pill {{ '' if s.implemented else 'pending' }}">{{ s.status_label }}</span>
+              </div>
+              <div class="flow-card-title">{{ s.title }}</div>
+              <div class="flow-card-sub">{{ s.subtitle }}</div>
+            {% if s.url %}</a>{% endif %}
+          </div>
+          <div class="flow-dot">{{ s.number }}</div>
+          <div></div>
+        {% else %}
+          <div></div>
+          <div class="flow-dot">{{ s.number }}</div>
+          <div class="flow-card {{ '' if s.implemented else 'pending' }}">
+            {% if s.url %}<a class="flow-card-link" href="{{ s.url }}">{% endif %}
+              <div class="flow-card-label">
+                <span>{{ s.label }}</span>
+                <span class="flow-pill {{ '' if s.implemented else 'pending' }}">{{ s.status_label }}</span>
+              </div>
+              <div class="flow-card-title">{{ s.title }}</div>
+              <div class="flow-card-sub">{{ s.subtitle }}</div>
+            {% if s.url %}</a>{% endif %}
+          </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

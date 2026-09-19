@@ -3,7 +3,7 @@ from flask_login import login_required, current_user
 
 from ..models import User
 from ..models.lead import LeadStatus, FollowUpStatus
-from ..services.domain import lead_service, interaction_service, preliminary_selection_service
+from ..services.domain import lead_service, interaction_service, preliminary_selection_service, survey_service
 leads_bp = Blueprint('leads', __name__)
 
 
@@ -129,3 +129,119 @@ def add_interaction(lead_id):
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
     return redirect(url_for('leads.detail', lead_id=lead_id))
+
+
+@leads_bp.route('/leads/<int:lead_id>/flow')
+@login_required
+def flow(lead_id):
+    lead = lead_service.get_lead(current_user.tenant_id, lead_id)
+    if not lead:
+        flash('Lead not found.', 'error')
+        return redirect(url_for('leads.index'))
+
+    presel = preliminary_selection_service.get_by_lead(current_user.tenant_id, lead_id)
+    survey = survey_service.get_by_lead(current_user.tenant_id, lead_id)
+
+    def not_started():
+        return {'implemented': False, 'status_label': 'Not started', 'group': 'pending', 'url': None}
+
+    stages = [
+        {
+            'number': 1, 'key': 'lead', 'group': 'lead',
+            'label': 'Lead Generation', 'title': 'New Enquiry Captured',
+            'subtitle': 'Source Channel, Customer Info, Rough Requirement',
+            'implemented': True,
+            'status_label': lead.status,
+            'url': url_for('leads.detail', lead_id=lead.id),
+        },
+        {
+            'number': 2, 'key': 'follow_up', 'group': 'lead',
+            'label': 'Follow-Up', 'title': 'Contact & Qualification',
+            'subtitle': 'First Contact, Budget Check, Site Visit Booked',
+            'implemented': True,
+            'status_label': lead.follow_up_status or 'Not started',
+            'url': url_for('leads.detail', lead_id=lead.id),
+        },
+        {
+            'number': 3, 'key': 'presel', 'group': 'presel',
+            'label': 'Preliminary Selection', 'title': 'Catalog & Style Walkthrough',
+            'subtitle': 'Shortlist Ranges, Ballpark Price, Survey Req.',
+            **({
+                'implemented': True,
+                'status_label': presel.status,
+                'url': url_for('presel.detail', presel_id=presel.id),
+            } if presel else not_started()),
+        },
+        {
+            'number': 4, 'key': 'survey', 'group': 'presel',
+            'label': 'Survey', 'title': 'On-Site Measurement',
+            'subtitle': 'Accurate Dimensions, Site Conditions, Photos',
+            **({
+                'implemented': True,
+                'status_label': survey.status,
+                'url': url_for('survey.detail', survey_id=survey.id),
+            } if survey else not_started()),
+        },
+        {
+            'number': 5, 'key': 'design', 'group': 'design',
+            'label': 'Design & Specs', 'title': 'Configurator & BOM',
+            'subtitle': 'Select Profiles, Generate Drawings, BOM',
+            **not_started(),
+        },
+        {
+            'number': 6, 'key': 'approval', 'group': 'design',
+            'label': 'Customer Approval', 'title': 'Design Sign-off',
+            'subtitle': 'Share Drawings & BOM, Get Customer Approval',
+            **not_started(),
+        },
+        {
+            'number': 7, 'key': 'quotation', 'group': 'design',
+            'label': 'Quotation', 'title': 'Formal Pricing',
+            'subtitle': 'Line-Item Quote, Terms, Validity',
+            **not_started(),
+        },
+        {
+            'number': 8, 'key': 'order', 'group': 'design',
+            'label': 'Order', 'title': 'Order Confirmation',
+            'subtitle': 'PO / Order Acceptance, Production Handoff',
+            **not_started(),
+        },
+        {
+            'number': 9, 'key': 'advance_payment', 'group': 'payment',
+            'label': 'Advance Payment', 'title': 'Initial Milestone',
+            'subtitle': 'Invoice (40-50%), Collect Payment, Reconcile',
+            **not_started(),
+        },
+        {
+            'number': 10, 'key': 'payment_journey', 'group': 'payment',
+            'label': 'Payment Journey', 'title': 'Milestone Tracking',
+            'subtitle': 'Progress Invoices, Balance Due, Reconciliation',
+            **not_started(),
+        },
+        {
+            'number': 11, 'key': 'manufacturing', 'group': 'manufacturing',
+            'label': 'Manufacturing', 'title': 'Shop Floor Production',
+            'subtitle': 'Cutting, Machining, Assembly, QC',
+            **not_started(),
+        },
+        {
+            'number': 12, 'key': 'delivery', 'group': 'manufacturing',
+            'label': 'Delivery', 'title': 'Dispatch & Transport',
+            'subtitle': 'Packing List, Dispatch, Site Delivery',
+            **not_started(),
+        },
+        {
+            'number': 13, 'key': 'installation', 'group': 'amc',
+            'label': 'Installation', 'title': 'On-Site Fit-out',
+            'subtitle': 'Install, Snag List, Handover',
+            **not_started(),
+        },
+        {
+            'number': 14, 'key': 'amc', 'group': 'amc',
+            'label': 'AMC', 'title': 'Warranty & Maintenance',
+            'subtitle': 'Warranty Start, Schedule Service, Renewals',
+            **not_started(),
+        },
+    ]
+
+    return render_template('project_timeline.html', lead=lead, stages=stages)

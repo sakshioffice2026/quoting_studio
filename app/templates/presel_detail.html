@@ -94,13 +94,23 @@
       </form>
       {% endif %}
 
-      {% if presel.status == 'PRESEL-SHORTLISTED' and presel.survey_required %}
+      {% if presel.status == 'PRESEL-SHORTLISTED' and presel.survey_required and not latest_survey %}
       <form method="POST" action="{{ url_for('presel.confirm_survey', presel_id=presel.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input class="form-control" style="display:inline-block; width:auto;" type="text"
+               name="surveyor_name" placeholder="Surveyor name (optional)">
         <button type="submit" class="btn btn-primary btn-sm">Confirm survey →</button>
       </form>
       {% endif %}
     </div>
+
+    {% if latest_survey %}
+    <p style="margin-top:12px;">
+      <a href="{{ url_for('survey.detail', survey_id=latest_survey.id) }}" class="btn btn-secondary btn-sm">
+        View survey ({{ latest_survey.status_label }}) →
+      </a>
+    </p>
+    {% endif %}
   </div>
 </div>
 {% endblock %}
