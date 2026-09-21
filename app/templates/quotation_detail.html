@@ -1,148 +1,145 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, stage_tracker %}
 {% block title %}{{ quotation.quotation_number }} — FenestraOne{% endblock %}
+
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
 
-    {# ── Page header ── #}
-    <div class="page-header">
-      <div>
-        <h1>{{ quotation.project.display_name if quotation.project else 'Quotation' }}</h1>
-        <div class="sub mono">
-          {{ quotation.quotation_number }} · v{{ quotation.quotation_version }}
-          · <span class="badge badge-{{ quotation.status|lower|replace('quote-', '')|replace('_', '-') }}">{{ quotation.status_label }}</span>
-          {% if quotation.is_expired and quotation.status != QuotationStatus.EXPIRED %}
-            · <span class="expiry-tag text-error">Expired</span>
-          {% elif quotation.days_until_expiry is not none and quotation.days_until_expiry <= 3 and quotation.status == QuotationStatus.SENT %}
-            · <span class="expiry-tag text-warning">⚠ {{ quotation.days_until_expiry }}d left</span>
+    {% set tone_map = {
+      'QUOTE-DRAFT': 'neutral', 'QUOTE-PENDING_DISCOUNT_APPROVAL': 'warn', 'QUOTE-SENT': 'info',
+      'QUOTE-NEGOTIATION': 'warn', 'QUOTE-ACCEPTED': 'success', 'QUOTE-LOST': 'danger', 'QUOTE-EXPIRED': 'danger'
+    } %}
+    {% set ns = namespace(step=8 if quotation.status == QuotationStatus.ACCEPTED else 7) %}
+
+    {# =================== 1. HEADER CARD =================== #}
+    <div class="ui-card lead-header-card">
+      <div class="lead-header-top">
+        <div class="lead-header-title">
+          <h1>{{ quotation.project.display_name if quotation.project else 'Quotation' }}</h1>
+          <span class="customer-chip">{{ quotation.quotation_number }} · v{{ quotation.quotation_version }}</span>
+        </div>
+        <div class="lead-header-actions" style="display:flex; gap:8px;">
+          {% if quotation.project %}
+          <a href="{{ url_for('projects.detail', project_id=quotation.project_id) }}" class="btn btn-secondary btn-sm">Project</a>
           {% endif %}
+          <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>
       </div>
-      <div class="flex gap-8">
-        {% if quotation.project %}
-        <a href="{{ url_for('projects.detail', project_id=quotation.project_id) }}" class="btn btn-secondary btn-sm">Project</a>
+
+      <div class="lead-header-pills">
+        {{ pill(quotation.status_label, tone_map.get(quotation.status, 'neutral')) }}
+        {% if quotation.is_expired and quotation.status != QuotationStatus.EXPIRED %}
+          {{ pill('Expired', 'danger') }}
+        {% elif quotation.days_until_expiry is not none and quotation.days_until_expiry <= 3 and quotation.status == QuotationStatus.SENT %}
+          {{ pill(quotation.days_until_expiry ~ 'd left', 'warn') }}
         {% endif %}
-        <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
+        {% if quotation.parent_quotation_id %}
+          {{ pill('Supersedes #' ~ quotation.parent_quotation_id, 'neutral') }}
+        {% endif %}
       </div>
+
+      {{ stage_tracker(ns.step, quotation.status == QuotationStatus.LOST) }}
     </div>
 
-    {# ── Summary cards ── #}
+    {# =================== 2. KEY NUMBERS =================== #}
     <div class="info-card-row">
-
       <div class="info-card">
         <div class="info-card-label">Subtotal</div>
         <div class="info-card-value">{{ '₹{:,.2f}'.format(quotation.subtotal|float) if quotation.subtotal else '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Discount ({{ quotation.discount_pct or 0 }}%)</div>
         <div class="info-card-value">
-          {% if quotation.discount_amount %}
-            − ₹{{ '{:,.2f}'.format(quotation.discount_amount|float) }}
-          {% else %}—{% endif %}
+          {% if quotation.discount_amount %}− ₹{{ '{:,.2f}'.format(quotation.discount_amount|float) }}{% else %}—{% endif %}
           {% if not quotation.discount_approved and quotation.discount_pct and quotation.discount_pct > 0 %}
             <span class="info-card-note">Pending approval</span>
           {% endif %}
         </div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Tax ({{ (quotation.tax_rate|float * 100)|round(0)|int }}%)</div>
         <div class="info-card-value">{{ '₹{:,.2f}'.format(quotation.tax_amount|float) if quotation.tax_amount else '—' }}</div>
       </div>
-
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Grand Total</div>
         <div class="info-card-value">{{ '₹{:,.2f}'.format(quotation.grand_total|float) if quotation.grand_total else '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Valid Until</div>
-        <div class="info-card-value {{ 'text-error' if quotation.is_expired else '' }}">
-          {{ quotation.validity_date.strftime('%Y-%m-%d') if quotation.validity_date else '—' }}
+        <div class="info-card-value" style="{{ 'color:var(--error);' if quotation.is_expired }}">
+          {{ quotation.validity_date.strftime('%d %b %Y') if quotation.validity_date else '—' }}
         </div>
       </div>
-
     </div>
 
-    {# ── Timeline info ── #}
-    <div class="quote-meta">
-      {% if quotation.payment_terms_template %}
-        <p><strong>Payment Terms:</strong> {{ quotation.payment_terms_template }}</p>
-      {% endif %}
-      {% if quotation.sent_at %}
-        <p><strong>Sent:</strong> {{ quotation.sent_at.strftime('%Y-%m-%d %H:%M') }}</p>
-      {% endif %}
-      {% if quotation.accepted_at %}
-        <p><strong>Accepted:</strong> {{ quotation.accepted_at.strftime('%Y-%m-%d %H:%M') }}
-          by {{ quotation.accepted_by_name }} ({{ quotation.acceptance_method }})</p>
-      {% endif %}
-      {% if quotation.lost_at %}
-        <p><strong>Lost:</strong> {{ quotation.lost_at.strftime('%Y-%m-%d %H:%M') }}
-          — {{ quotation.lost_reason }}</p>
-      {% endif %}
-      {% if quotation.negotiation_notes %}
-        <p><strong>Negotiation notes:</strong> {{ quotation.negotiation_notes }}</p>
-      {% endif %}
-      {% if quotation.parent_quotation_id %}
-        <p class="muted" style="font-size:12px;">
-          Supersedes <a href="{{ url_for('quotation.detail', quotation_id=quotation.parent_quotation_id) }}">
-            parent quotation #{{ quotation.parent_quotation_id }}</a>
-        </p>
-      {% endif %}
-    </div>
-
-    {# ── Line items table ── #}
-    {% set items = quotation.line_items %}
-    {% if items %}
-    <div class="section-title">Line Items</div>
-    <div style="overflow-x:auto; margin-bottom:32px;">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Label</th>
-          <th>Material</th>
-          <th>Size (W×H mm)</th>
-          <th style="text-align:right;">Frame</th>
-          <th style="text-align:right;">Hardware</th>
-          <th style="text-align:right;">Extras</th>
-          <th style="text-align:right;">Fitting</th>
-          <th style="text-align:right;">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in items %}
-        <tr>
-          <td class="mono muted" style="font-size:11px;">{{ loop.index }}</td>
-          <td style="font-weight:600;">{{ item.label or '—' }}</td>
-          <td>{{ item.material or '—' }}</td>
-          <td class="mono" style="font-size:12px;">{{ item.width_mm }}×{{ item.height_mm }}</td>
-          <td class="num-cell">{{ '₹{:,.2f}'.format(item.frame|float) if item.frame else '—' }}</td>
-          <td class="num-cell">{{ '₹{:,.2f}'.format(item.hardware|float) if item.hardware else '—' }}</td>
-          <td class="num-cell">{{ '₹{:,.2f}'.format(item.extras|float) if item.extras else '—' }}</td>
-          <td class="num-cell">{{ '₹{:,.2f}'.format(item.fitting|float) if item.fitting else '—' }}</td>
-          <td class="num-cell" style="font-weight:600; color:var(--copper);">{{ '₹{:,.2f}'.format(item.amount|float) if item.amount else '—' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    {# =================== 3. TIMELINE / TERMS CARD =================== #}
+    {% if quotation.payment_terms_template or quotation.sent_at or quotation.accepted_at or quotation.lost_at or quotation.negotiation_notes %}
+    <div class="ui-card">
+      <div class="ui-card-title">Timeline &amp; Terms</div>
+      <div class="info-grid">
+        {% if quotation.payment_terms_template %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Payment terms</div><div class="info-grid-value">{{ quotation.payment_terms_template }}</div></div></div>
+        {% endif %}
+        {% if quotation.sent_at %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Sent</div><div class="info-grid-value">{{ quotation.sent_at.strftime('%d %b %Y, %H:%M') }}</div></div></div>
+        {% endif %}
+        {% if quotation.accepted_at %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Accepted</div><div class="info-grid-value">{{ quotation.accepted_at.strftime('%d %b %Y, %H:%M') }} by {{ quotation.accepted_by_name }} ({{ quotation.acceptance_method }})</div></div></div>
+        {% endif %}
+        {% if quotation.lost_at %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Lost</div><div class="info-grid-value">{{ quotation.lost_at.strftime('%d %b %Y, %H:%M') }} — {{ quotation.lost_reason }}</div></div></div>
+        {% endif %}
+        {% if quotation.negotiation_notes %}
+        <div class="info-grid-item" style="grid-column:1/-1;"><div><div class="info-grid-label">Negotiation notes</div><div class="info-grid-value">{{ quotation.negotiation_notes }}</div></div></div>
+        {% endif %}
+      </div>
     </div>
     {% endif %}
 
-    {# ══════════════════════════════════════════════
-       ACTION PANELS
-       ══════════════════════════════════════════════ #}
+    {# =================== 4. LINE ITEMS =================== #}
+    {% set items = quotation.line_items %}
+    {% if items %}
+    <div class="ui-card">
+      <div class="ui-card-title">Line Items</div>
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Label</th><th>Material</th><th>Size (W×H mm)</th>
+              <th style="text-align:right;">Frame</th><th style="text-align:right;">Hardware</th>
+              <th style="text-align:right;">Extras</th><th style="text-align:right;">Fitting</th>
+              <th style="text-align:right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td class="mono muted" style="font-size:11px;">{{ loop.index }}</td>
+              <td style="font-weight:600;">{{ item.label or '—' }}</td>
+              <td>{{ item.material or '—' }}</td>
+              <td class="mono" style="font-size:12px;">{{ item.width_mm }}×{{ item.height_mm }}</td>
+              <td class="num-cell">{{ '₹{:,.2f}'.format(item.frame|float) if item.frame else '—' }}</td>
+              <td class="num-cell">{{ '₹{:,.2f}'.format(item.hardware|float) if item.hardware else '—' }}</td>
+              <td class="num-cell">{{ '₹{:,.2f}'.format(item.extras|float) if item.extras else '—' }}</td>
+              <td class="num-cell">{{ '₹{:,.2f}'.format(item.fitting|float) if item.fitting else '—' }}</td>
+              <td class="num-cell" style="font-weight:700; color:var(--copper);">{{ '₹{:,.2f}'.format(item.amount|float) if item.amount else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
 
-    {# ── PENDING DISCOUNT APPROVAL ── #}
+    {# =================== 5. ACTION CARDS =================== #}
+
     {% if quotation.status == QuotationStatus.PENDING_DISCOUNT_APPROVAL %}
-    <div class="action-panel action-panel-wide action-panel-warning">
-      <h4 class="action-title">Discount Approval Required</h4>
-      <p class="action-note">
-        A discount of {{ quotation.discount_pct }}% exceeds the auto-approval limit. A manager must approve before this quotation can be sent.
-      </p>
+    <div class="ui-card action-panel-warning" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px;">Discount Approval Required</div>
+      <p class="action-note">A discount of {{ quotation.discount_pct }}% exceeds the auto-approval limit. A manager must approve before this quotation can be sent.</p>
       <form method="POST" action="{{ url_for('quotation.approve_discount', quotation_id=quotation.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-primary btn-sm">Approve Discount</button>
@@ -150,43 +147,32 @@
     </div>
     {% endif %}
 
-    {# ── DRAFT → Send to Customer ── #}
     {% if quotation.status == QuotationStatus.DRAFT %}
     <div class="action-grid">
-
-      <form method="POST" class="action-panel"
-            action="{{ url_for('quotation.send_to_customer', quotation_id=quotation.id) }}">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.send_to_customer', quotation_id=quotation.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Send to Customer</h4>
-        <p class="action-note">
-          This will lock the quotation and mark it as sent. Valid until {{ quotation.validity_date.strftime('%Y-%m-%d') if quotation.validity_date else 'N/A' }}.
-        </p>
+        <div class="ui-card-title" style="margin-bottom:6px;">Send to Customer</div>
+        <p class="action-note">This will lock the quotation and mark it as sent. Valid until {{ quotation.validity_date.strftime('%d %b %Y') if quotation.validity_date else 'N/A' }}.</p>
         <button type="submit" class="btn btn-primary btn-sm">Send Quotation →</button>
       </form>
 
-      <form method="POST" class="action-panel"
-            action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}"
-            onsubmit="return confirm('Mark this quotation as lost?')">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}" onsubmit="return confirm('Mark this quotation as lost?')">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Mark as Lost</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Mark as Lost</div>
         <div class="form-group">
           <label class="form-label" for="lost_reason_draft">Reason</label>
           <textarea class="form-control" id="lost_reason_draft" name="lost_reason" rows="2" required></textarea>
         </div>
         <button type="submit" class="btn btn-secondary btn-sm">Mark Lost</button>
       </form>
-
     </div>
     {% endif %}
 
-    {# ── SENT → Negotiation / Accept / Lost ── #}
     {% if quotation.status == QuotationStatus.SENT %}
     <div class="action-grid">
-
-      <form method="POST" class="action-panel"
-            action="{{ url_for('quotation.mark_negotiation', quotation_id=quotation.id) }}">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_negotiation', quotation_id=quotation.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Enter Negotiation</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Enter Negotiation</div>
         <div class="form-group">
           <label class="form-label" for="notes">Notes</label>
           <textarea class="form-control" id="notes" name="notes" rows="2"></textarea>
@@ -194,10 +180,9 @@
         <button type="submit" class="btn btn-secondary btn-sm">Mark as Negotiation</button>
       </form>
 
-      <form method="POST" class="action-panel"
-            action="{{ url_for('quotation.accept', quotation_id=quotation.id) }}">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.accept', quotation_id=quotation.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Accept Quotation</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Accept Quotation</div>
         <div class="form-group">
           <label class="form-label" for="acceptance_method">Method</label>
           <select class="form-control" id="acceptance_method" name="acceptance_method">
@@ -210,29 +195,23 @@
         <button type="submit" class="btn btn-primary btn-sm">Accept &amp; Proceed →</button>
       </form>
 
-      <form method="POST" class="action-panel"
-            action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}"
-            onsubmit="return confirm('Mark this quotation as lost?')">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}" onsubmit="return confirm('Mark this quotation as lost?')">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Mark as Lost</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Mark as Lost</div>
         <div class="form-group">
           <label class="form-label" for="lost_reason_sent">Reason</label>
           <textarea class="form-control" id="lost_reason_sent" name="lost_reason" rows="2" required></textarea>
         </div>
         <button type="submit" class="btn btn-secondary btn-sm">Mark Lost</button>
       </form>
-
     </div>
     {% endif %}
 
-    {# ── NEGOTIATION → Accept / Lost ── #}
     {% if quotation.status == QuotationStatus.NEGOTIATION %}
     <div class="action-grid">
-
-      <form method="POST" class="action-panel"
-            action="{{ url_for('quotation.accept', quotation_id=quotation.id) }}">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.accept', quotation_id=quotation.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Accept Quotation</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Accept Quotation</div>
         <div class="form-group">
           <label class="form-label" for="acceptance_method_neg">Method</label>
           <select class="form-control" id="acceptance_method_neg" name="acceptance_method">
@@ -245,35 +224,27 @@
         <button type="submit" class="btn btn-primary btn-sm">Accept &amp; Proceed →</button>
       </form>
 
-      <form method="POST" class="action-panel"
-            action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}"
-            onsubmit="return confirm('Mark this quotation as lost?')">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}" onsubmit="return confirm('Mark this quotation as lost?')">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Mark as Lost</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Mark as Lost</div>
         <div class="form-group">
           <label class="form-label" for="lost_reason_neg">Reason</label>
           <textarea class="form-control" id="lost_reason_neg" name="lost_reason" rows="2" required></textarea>
         </div>
         <button type="submit" class="btn btn-secondary btn-sm">Mark Lost</button>
       </form>
-
     </div>
     {% endif %}
 
-    {# ── ACCEPTED — terminal, show next step hint ── #}
     {% if quotation.status == QuotationStatus.ACCEPTED %}
-    <div class="action-panel action-panel-wide action-panel-success">
-      <h4 class="action-title text-success">✓ Quotation Accepted</h4>
+    <div class="ui-card action-panel-success" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Quotation Accepted</div>
       {% set active_order = quotation.active_order %}
       {% if active_order %}
-      <p class="action-note" style="margin-bottom:12px;">
-        Order <strong>{{ active_order.order_number }}</strong> already raised for this quotation.
-      </p>
+      <p class="action-note" style="margin-bottom:12px;">Order <strong>{{ active_order.order_number }}</strong> already raised for this quotation.</p>
       <a href="{{ url_for('order.detail', order_id=active_order.id) }}" class="btn btn-primary btn-sm">View Order →</a>
       {% else %}
-      <p class="action-note">
-        Proceed to <strong>Section 8 — Order Acceptance</strong> to raise the sales order and collect the advance payment.
-      </p>
+      <p class="action-note">Proceed to <strong>Order Acceptance</strong> to raise the sales order and collect the advance payment.</p>
       <form method="POST" action="{{ url_for('order.create', quotation_id=quotation.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">

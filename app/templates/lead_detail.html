@@ -1,36 +1,142 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, avatar, stage_tracker %}
 {% block title %}{{ lead.display_name }} — Lead{% endblock %}
+
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
-    <div class="page-header">
-      <div>
-        <h1>{{ lead.display_name }}</h1>
-        <div class="sub mono">Customer: {{ lead.customer_name }}</div>
-        <div class="sub mono">{{ lead.status_label }} · {{ lead.follow_up_status_label or 'No follow-up yet' }}</div>
+
+    {# ---------------- customer initials + qualification score (computed once) ---------------- #}
+    {% set name_parts = lead.customer_name.split() %}
+    {% set customer_initials = ((name_parts[0][0] if name_parts|length > 0 else '?') ~ (name_parts[1][0] if name_parts|length > 1 else '')) | upper %}
+    {% set ns = namespace(score=None) %}
+    {% for i in interactions %}{% if i.qualification_score %}{% set ns.score = i.qualification_score %}{% endif %}{% endfor %}
+    {% set score_tone = {'Hot': 'hot', 'Warm': 'warm', 'Cold': 'cold'} %}
+
+    {# ---------------- current stage (1-13) ---------------- #}
+    {% set ns2 = namespace(step=1, danger=false) %}
+    {% if lead.status in ['LEAD-DUPLICATE', 'LEAD-INVALID'] %}{% set ns2.danger = true %}{% endif %}
+    {% if lead.follow_up_status %}{% set ns2.step = 2 %}{% endif %}
+    {% if lead.follow_up_status == 'FUP-LOST' %}{% set ns2.danger = true %}{% endif %}
+    {% if presel %}{% set ns2.step = 3 %}{% endif %}
+    {% if presel and presel.status == 'PRESEL-SHORTLISTED' %}{% set ns2.step = 4 %}{% endif %}
+
+    {# =================== 1. HEADER CARD =================== #}
+    <div class="ui-card lead-header-card">
+      <div class="lead-header-top">
+        <div class="lead-header-title">
+          <h1>{{ lead.display_name }}</h1>
+          <span class="customer-chip">{{ avatar(customer_initials, 'sm') }}{{ lead.customer_name }}</span>
+        </div>
+        <div class="lead-header-actions">
+          <a href="{{ url_for('leads.flow', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">View Timeline →</a>
+        </div>
       </div>
-      <a href="{{ url_for('leads.flow', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">View Timeline →</a>
+
+      <div class="lead-header-pills">
+        {% if lead.assignee %}{{ pill('Assigned · ' ~ lead.assignee.full_name, 'info') }}{% else %}{{ pill('Unassigned', 'neutral') }}{% endif %}
+        {% if lead.follow_up_status == 'FUP-QUALIFIED' %}
+          {{ pill('Qualified', 'success') }}
+        {% elif lead.follow_up_status == 'FUP-NURTURE' %}
+          {{ pill('Nurture', 'warn') }}
+        {% elif lead.follow_up_status == 'FUP-LOST' %}
+          {{ pill('Lost', 'danger') }}
+        {% else %}
+          {{ pill(lead.status_label, 'neutral') }}
+        {% endif %}
+        {% if ns.score %}{{ pill(ns.score, score_tone.get(ns.score, 'neutral')) }}{% endif %}
+      </div>
+
+      {{ stage_tracker(ns2.step, ns2.danger) }}
     </div>
 
-    <div style="max-width:640px;">
-      <p><strong>Phone:</strong> {{ lead.phone or '—' }}</p>
-      <p><strong>Email:</strong> {{ lead.email or '—' }}</p>
-      <p><strong>Source:</strong> {{ lead.source_channel }}</p>
-      <p><strong>City:</strong> {{ lead.project_city or '—' }}</p>
-      <p><strong>Product interest:</strong> {{ lead.product_interest or '—' }}</p>
-      <p><strong>Assigned to:</strong> {{ lead.assignee.full_name if lead.assignee else 'Unassigned' }}</p>
+    {# =================== 2. CONTACT & DETAILS CARD =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Contact &amp; Details</div>
+      <div class="info-grid">
 
-      {% if not lead.follow_up_status and lead.status not in ['LEAD-DUPLICATE', 'LEAD-INVALID'] %}
-      <form method="POST" action="{{ url_for('leads.follow_up', lead_id=lead.id) }}" style="margin-top:8px;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-primary btn-sm">Follow Up</button>
-      </form>
-      {% endif %}
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">Phone</div>
+            <div class="info-grid-value">
+              {% if lead.phone %}<a href="tel:{{ lead.phone }}">{{ lead.phone }}</a>{% else %}<span class="muted-value">—</span>{% endif %}
+            </div>
+          </div>
+        </div>
 
-      {% if lead.follow_up_status not in ['FUP-QUALIFIED', 'FUP-LOST'] and lead.status not in ['LEAD-DUPLICATE', 'LEAD-INVALID'] %}
-      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z" opacity="0"/><path d="M22 6l-10 7L2 6"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">Email</div>
+            <div class="info-grid-value">
+              {% if lead.email %}<a href="mailto:{{ lead.email }}">{{ lead.email }}</a>{% else %}<span class="muted-value">—</span>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">Source</div>
+            <div class="info-grid-value">{{ pill(lead.source_channel.replace('_',' ')|title, 'neutral') }}</div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">City</div>
+            <div class="info-grid-value {{ '' if lead.project_city else 'muted-value' }}">{{ lead.project_city or '—' }}</div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">Product interest</div>
+            <div class="info-grid-value {{ '' if lead.product_interest else 'muted-value' }}">{{ (lead.product_interest or '—')|title }}</div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">Assigned to</div>
+            <div class="info-grid-value">
+              {% if lead.assignee %}
+              <span style="display:inline-flex;align-items:center;gap:7px;">{{ avatar(lead.assignee.initials, 'sm') }}{{ lead.assignee.full_name }}</span>
+              {% else %}<span class="muted-value">Unassigned</span>{% endif %}
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {# ---- inline status-change forms (kept functionally identical) ---- #}
+      <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap;">
+        {% if not lead.follow_up_status and lead.status not in ['LEAD-DUPLICATE', 'LEAD-INVALID'] %}
+        <form method="POST" action="{{ url_for('leads.follow_up', lead_id=lead.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary btn-sm">Follow Up</button>
+        </form>
+        {% endif %}
+
+        {% if lead.follow_up_status not in ['FUP-QUALIFIED', 'FUP-LOST'] and lead.status not in ['LEAD-DUPLICATE', 'LEAD-INVALID'] %}
         <form method="POST" action="{{ url_for('leads.qualify', lead_id=lead.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-primary btn-sm">Mark Qualified</button>
@@ -44,36 +150,95 @@
         {% endif %}
 
         <form method="POST" action="{{ url_for('leads.lost', lead_id=lead.id) }}"
-              onsubmit="return this.lost_reason.value.trim().length > 0 || alert('A lost reason is required.');">
+              onsubmit="return this.lost_reason.value.trim().length > 0 || alert('A lost reason is required.');"
+              style="display:flex; gap:8px;">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input class="form-control" style="display:inline-block; width:auto;" type="text"
-                 name="lost_reason" placeholder="Lost reason" required>
+          <input class="form-control" style="width:auto;" type="text" name="lost_reason" placeholder="Lost reason" required>
           <button type="submit" class="btn btn-danger btn-sm">Mark Lost</button>
         </form>
-      </div>
-      {% endif %}
+        {% endif %}
 
-      {% if not lead.assignee %}
-      <form method="POST" action="{{ url_for('leads.assign', lead_id=lead.id) }}" style="margin-top:12px;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-group">
-          <label class="form-label" for="assigned_to">Assign to</label>
-          <select class="form-control" id="assigned_to" name="assigned_to" required>
+        {% if not lead.assignee %}
+        <form method="POST" action="{{ url_for('leads.assign', lead_id=lead.id) }}" style="display:flex; gap:8px;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <select class="form-control" style="width:auto;" id="assigned_to" name="assigned_to" required>
             {% for u in team %}
             <option value="{{ u.id }}">{{ u.full_name }}</option>
             {% endfor %}
           </select>
-        </div>
-        <button type="submit" class="btn btn-primary btn-sm">Assign</button>
-      </form>
-      {% endif %}
+          <button type="submit" class="btn btn-primary btn-sm">Assign</button>
+        </form>
+        {% endif %}
+      </div>
     </div>
 
-    <h2 style="margin-top:32px;">Preliminary Selection</h2>
-    <div style="max-width:640px;">
+    {# =================== 3. QUICK ACTIONS BAR =================== #}
+    <div class="quick-actions">
+      {% if lead.phone %}
+      <a href="tel:{{ lead.phone }}" class="qa-btn qa-btn-primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+        Call
+      </a>
+      <a href="https://wa.me/{{ lead.phone|replace(' ','')|replace('+','')|replace('-','') }}" target="_blank" rel="noopener" class="qa-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.36 7.56L3 20l1.05-5.4A8.5 8.5 0 1 1 21 11.5z"/></svg>
+        WhatsApp
+      </a>
+      {% endif %}
+      {% if lead.email %}
+      <a href="mailto:{{ lead.email }}" class="qa-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></svg>
+        Email
+      </a>
+      {% endif %}
+      <button type="button" class="qa-btn" id="openLogInteraction">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+        Log interaction
+      </button>
       {% if presel %}
-      <p><strong>Status:</strong> {{ presel.status_label }}</p>
-      <p><a href="{{ url_for('presel.detail', presel_id=presel.id) }}" class="btn btn-secondary btn-sm">Open preliminary selection →</a></p>
+      <a href="{{ url_for('presel.detail', presel_id=presel.id) }}" class="qa-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Open Preliminary Selection
+      </a>
+      {% else %}
+      <span class="qa-btn is-disabled">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Open Preliminary Selection
+      </span>
+      {% endif %}
+      <a href="{{ url_for('leads.flow', lead_id=lead.id) }}" class="qa-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        View Timeline
+      </a>
+    </div>
+
+    {# =================== 4. PRELIMINARY SELECTION CARD =================== #}
+    <div class="ui-card">
+      <div class="presel-card-head">
+        <div class="ui-card-title" style="margin-bottom:0;">Preliminary Selection</div>
+        {% if presel %}{{ pill(presel.status_label, 'info' if presel.status == 'PRESEL-IN_PROGRESS' else ('success' if presel.status == 'PRESEL-SHORTLISTED' else 'warn')) }}{% endif %}
+      </div>
+
+      {% if presel %}
+      <div class="presel-stats">
+        <div>
+          <div class="presel-stat-value">{{ presel.rough_opening_count }}</div>
+          <div class="presel-stat-label">Rough openings</div>
+        </div>
+        <div>
+          <div class="presel-stat-value">
+            {% if presel.indicative_price_min or presel.indicative_price_max %}
+              ₹{{ '%.0f'|format(presel.indicative_price_min or 0) }}–{{ '%.0f'|format(presel.indicative_price_max or 0) }}
+            {% else %}—{% endif %}
+          </div>
+          <div class="presel-stat-label">Indicative price</div>
+        </div>
+        <div>
+          <div class="presel-stat-value">{{ 'Yes' if presel.survey_required else 'No' }}</div>
+          <div class="presel-stat-label">Survey required</div>
+        </div>
+      </div>
+      <a href="{{ url_for('presel.detail', presel_id=presel.id) }}" class="btn btn-primary btn-sm">Continue →</a>
+
       {% elif lead.follow_up_status == 'FUP-QUALIFIED' %}
       <form method="POST" action="{{ url_for('presel.start', lead_id=lead.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -85,84 +250,144 @@
         </div>
         <button type="submit" class="btn btn-primary btn-sm">Start preliminary selection</button>
       </form>
+
       {% else %}
-      <p class="muted">Lead must be qualified (FUP-QUALIFIED) before preliminary selection can start.</p>
+      <div class="empty-state">
+        <div class="empty-state-icon">🔒</div>
+        Lead must be qualified before preliminary selection can start.
+      </div>
       {% endif %}
     </div>
 
-    <h2 style="margin-top:32px;">Interactions</h2>
-    <form method="POST" action="{{ url_for('leads.add_interaction', lead_id=lead.id) }}" style="max-width:640px;">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="form-group">
-        <label class="form-label" for="interaction_type">Type</label>
-        <select class="form-control" id="interaction_type" name="interaction_type" required>
-          <option value="call">Call</option>
-          <option value="whatsapp">WhatsApp</option>
-          <option value="email">Email</option>
-          <option value="visit">Visit</option>
-        </select>
-      </div>
+    {# =================== 5. INTERACTIONS TIMELINE =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title" style="margin-bottom:18px;">Interactions</div>
 
-      <div class="form-group">
-        <label class="form-label" for="outcome">Outcome</label>
-        <select class="form-control" id="outcome" name="outcome">
-          <option value="">—</option>
-          <option value="connected">Connected</option>
-          <option value="no-answer">No answer</option>
-          <option value="not-interested">Not interested</option>
-          <option value="callback-requested">Callback requested</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="qualification_score">Qualification score</label>
-        <select class="form-control" id="qualification_score" name="qualification_score">
-          <option value="">—</option>
-          <option value="Hot">Hot</option>
-          <option value="Warm">Warm</option>
-          <option value="Cold">Cold</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="next_action_date">Next action date</label>
-        <input class="form-control" type="date" id="next_action_date" name="next_action_date">
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="notes">Notes</label>
-        <textarea class="form-control" id="notes" name="notes" rows="2"></textarea>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="lost_reason">Lost reason (if not interested)</label>
-        <input class="form-control" type="text" id="lost_reason" name="lost_reason">
-      </div>
-
-      <div style="margin-top:12px;">
-        <button type="submit" class="btn btn-primary btn-sm">Log interaction</button>
-      </div>
-    </form>
-
-    <table class="data-table" style="margin-top:16px;">
-      <thead>
-        <tr><th>When</th><th>Type</th><th>Outcome</th><th>Score</th><th>Next action</th><th>Notes</th></tr>
-      </thead>
-      <tbody>
-        {% for i in interactions %}
-        <tr>
-          <td class="mono" style="font-size:12px;">{{ i.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-          <td>{{ i.interaction_type }}</td>
-          <td>{{ i.outcome or '—' }}</td>
-          <td>{{ i.qualification_score or '—' }}</td>
-          <td class="mono" style="font-size:12px;">{{ i.next_action_date.strftime('%Y-%m-%d') if i.next_action_date else '—' }}</td>
-          <td class="muted" style="font-size:12px;">{{ i.notes or '' }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6" class="muted">No interactions logged yet.</td></tr>
+      {% if interactions %}
+      <div class="activity-timeline">
+        {% for i in interactions|reverse %}
+        <div class="activity-item">
+          <span class="activity-icon activity-icon-{{ i.interaction_type }}">
+            {% if i.interaction_type == 'call' %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            {% elif i.interaction_type == 'whatsapp' %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.36 7.56L3 20l1.05-5.4A8.5 8.5 0 1 1 21 11.5z"/></svg>
+            {% elif i.interaction_type == 'email' %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></svg>
+            {% else %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            {% endif %}
+          </span>
+          <div class="activity-body">
+            <div class="activity-top">
+              <span class="activity-type">{{ i.interaction_type }}</span>
+              <span class="activity-when">{{ i.created_at.strftime('%d %b %Y, %H:%M') }}</span>
+            </div>
+            <div class="activity-meta">
+              {% if i.outcome %}{{ pill(i.outcome.replace('-', ' ')|title, 'neutral') }}{% endif %}
+              {% if i.qualification_score %}{{ pill(i.qualification_score, score_tone.get(i.qualification_score, 'neutral')) }}{% endif %}
+            </div>
+            {% if i.notes %}<div class="activity-notes">{{ i.notes }}</div>{% endif %}
+            {% if i.next_action_date %}<div class="activity-next">Next action: <strong>{{ i.next_action_date.strftime('%d %b %Y') }}</strong></div>{% endif %}
+          </div>
+        </div>
         {% endfor %}
-      </tbody>
-    </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-state-icon">💬</div>
+        No interactions logged yet.
+      </div>
+      {% endif %}
+    </div>
+
   </div>
 </div>
+
+{# =================== SLIDE-IN PANEL: LOG INTERACTION =================== #}
+<div class="slide-panel-overlay" id="logInteractionOverlay"></div>
+<div class="slide-panel" id="logInteractionPanel">
+  <div class="slide-panel-head">
+    <h3>Log interaction</h3>
+    <button type="button" class="slide-panel-close" id="closeLogInteraction">✕</button>
+  </div>
+  <form method="POST" action="{{ url_for('leads.add_interaction', lead_id=lead.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="slide-panel-body">
+      <div class="slide-panel-grid">
+        <div class="form-group">
+          <label class="form-label" for="interaction_type">Type</label>
+          <select class="form-control" id="interaction_type" name="interaction_type" required>
+            <option value="call">Call</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="email">Email</option>
+            <option value="visit">Visit</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="outcome">Outcome</label>
+          <select class="form-control" id="outcome" name="outcome">
+            <option value="">—</option>
+            <option value="connected">Connected</option>
+            <option value="no-answer">No answer</option>
+            <option value="not-interested">Not interested</option>
+            <option value="callback-requested">Callback requested</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="qualification_score">Qualification score</label>
+          <select class="form-control" id="qualification_score" name="qualification_score">
+            <option value="">—</option>
+            <option value="Hot">Hot</option>
+            <option value="Warm">Warm</option>
+            <option value="Cold">Cold</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="next_action_date">Next action date</label>
+          <input class="form-control" type="date" id="next_action_date" name="next_action_date">
+        </div>
+
+        <div class="form-group form-group-full">
+          <label class="form-label" for="notes">Notes</label>
+          <textarea class="form-control" id="notes" name="notes" rows="3"></textarea>
+        </div>
+
+        <div class="form-group form-group-full">
+          <label class="form-label" for="lost_reason">Lost reason (if not interested)</label>
+          <input class="form-control" type="text" id="lost_reason" name="lost_reason">
+        </div>
+      </div>
+    </div>
+    <div class="slide-panel-foot">
+      <button type="submit" class="btn btn-primary">Log interaction</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var openBtn   = document.getElementById('openLogInteraction');
+    var closeBtn  = document.getElementById('closeLogInteraction');
+    var overlay   = document.getElementById('logInteractionOverlay');
+    var panel     = document.getElementById('logInteractionPanel');
+    if (!openBtn || !panel || !overlay) return;
+
+    function setOpen(open) {
+      panel.classList.toggle('is-open', open);
+      overlay.classList.toggle('is-open', open);
+    }
+    openBtn.addEventListener('click', function () { setOpen(true); });
+    closeBtn.addEventListener('click', function () { setOpen(false); });
+    overlay.addEventListener('click', function () { setOpen(false); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') setOpen(false);
+    });
+  })();
+</script>
 {% endblock %}

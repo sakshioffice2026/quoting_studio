@@ -1,84 +1,85 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, stage_tracker %}
 {% block title %}{{ order.order_number }} — FenestraOne{% endblock %}
+
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
 
-    {# ── Page header ── #}
-    <div class="page-header">
-      <div>
-        <h1>{{ order.project.display_name if order.project else 'Order' }}</h1>
-        <div class="sub mono">
-          {{ order.order_number }}
-          · <span class="badge badge-{{ order.status|lower|replace('order-', '')|replace('_', '-') }}">{{ order.status_label }}</span>
+    {% set tone_map = {
+      'ORDER-PENDING_SIGNATURE': 'warn', 'ORDER-CONFIRMED': 'success', 'ORDER-CANCELLED': 'danger'
+    } %}
+    {% set ns = namespace(step=9 if order.status == OrderStatus.CONFIRMED else 8) %}
+
+    {# =================== 1. HEADER CARD =================== #}
+    <div class="ui-card lead-header-card">
+      <div class="lead-header-top">
+        <div class="lead-header-title">
+          <h1>{{ order.project.display_name if order.project else 'Order' }}</h1>
+          <span class="customer-chip">{{ order.order_number }}</span>
+        </div>
+        <div class="lead-header-actions" style="display:flex; gap:8px;">
+          {% if order.project %}
+          <a href="{{ url_for('projects.detail', project_id=order.project_id) }}" class="btn btn-secondary btn-sm">Project</a>
+          {% endif %}
+          {% if order.quotation %}
+          <a href="{{ url_for('quotation.detail', quotation_id=order.quotation_id) }}" class="btn btn-secondary btn-sm">Quotation</a>
+          {% endif %}
+          <a href="{{ url_for('order.index') }}" class="btn btn-secondary btn-sm">← All Orders</a>
         </div>
       </div>
-      <div class="flex gap-8">
-        {% if order.project %}
-        <a href="{{ url_for('projects.detail', project_id=order.project_id) }}" class="btn btn-secondary btn-sm">Project</a>
-        {% endif %}
-        {% if order.quotation %}
-        <a href="{{ url_for('quotation.detail', quotation_id=order.quotation_id) }}" class="btn btn-secondary btn-sm">Quotation</a>
-        {% endif %}
-        <a href="{{ url_for('order.index') }}" class="btn btn-secondary btn-sm">← All Orders</a>
+
+      <div class="lead-header-pills">
+        {{ pill(order.status_label, tone_map.get(order.status, 'neutral')) }}
       </div>
+
+      {{ stage_tracker(ns.step, order.status == OrderStatus.CANCELLED) }}
     </div>
 
-    {# ── Summary cards ── #}
+    {# =================== 2. KEY NUMBERS =================== #}
     <div class="info-card-row">
-
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Total Amount</div>
         <div class="info-card-value">{{ '₹{:,.2f}'.format(order.total_amount|float) if order.total_amount else '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Contract Ref</div>
         <div class="info-card-value">{{ order.contract_ref or '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Promised Delivery</div>
-        <div class="info-card-value">
-          {{ order.promised_delivery_date.strftime('%Y-%m-%d') if order.promised_delivery_date else '—' }}
-        </div>
+        <div class="info-card-value">{{ order.promised_delivery_date.strftime('%d %b %Y') if order.promised_delivery_date else '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Project Manager</div>
-        <div class="info-card-value">
-          {{ order.project_manager.name if order.project_manager else '—' }}
-        </div>
+        <div class="info-card-value">{{ order.project_manager.name if order.project_manager else '—' }}</div>
       </div>
-
     </div>
 
-    {# ── Timeline info ── #}
-    <div class="quote-meta">
-      {% if order.order_confirmed_at %}
-        <p><strong>Confirmed:</strong> {{ order.order_confirmed_at.strftime('%Y-%m-%d %H:%M') }}
-          by {{ order.order_confirmed_by_name }} ({{ order.confirmation_method }})</p>
-      {% endif %}
-      {% if order.cancelled_at %}
-        <p><strong>Cancelled:</strong> {{ order.cancelled_at.strftime('%Y-%m-%d %H:%M') }}
-          — {{ order.cancelled_reason }}</p>
-      {% endif %}
+    {# =================== 3. TIMELINE CARD =================== #}
+    {% if order.order_confirmed_at or order.cancelled_at %}
+    <div class="ui-card">
+      <div class="ui-card-title">Timeline</div>
+      <div class="info-grid">
+        {% if order.order_confirmed_at %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Confirmed</div><div class="info-grid-value">{{ order.order_confirmed_at.strftime('%d %b %Y, %H:%M') }} by {{ order.order_confirmed_by_name }} ({{ order.confirmation_method }})</div></div></div>
+        {% endif %}
+        {% if order.cancelled_at %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Cancelled</div><div class="info-grid-value">{{ order.cancelled_at.strftime('%d %b %Y, %H:%M') }} — {{ order.cancelled_reason }}</div></div></div>
+        {% endif %}
+      </div>
     </div>
+    {% endif %}
 
-    {# ══════════════════════════════════════════════
-       ACTION PANELS
-       ══════════════════════════════════════════════ #}
+    {# =================== 4. ACTION CARDS =================== #}
 
-    {# ── PENDING SIGNATURE → Confirm / Cancel ── #}
     {% if order.status == OrderStatus.PENDING_SIGNATURE %}
     <div class="action-grid">
-
-      <form method="POST" class="action-panel"
-            action="{{ url_for('order.confirm', order_id=order.id) }}">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('order.confirm', order_id=order.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Confirm Order</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Confirm Order</div>
         <div class="form-group">
           <label class="form-label" for="order_confirmed_by_name">Customer name</label>
           <input type="text" class="form-control" id="order_confirmed_by_name" name="order_confirmed_by_name"
@@ -101,34 +102,26 @@
         <button type="submit" class="btn btn-primary btn-sm">Confirm &amp; Proceed →</button>
       </form>
 
-      <form method="POST" class="action-panel"
-            action="{{ url_for('order.cancel', order_id=order.id) }}"
-            onsubmit="return confirm('Cancel this order?')">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('order.cancel', order_id=order.id) }}" onsubmit="return confirm('Cancel this order?')">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Cancel Order</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Cancel Order</div>
         <div class="form-group">
           <label class="form-label" for="cancelled_reason">Reason</label>
           <textarea class="form-control" id="cancelled_reason" name="cancelled_reason" rows="2" required></textarea>
         </div>
         <button type="submit" class="btn btn-secondary btn-sm">Cancel Order</button>
       </form>
-
     </div>
     {% endif %}
 
-    {# ── CONFIRMED — terminal, show next step hint ── #}
     {% if order.status == OrderStatus.CONFIRMED %}
-    <div class="action-panel action-panel-wide action-panel-success">
-      <h4 class="action-title text-success">✓ Order Confirmed</h4>
+    <div class="ui-card action-panel-success" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Order Confirmed</div>
       {% if order.payments.first() %}
-      <p class="action-note" style="margin-bottom:12px;">
-        {{ order.payments.count() }} payment milestone(s) raised for this order.
-      </p>
+      <p class="action-note" style="margin-bottom:12px;">{{ order.payments.count() }} payment milestone(s) raised for this order.</p>
       <a href="{{ url_for('payment.index') }}" class="btn btn-secondary btn-sm">View Payments →</a>
       {% else %}
-      <p class="action-note">
-        Proceed to <strong>Section 9 — Advance Payment</strong> to invoice and collect the advance before releasing to manufacturing.
-      </p>
+      <p class="action-note">Proceed to <strong>Advance Payment</strong> to invoice and collect the advance before releasing to manufacturing.</p>
       <form method="POST" action="{{ url_for('payment.raise_invoice', order_id=order.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="payment_stage" value="Advance">
@@ -147,7 +140,7 @@
     </div>
     {% endif %}
 
-    {# ── DELIVERY (Section 12) ── #}
+    {# =================== 5. DELIVERIES =================== #}
     {% if order.status == OrderStatus.CONFIRMED and order.manufacturing_jobs.first() %}
     {% set _ns = namespace(taken=[]) %}
     {% set _deliveries = order.deliveries.all() %}
@@ -159,40 +152,38 @@
 
     {% with order_id=order.id, current_delivery_id=None %}{% include '_delivery_progress.html' %}{% endwith %}
 
-    <div class="section-title">Deliveries</div>
-
-    {% if _deliveries %}
-    <div style="overflow-x:auto; margin-bottom:16px;">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Delivery #</th>
-          <th>Items</th>
-          <th>Status</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for _d in _deliveries %}
-        <tr>
-          <td class="mono" style="font-size:12px; font-weight:600;">{{ _d.delivery_number }}</td>
-          <td class="mono" style="font-size:12px;">{{ _d.items|length }}</td>
-          <td><span class="badge badge-{{ _d.status|lower|replace('del-', '')|replace('_', '-') }}">{{ _d.status_label }}</span></td>
-          <td style="text-align:right;">
-            <a href="{{ url_for('delivery.detail', delivery_id=_d.id) }}" class="btn btn-secondary btn-sm">View →</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="ui-card">
+      <div class="ui-card-title">Deliveries</div>
+      {% if _deliveries %}
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr><th>Delivery #</th><th>Items</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for _d in _deliveries %}
+            <tr>
+              <td class="mono" style="font-size:12px; font-weight:600;">{{ _d.delivery_number }}</td>
+              <td class="mono" style="font-size:12px;">{{ _d.items|length }}</td>
+              <td>{{ pill(_d.status_label, 'neutral') }}</td>
+              <td style="text-align:right;"><a href="{{ url_for('delivery.detail', delivery_id=_d.id) }}" class="btn btn-secondary btn-sm">View →</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-state-icon">📦</div>
+        No deliveries packed yet.
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
 
     {% if _ready %}
-    <form method="POST" class="action-panel action-panel-wide"
-          action="{{ url_for('delivery.create', order_id=order.id) }}">
+    <form method="POST" class="ui-card action-panel-wide" action="{{ url_for('delivery.create', order_id=order.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <h4 class="action-title">Pack Delivery</h4>
+      <div class="ui-card-title" style="margin-bottom:6px;">Pack Delivery</div>
       <p class="action-note">
         {{ _ready|length }} finished opening{{ 's' if _ready|length != 1 }} ready.
         Select the ones to send now — the rest can be packed and dispatched later as they are completed.
@@ -210,35 +201,36 @@
         {% endfor %}
       </div>
 
-      <div class="form-group">
-        <label class="form-label" for="delivery_address">Delivery address</label>
-        <textarea class="form-control" id="delivery_address" name="delivery_address" rows="2"></textarea>
+      <div class="slide-panel-grid">
+        <div class="form-group form-group-full">
+          <label class="form-label" for="delivery_address">Delivery address</label>
+          <textarea class="form-control" id="delivery_address" name="delivery_address" rows="2"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="site_contact_name">Site contact name</label>
+          <input type="text" class="form-control" id="site_contact_name" name="site_contact_name">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="site_contact_phone">Site contact phone</label>
+          <input type="text" class="form-control" id="site_contact_phone" name="site_contact_phone">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="scheduled_dispatch_date">Scheduled dispatch date (optional)</label>
+          <input type="date" class="form-control" id="scheduled_dispatch_date" name="scheduled_dispatch_date">
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label" for="site_contact_name">Site contact name</label>
-        <input type="text" class="form-control" id="site_contact_name" name="site_contact_name">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="site_contact_phone">Site contact phone</label>
-        <input type="text" class="form-control" id="site_contact_phone" name="site_contact_phone">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="scheduled_dispatch_date">Scheduled dispatch date (optional)</label>
-        <input type="date" class="form-control" id="scheduled_dispatch_date" name="scheduled_dispatch_date">
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm">Pack Delivery →</button>
+      <button type="submit" class="btn btn-primary btn-sm" style="margin-top:8px;">Pack Delivery →</button>
     </form>
     {% else %}
-    <div style="font-size:13px; color:var(--steel); padding:8px 0 24px;">
+    <div class="empty-state" style="text-align:left;">
       Nothing is ready to pack right now. Each opening becomes available here as soon as its manufacturing job is completed — no need to wait for the whole order.
     </div>
     {% endif %}
     {% endif %}
 
-    {# ── CANCELLED ── #}
     {% if order.status == OrderStatus.CANCELLED %}
-    <div class="action-panel action-panel-wide action-panel-warning">
-      <h4 class="action-title">Order Cancelled</h4>
+    <div class="ui-card action-panel-warning" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px;">Order Cancelled</div>
       <p class="action-note" style="margin-bottom:0;">{{ order.cancelled_reason }}</p>
     </div>
     {% endif %}

@@ -1,0 +1,32 @@
+{# Shared UI components — reusable across Lead / Project / Order / Dashboard pages #}
+
+{% macro pill(label, tone='neutral') -%}
+<span class="ui-pill ui-pill-{{ tone }}"><span class="ui-pill-dot"></span>{{ label }}</span>
+{%- endmacro %}
+
+{% macro avatar(initials, size='') -%}
+<span class="ui-avatar {{ 'ui-avatar-sm' if size == 'sm' }}">{{ initials }}</span>
+{%- endmacro %}
+
+{% set UI_STAGES = [
+  'Lead Generation', 'Follow-Up', 'Preliminary Selection', 'Survey',
+  'Design & Specs', 'Customer Approval', 'Quotation', 'Order Acceptance',
+  'Advance Payment', 'Manufacturing', 'Delivery', 'Installation', 'AMC'
+] %}
+
+{% macro stage_tracker(current_step, danger=false, stages=UI_STAGES) -%}
+<div class="stage-tracker">
+  <div class="stage-tracker-row">
+    {% for label in stages %}
+    {% set n = loop.index %}
+    {% set state = 'is-done' if n < current_step else ('is-current' if n == current_step else '') %}
+    {% if danger and n == current_step %}{% set state = 'is-danger' %}{% endif %}
+    <div class="stage-tracker-step {{ state }}" title="{{ n }}. {{ label }}">
+      <span class="stage-tracker-line {{ 'is-done' if n < current_step or (n == current_step and n > 1) }}"></span>
+      <span class="stage-tracker-dot"></span>
+      <span class="stage-tracker-label">{{ label }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{%- endmacro %}
