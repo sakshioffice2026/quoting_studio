@@ -21,6 +21,12 @@ from .order import Order, OrderStatus
 from .payment import Payment, PaymentStatus, PaymentStage
 from .manufacturing_job import ManufacturingJob, JobStatus, ProductionStage, QcResult
 from .delivery import Delivery, DeliveryItem, DeliveryStatus
+from .installation import Installation, InstallationItem, InstallationStatus, TestResult
+from .amc import (
+    Warranty, WarrantyStatus,
+    AmcContract, AmcStatus, AmcTier,
+    ServiceTicket, TicketStatus, ServiceType, Coverage,
+)
 
 __all__ = [
     'Tenant',
@@ -46,4 +52,8 @@ __all__ = [
     'Payment', 'PaymentStatus', 'PaymentStage',
     'ManufacturingJob', 'JobStatus', 'ProductionStage', 'QcResult',
     'Delivery', 'DeliveryItem', 'DeliveryStatus',
+    'Installation', 'InstallationItem', 'InstallationStatus', 'TestResult',
+    'Warranty', 'WarrantyStatus',
+    'AmcContract', 'AmcStatus', 'AmcTier',
+    'ServiceTicket', 'TicketStatus', 'ServiceType', 'Coverage',
 ]

@@ -1,0 +1,33 @@
+<style>
+  .badge-amc-offered  { background: #EFEAE0; color: #8A7A5A; }
+  .badge-amc-active   { background: var(--navy); color: var(--paper); }
+  .badge-amc-expired  { background: #F0EEEA; color: var(--steel); }
+
+  .badge-tkt-open        { background: #FBF1DC; color: var(--warning); }
+  .badge-tkt-in-progress { background: #E8EEF5; color: var(--navy); }
+  .badge-tkt-resolved    { background: #E4EDE9; color: var(--sage); }
+
+  .badge-war-active { background: #E4EDE9; color: var(--sage); }
+
+  .amc-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .amc-chip { font-size:12px; padding:5px 10px; border-radius:999px; border:1px solid var(--line); background:#fff; color:var(--steel); }
+  .amc-chip strong { color:var(--navy); margin-right:4px; }
+  .amc-chip.main { background:var(--navy); border-color:var(--navy); color:#fff; }
+  .amc-chip.main strong { color:#fff; }
+  .amc-chip.ready { border-color:var(--sage); color:var(--sage); }
+  .amc-chip.warn { border-color:var(--warning); color:var(--warning); }
+
+  .amc-card { border:1px solid var(--line); border-radius:8px; background:#fff; padding:16px; margin-bottom:14px; }
+  .amc-card.warn { border-color:var(--warning); background:#FDF8EC; }
+  .amc-card.ok { border-color:var(--sage); background:#F3FAF6; }
+  .amc-card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:12px; flex-wrap:wrap; }
+  .amc-card-title { font-weight:700; color:var(--navy); font-size:14px; }
+  .amc-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+  .amc-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:12px; }
+  @media (max-width:640px) { .amc-grid, .amc-grid-3 { grid-template-columns:1fr; } }
+
+  .amc-pill { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; }
+  .amc-pill.Warranty   { background:#E4EDE9; color:var(--sage); }
+  .amc-pill.AMC        { background:#E8EEF5; color:var(--navy); }
+  .amc-pill.Chargeable { background:#FBF1DC; color:var(--warning); }
+</style>

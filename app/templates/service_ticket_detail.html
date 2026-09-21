@@ -1,0 +1,144 @@
+{% extends 'base.html' %}
+{% block title %}{{ ticket.ticket_number }} — FenestraOne{% endblock %}
+{% block body %}
+{% include '_amc_styles.html' %}
+{% set _badge = ticket.status|lower|replace('ticket-', '')|replace('_', '-') %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    {# ── Page header ── #}
+    <div class="page-header">
+      <div>
+        <h1>Ticket {{ ticket.ticket_number }}</h1>
+        <div class="sub mono">
+          {{ ticket.order.order_number if ticket.order else '' }}
+          · <span class="badge badge-tkt-{{ _badge }}">{{ ticket.status_label }}</span>
+          · <span class="amc-pill {{ ticket.coverage }}">{{ ticket.coverage }}</span>
+        </div>
+      </div>
+      <div class="flex gap-8">
+        {% if ticket.contract %}
+        <a href="{{ url_for('amc.detail', contract_id=ticket.contract.id) }}" class="btn btn-secondary btn-sm">AMC {{ ticket.contract.amc_number }}</a>
+        {% endif %}
+        {% if ticket.order %}
+        <a href="{{ url_for('order.detail', order_id=ticket.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+        {% endif %}
+        <a href="{{ url_for('amc.tickets') }}" class="btn btn-secondary btn-sm">← All Tickets</a>
+      </div>
+    </div>
+
+    {# ── Summary cards ── #}
+    <div class="info-card-row">
+      <div class="info-card info-card-highlight">
+        <div class="info-card-label">Status</div>
+        <div class="info-card-value">{{ ticket.status_label }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Type</div>
+        <div class="info-card-value">{{ ticket.service_type }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Visit Date</div>
+        <div class="info-card-value">{{ ticket.scheduled_date.strftime('%Y-%m-%d') if ticket.scheduled_date else '—' }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Technician</div>
+        <div class="info-card-value">{{ ticket.technician_name or '—' }}</div>
+      </div>
+    </div>
+
+    {# ── Ticket details ── #}
+    <div class="quote-meta">
+      <p><strong>Title:</strong> {{ ticket.title }}</p>
+      {% if ticket.description %}
+        <p style="white-space:pre-line;"><strong>Description:</strong> {{ ticket.description }}</p>
+      {% endif %}
+      <p><strong>Opening:</strong> {{ ticket.opening.label if ticket.opening else 'Whole order' }}</p>
+      <p><strong>Reported by:</strong> {{ ticket.reported_by or '—' }}</p>
+      <p><strong>Opened:</strong> {{ ticket.opened_at.strftime('%Y-%m-%d %H:%M') if ticket.opened_at else '—' }}</p>
+      {% if ticket.started_at %}
+        <p><strong>Started:</strong> {{ ticket.started_at.strftime('%Y-%m-%d %H:%M') }}</p>
+      {% endif %}
+      {% if ticket.resolved_at %}
+        <p><strong>Resolved:</strong> {{ ticket.resolved_at.strftime('%Y-%m-%d %H:%M') }}
+          · by {{ ticket.resolved_by or '—' }}</p>
+      {% endif %}
+    </div>
+
+    {# ── Service visit report (once resolved) ── #}
+    {% if ticket.resolution_notes %}
+    <div class="section-title">Service Visit Report</div>
+    <div class="amc-card ok" style="white-space:pre-line; font-size:13px;">{{ ticket.resolution_notes }}</div>
+    {% endif %}
+
+    {# ══════════════════════════════════════════════
+       ACTION PANELS
+       ══════════════════════════════════════════════ #}
+
+    {# ── OPEN / IN_PROGRESS → Schedule ── #}
+    {% if ticket.status in (TicketStatus.OPEN, TicketStatus.IN_PROGRESS) %}
+    <form method="POST" class="action-panel action-panel-wide"
+          action="{{ url_for('amc.ticket_schedule', ticket_id=ticket.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h4 class="action-title">Schedule Visit</h4>
+      <div class="form-group">
+        <label class="form-label" for="scheduled_date">Visit date *</label>
+        <input type="date" class="form-control" id="scheduled_date" name="scheduled_date"
+               value="{{ ticket.scheduled_date.strftime('%Y-%m-%d') if ticket.scheduled_date else '' }}" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="technician_name_sched">Technician</label>
+        <input type="text" class="form-control" id="technician_name_sched" name="technician_name"
+               value="{{ ticket.technician_name or '' }}">
+      </div>
+      <button type="submit" class="btn btn-secondary btn-sm">Save Schedule</button>
+    </form>
+    {% endif %}
+
+    {# ── OPEN → Start ── #}
+    {% if ticket.status == TicketStatus.OPEN %}
+    <form method="POST" class="action-panel action-panel-wide"
+          action="{{ url_for('amc.ticket_start', ticket_id=ticket.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h4 class="action-title">Start Work</h4>
+      <div class="form-group">
+        <label class="form-label" for="technician_name_start">Technician</label>
+        <input type="text" class="form-control" id="technician_name_start" name="technician_name"
+               value="{{ ticket.technician_name or '' }}">
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Start →</button>
+    </form>
+    {% endif %}
+
+    {# ── IN_PROGRESS → Resolve ── #}
+    {% if ticket.status == TicketStatus.IN_PROGRESS %}
+    <form method="POST" class="action-panel action-panel-wide"
+          action="{{ url_for('amc.ticket_resolve', ticket_id=ticket.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h4 class="action-title">Resolve &amp; Record Service Report</h4>
+      <div class="form-group">
+        <label class="form-label" for="resolved_by">Resolved by *</label>
+        <input type="text" class="form-control" id="resolved_by" name="resolved_by"
+               value="{{ ticket.technician_name or '' }}" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="resolution_notes">Work done / findings *</label>
+        <textarea class="form-control" id="resolution_notes" name="resolution_notes" rows="4" required></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Mark Resolved →</button>
+    </form>
+    {% endif %}
+
+    {# ── RESOLVED — terminal ── #}
+    {% if ticket.status == TicketStatus.RESOLVED %}
+    <div class="action-panel action-panel-wide action-panel-success">
+      <h4 class="action-title text-success">✓ Ticket Resolved</h4>
+      <p class="action-note" style="margin-bottom:0;">Service visit report is recorded above.</p>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

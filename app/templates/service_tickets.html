@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block title %}Service Tickets — FenestraOne{% endblock %}
+{% block body %}
+{% include '_amc_styles.html' %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div>
+        <h1>Service Tickets</h1>
+        <div class="sub mono">{{ tickets|length }} ticket{{ 's' if tickets|length != 1 else '' }}</div>
+      </div>
+      <a href="{{ url_for('amc.index') }}" class="btn btn-secondary">← AMC &amp; Warranty</a>
+    </div>
+
+    {# ── Raise a ticket against a warranted order ── #}
+    {% if warranties %}
+    <div class="section-title">Raise a Ticket</div>
+    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:24px;">
+      {% for w in warranties %}
+      <a href="{{ url_for('amc.ticket_new', order_id=w.order_id) }}" class="btn btn-secondary btn-sm">
+        {{ w.order.order_number if w.order else w.order_id }} +
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {# ── Filters ── #}
+    <div style="margin-bottom:8px; display:flex; flex-wrap:wrap; gap:6px;">
+      <a href="{{ url_for('amc.tickets', service_type=type_filter) }}"
+         class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All statuses</a>
+      {% for code in TicketStatus.ALL %}
+      <a href="{{ url_for('amc.tickets', status=code, service_type=type_filter) }}"
+         class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">{{ TicketStatus.LABELS[code] }}</a>
+      {% endfor %}
+    </div>
+    <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:6px;">
+      <a href="{{ url_for('amc.tickets', status=status_filter) }}"
+         class="btn btn-sm {{ 'btn-primary' if not type_filter else 'btn-secondary' }}">All types</a>
+      {% for t in ServiceType.ALL %}
+      <a href="{{ url_for('amc.tickets', status=status_filter, service_type=t) }}"
+         class="btn btn-sm {{ 'btn-primary' if type_filter == t else 'btn-secondary' }}">{{ t }}</a>
+      {% endfor %}
+    </div>
+
+    {% if tickets %}
+    <div style="overflow-x:auto;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Ticket #</th>
+          <th>Order</th>
+          <th>Opening</th>
+          <th>Type</th>
+          <th>Title</th>
+          <th>Coverage</th>
+          <th>Status</th>
+          <th>Scheduled</th>
+          <th>Opened</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tickets %}
+        <tr>
+          <td class="mono" style="font-size:12px; font-weight:600;">{{ t.ticket_number }}</td>
+          <td class="link-cell">
+            <a href="{{ url_for('order.detail', order_id=t.order_id) }}">{{ t.order.order_number if t.order else t.order_id }}</a>
+          </td>
+          <td style="font-size:12px;">{{ t.opening.label if t.opening else '—' }}</td>
+          <td style="font-size:12px;">{{ t.service_type }}</td>
+          <td style="font-size:12px;">{{ t.title }}</td>
+          <td><span class="amc-pill {{ t.coverage }}">{{ t.coverage }}</span></td>
+          <td><span class="badge badge-tkt-{{ t.status|lower|replace('ticket-', '')|replace('_', '-') }}">{{ t.status_label }}</span></td>
+          <td class="muted mono" style="font-size:12px;">{{ t.scheduled_date.strftime('%Y-%m-%d') if t.scheduled_date else '—' }}</td>
+          <td class="muted mono" style="font-size:12px;">{{ t.opened_at.strftime('%Y-%m-%d') if t.opened_at else '—' }}</td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('amc.ticket_detail', ticket_id=t.id) }}" class="btn btn-secondary btn-sm">View →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="icon">🔧</div>
+      <p>No service tickets yet. Raise one against a warranted order above.</p>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

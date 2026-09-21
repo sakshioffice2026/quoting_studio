@@ -1,0 +1,217 @@
+{% extends 'base.html' %}
+{% block title %}AMC & Warranty — FenestraOne{% endblock %}
+{% block body %}
+{% include '_amc_styles.html' %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div>
+        <h1>AMC &amp; Warranty</h1>
+        <div class="sub mono">
+          {{ warranties|length }} warrant{{ 'ies' if warranties|length != 1 else 'y' }}
+          · {{ contracts|length }} contract{{ 's' if contracts|length != 1 else '' }}
+        </div>
+      </div>
+      <a href="{{ url_for('amc.tickets') }}" class="btn btn-secondary">Service Tickets →</a>
+    </div>
+
+    {# ── Fully installed orders waiting for warranty registration ── #}
+    {% if ready_orders %}
+    <div class="section-title">Ready for Warranty Registration</div>
+    {% for row in ready_orders %}
+    <form method="POST" class="amc-card ok"
+          action="{{ url_for('amc.register_warranty', order_id=row.order.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="amc-card-head">
+        <div class="amc-card-title">
+          <a href="{{ url_for('order.detail', order_id=row.order.id) }}">{{ row.order.order_number }}</a>
+          · all openings installed &amp; signed off
+        </div>
+      </div>
+      <div class="amc-grid-3">
+        <div class="form-group">
+          <label class="form-label" for="wm_{{ row.order.id }}">Warranty period (months)</label>
+          <input type="number" min="1" max="120" class="form-control" id="wm_{{ row.order.id }}"
+                 name="warranty_months" value="12">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ws_{{ row.order.id }}">Warranty start (defaults to handover)</label>
+          <input type="date" class="form-control" id="ws_{{ row.order.id }}" name="start_date"
+                 value="{{ row.handover_on.strftime('%Y-%m-%d') if row.handover_on else '' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="wt_{{ row.order.id }}">Terms</label>
+          <input type="text" class="form-control" id="wt_{{ row.order.id }}" name="terms"
+                 placeholder="e.g. Manufacturing defects, hardware">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Register Warranty →</button>
+    </form>
+    {% endfor %}
+    {% endif %}
+
+    {# ── Renewals due ── #}
+    {% if expiring %}
+    <div class="section-title">Renewals Due (next 60 days)</div>
+    <div style="overflow-x:auto; margin-bottom:24px;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>AMC #</th>
+          <th>Order</th>
+          <th>Plan</th>
+          <th>Ends</th>
+          <th>Days left</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in expiring %}
+        <tr>
+          <td class="mono" style="font-size:12px; font-weight:600;">{{ c.amc_number }}</td>
+          <td class="link-cell">
+            <a href="{{ url_for('order.detail', order_id=c.order_id) }}">{{ c.order.order_number if c.order else c.order_id }}</a>
+          </td>
+          <td style="font-size:12px;">{{ c.plan_tier }}</td>
+          <td class="mono" style="font-size:12px;">{{ c.amc_end_date.strftime('%Y-%m-%d') if c.amc_end_date else '—' }}</td>
+          <td class="mono text-warning" style="font-size:12px;">{{ c.days_to_expiry }}</td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('amc.detail', contract_id=c.id) }}" class="btn btn-secondary btn-sm">Renew →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% endif %}
+
+    {# ── Warranties ── #}
+    <div class="section-title">Warranties</div>
+    {% if warranties %}
+    {% for w in warranties %}
+    <div class="amc-card">
+      <div class="amc-card-head">
+        <div class="amc-card-title">
+          {{ w.warranty_number }}
+          · <a href="{{ url_for('order.detail', order_id=w.order_id) }}">{{ w.order.order_number if w.order else w.order_id }}</a>
+        </div>
+        <div>
+          <span class="badge badge-war-active">{{ w.status_label }}</span>
+          {% if w.in_period %}
+            <span class="amc-pill Warranty">{{ w.days_remaining }} days left</span>
+          {% else %}
+            <span class="amc-pill Chargeable">Warranty ended</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="muted mono" style="font-size:12px; margin-bottom:10px;">
+        {{ w.warranty_start_date.strftime('%Y-%m-%d') }} → {{ w.warranty_end_date.strftime('%Y-%m-%d') }}
+        · {{ w.warranty_months }} months
+        {% if w.terms %}· {{ w.terms }}{% endif %}
+      </div>
+
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+        <a href="{{ url_for('amc.warranty_certificate', warranty_id=w.id) }}" target="_blank" class="btn btn-secondary btn-sm">Warranty Certificate</a>
+        <a href="{{ url_for('amc.ticket_new', order_id=w.order_id) }}" class="btn btn-secondary btn-sm">Raise Ticket</a>
+      </div>
+
+      <details>
+        <summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--navy);">Offer AMC plan</summary>
+        <form method="POST" style="margin-top:12px;"
+              action="{{ url_for('amc.offer', order_id=w.order_id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="amc-grid-3">
+            <div class="form-group">
+              <label class="form-label" for="tier_{{ w.id }}">Plan tier *</label>
+              <select class="form-control" id="tier_{{ w.id }}" name="plan_tier" required>
+                {% for t in AmcTier.ALL %}
+                <option value="{{ t }}">{{ t }} ({{ AmcTier.VISITS[t] }} visit{{ 's' if AmcTier.VISITS[t] != 1 }}/yr)</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="fee_{{ w.id }}">Annual fee *</label>
+              <input type="number" step="0.01" min="0" class="form-control" id="fee_{{ w.id }}" name="annual_fee" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="visits_{{ w.id }}">Visits / year (optional override)</label>
+              <input type="number" min="1" class="form-control" id="visits_{{ w.id }}" name="visits_per_year">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="notes_{{ w.id }}">Notes</label>
+            <input type="text" class="form-control" id="notes_{{ w.id }}" name="notes">
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">Offer Plan →</button>
+        </form>
+      </details>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="muted" style="margin-bottom:24px; font-size:13px;">No warranties registered yet. Warranties appear once every opening on an order is installed and signed off.</div>
+    {% endif %}
+
+    {# ── AMC contracts ── #}
+    <div class="section-title">AMC Contracts</div>
+    <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:6px;">
+      <a href="{{ url_for('amc.index') }}"
+         class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
+      {% for code in AmcStatus.ALL %}
+      <a href="{{ url_for('amc.index', status=code) }}"
+         class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">{{ AmcStatus.LABELS[code] }}</a>
+      {% endfor %}
+    </div>
+
+    {% if contracts %}
+    <div style="overflow-x:auto;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>AMC #</th>
+          <th>Order</th>
+          <th>Plan</th>
+          <th>Status</th>
+          <th>Annual fee</th>
+          <th>Term</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in contracts %}
+        <tr>
+          <td class="mono" style="font-size:12px; font-weight:600;">
+            {{ c.amc_number }}{% if c.renewal_of_id %} <span class="muted">(renewal)</span>{% endif %}
+          </td>
+          <td class="link-cell">
+            <a href="{{ url_for('order.detail', order_id=c.order_id) }}">{{ c.order.order_number if c.order else c.order_id }}</a>
+          </td>
+          <td style="font-size:12px;">{{ c.plan_tier }} · {{ c.visits_per_year }}/yr</td>
+          <td>
+            <span class="badge badge-amc-{{ c.status|lower|replace('amc-', '') }}">{{ c.status_label }}</span>
+          </td>
+          <td class="mono" style="font-size:12px;">{{ c.annual_fee if c.annual_fee is not none else '—' }}</td>
+          <td class="muted mono" style="font-size:12px;">
+            {% if c.amc_start_date and c.amc_end_date %}
+              {{ c.amc_start_date.strftime('%Y-%m-%d') }} → {{ c.amc_end_date.strftime('%Y-%m-%d') }}
+            {% else %}—{% endif %}
+          </td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('amc.detail', contract_id=c.id) }}" class="btn btn-secondary btn-sm">View →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="icon">🛡️</div>
+      <p>No AMC contracts yet. Offer a plan from a registered warranty above.</p>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

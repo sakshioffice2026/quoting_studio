@@ -1,0 +1,188 @@
+{% extends 'base.html' %}
+{% block title %}{{ contract.amc_number }} — FenestraOne{% endblock %}
+{% block body %}
+{% include '_amc_styles.html' %}
+{% set _badge = contract.status|lower|replace('amc-', '') %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    {# ── Page header ── #}
+    <div class="page-header">
+      <div>
+        <h1>AMC {{ contract.amc_number }}</h1>
+        <div class="sub mono">
+          {{ contract.order.order_number if contract.order else '' }}
+          · <span class="badge badge-amc-{{ _badge }}">{{ contract.status_label }}</span>
+          {% if contract.renewal_of %}
+            · renewal of <a href="{{ url_for('amc.detail', contract_id=contract.renewal_of.id) }}">{{ contract.renewal_of.amc_number }}</a>
+          {% endif %}
+        </div>
+      </div>
+      <div class="flex gap-8">
+        {% if contract.order %}
+        <a href="{{ url_for('order.detail', order_id=contract.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+        {% endif %}
+        <a href="{{ url_for('amc.index') }}" class="btn btn-secondary btn-sm">← AMC &amp; Warranty</a>
+      </div>
+    </div>
+
+    {# ── Summary cards ── #}
+    <div class="info-card-row">
+      <div class="info-card info-card-highlight">
+        <div class="info-card-label">Status</div>
+        <div class="info-card-value">{{ contract.status_label }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Plan</div>
+        <div class="info-card-value">{{ contract.plan_tier }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Visits / Year</div>
+        <div class="info-card-value">{{ contract.visits_per_year }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Annual Fee</div>
+        <div class="info-card-value">{{ contract.annual_fee if contract.annual_fee is not none else '—' }}</div>
+      </div>
+    </div>
+
+    {# ── Contract details ── #}
+    <div class="quote-meta">
+      {% if contract.warranty %}
+        <p><strong>Warranty:</strong> {{ contract.warranty.warranty_number }}
+          · {{ contract.warranty.warranty_start_date.strftime('%Y-%m-%d') }} → {{ contract.warranty.warranty_end_date.strftime('%Y-%m-%d') }}</p>
+      {% endif %}
+      {% if contract.offered_at %}
+        <p><strong>Offered:</strong> {{ contract.offered_at.strftime('%Y-%m-%d %H:%M') }}</p>
+      {% endif %}
+      {% if contract.amc_start_date and contract.amc_end_date %}
+        <p><strong>Term:</strong> {{ contract.amc_start_date.strftime('%Y-%m-%d') }} → {{ contract.amc_end_date.strftime('%Y-%m-%d') }}
+          {% if contract.status == AmcStatus.ACTIVE and contract.days_to_expiry is not none %}
+            · <span class="{{ 'text-warning' if contract.days_to_expiry <= 60 }}">{{ contract.days_to_expiry }} days left</span>
+          {% endif %}
+        </p>
+      {% endif %}
+      {% if contract.activated_at %}
+        <p><strong>Activated:</strong> {{ contract.activated_at.strftime('%Y-%m-%d %H:%M') }}
+          · signed by {{ contract.signed_by or '—' }}</p>
+      {% endif %}
+      {% if contract.notes %}
+        <p><strong>Notes:</strong> {{ contract.notes }}</p>
+      {% endif %}
+      {% if contract.contract_file_path %}
+        <p><strong>Signed contract:</strong>
+          <a href="{{ url_for('uploaded_file', filename=contract.contract_file_path) }}" target="_blank">View file</a></p>
+      {% endif %}
+    </div>
+
+    {# ── Service history under this contract ── #}
+    <div class="section-title">Service Visits</div>
+    {% if tickets %}
+    <div style="overflow-x:auto; margin-bottom:24px;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Ticket #</th>
+          <th>Type</th>
+          <th>Title</th>
+          <th>Status</th>
+          <th>Scheduled</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tickets %}
+        <tr>
+          <td class="mono" style="font-size:12px; font-weight:600;">{{ t.ticket_number }}</td>
+          <td style="font-size:12px;">{{ t.service_type }}</td>
+          <td style="font-size:12px;">{{ t.title }}</td>
+          <td><span class="badge badge-tkt-{{ t.status|lower|replace('ticket-', '')|replace('_', '-') }}">{{ t.status_label }}</span></td>
+          <td class="muted mono" style="font-size:12px;">{{ t.scheduled_date.strftime('%Y-%m-%d') if t.scheduled_date else '—' }}</td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('amc.ticket_detail', ticket_id=t.id) }}" class="btn btn-secondary btn-sm">View →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="muted" style="margin-bottom:24px; font-size:13px;">No service visits recorded under this contract yet.</div>
+    {% endif %}
+
+    {# ══════════════════════════════════════════════
+       ACTION PANELS
+       ══════════════════════════════════════════════ #}
+
+    {# ── OFFERED → Activate ── #}
+    {% if contract.status == AmcStatus.OFFERED %}
+    {% if final_payment_closed %}
+    <form method="POST" class="action-panel action-panel-wide" enctype="multipart/form-data"
+          action="{{ url_for('amc.activate', contract_id=contract.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h4 class="action-title">Activate AMC</h4>
+      <div class="form-group">
+        <label class="form-label" for="signed_by">Signed by (customer) *</label>
+        <input type="text" class="form-control" id="signed_by" name="signed_by" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="amc_start_date">Start date (blank = after warranty / previous term)</label>
+        <input type="date" class="form-control" id="amc_start_date" name="amc_start_date">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="contract_file">Signed AMC contract (JPG / PNG / PDF)</label>
+        <input type="file" class="form-control" id="contract_file" name="contract_file" accept=".jpg,.jpeg,.png,.pdf">
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Activate →</button>
+    </form>
+    {% else %}
+    <div class="action-panel action-panel-wide action-panel-warning">
+      <h4 class="action-title">Activation Blocked</h4>
+      <p class="action-note" style="margin-bottom:0;">
+        Every payment milestone on this order must be <strong>PAY-CLOSED</strong> before the AMC can be activated.
+      </p>
+      <a href="{{ url_for('order.detail', order_id=contract.order_id) }}" class="btn btn-secondary btn-sm" style="margin-top:12px;">Open Order →</a>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {# ── ACTIVE / EXPIRED → Renew ── #}
+    {% if contract.status in (AmcStatus.ACTIVE, AmcStatus.EXPIRED) %}
+    <form method="POST" class="action-panel action-panel-wide {{ 'action-panel-warning' if contract.status == AmcStatus.EXPIRED }}"
+          action="{{ url_for('amc.renew', contract_id=contract.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h4 class="action-title">{{ 'Contract Expired — Renew' if contract.status == AmcStatus.EXPIRED else 'Offer Renewal' }}</h4>
+      <div class="form-group">
+        <label class="form-label" for="renew_tier">Plan tier</label>
+        <select class="form-control" id="renew_tier" name="plan_tier">
+          {% for t in AmcTier.ALL %}
+          <option value="{{ t }}" {{ 'selected' if t == contract.plan_tier }}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="renew_fee">Annual fee (blank = same as current)</label>
+        <input type="number" step="0.01" min="0" class="form-control" id="renew_fee" name="annual_fee">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="renew_notes">Notes</label>
+        <input type="text" class="form-control" id="renew_notes" name="notes">
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Offer Renewal →</button>
+    </form>
+    {% endif %}
+
+    {# ── ACTIVE → quick ticket link ── #}
+    {% if contract.status == AmcStatus.ACTIVE %}
+    <div class="action-panel action-panel-wide action-panel-success">
+      <h4 class="action-title text-success">✓ Contract Active</h4>
+      <p class="action-note" style="margin-bottom:0;">Raise preventive visits and complaints against this contract from the order's ticket form.</p>
+      <a href="{{ url_for('amc.ticket_new', order_id=contract.order_id) }}" class="btn btn-secondary btn-sm" style="margin-top:12px;">Raise Ticket →</a>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

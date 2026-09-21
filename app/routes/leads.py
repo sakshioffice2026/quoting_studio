@@ -19,6 +19,19 @@ def index():
     return render_template('leads.html', leads=leads, status_filter=status, LeadStatus=LeadStatus)
 
 
+@leads_bp.route('/timeline')
+@login_required
+def timeline_index():
+    """Sidebar shortcut — pick any lead and open its project timeline."""
+    status = request.args.get('status') or None
+    try:
+        leads = lead_service.list_leads(current_user.tenant_id, status=status)
+    except Exception as exc:
+        current_app.logger.exception('Timeline index error: %s', exc)
+        leads = []
+    return render_template('timeline_index.html', leads=leads, status_filter=status, LeadStatus=LeadStatus)
+
+
 @leads_bp.route('/leads/new', methods=['GET', 'POST'])
 @login_required
 def new():

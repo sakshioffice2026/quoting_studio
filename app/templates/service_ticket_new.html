@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% block title %}New Service Ticket — FenestraOne{% endblock %}
+{% block body %}
+{% include '_amc_styles.html' %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+    <div class="page-header">
+      <div>
+        <h1>New Service Ticket</h1>
+        <div class="sub mono">
+          {{ order.order_number }}
+          · <span class="amc-pill {{ coverage }}">Covered by: {{ coverage }}</span>
+        </div>
+      </div>
+      <a href="{{ url_for('amc.tickets') }}" class="btn btn-secondary btn-sm">← All Tickets</a>
+    </div>
+
+    <div class="quote-meta">
+      <p><strong>Warranty:</strong> {{ warranty.warranty_number }}
+        · {{ warranty.warranty_start_date.strftime('%Y-%m-%d') }} → {{ warranty.warranty_end_date.strftime('%Y-%m-%d') }}
+        {% if warranty.in_period %}({{ warranty.days_remaining }} days left){% else %}(ended){% endif %}
+      </p>
+      {% if coverage == Coverage.CHARGEABLE %}
+      <p class="text-warning">Warranty has ended and no AMC is running — this visit will be chargeable.</p>
+      {% endif %}
+    </div>
+
+    <form method="POST" class="action-panel action-panel-wide"
+          action="{{ url_for('amc.ticket_create', order_id=order.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h4 class="action-title">Ticket Details</h4>
+
+      <div class="form-group">
+        <label class="form-label" for="service_type">Service type *</label>
+        <select class="form-control" id="service_type" name="service_type" required>
+          <option value="{{ ServiceType.COMPLAINT }}">Complaint</option>
+          <option value="{{ ServiceType.PREVENTIVE }}">Preventive visit (needs active AMC)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="opening_id">Opening (optional)</label>
+        <select class="form-control" id="opening_id" name="opening_id">
+          <option value="">Whole order / not specific</option>
+          {% for item in openings %}
+          <option value="{{ item.opening_id }}">{{ item.opening.label if item.opening else item.opening_id }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="title">Title *</label>
+        <input type="text" class="form-control" id="title" name="title" maxlength="200" required
+               placeholder="e.g. Sash not closing fully">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="description">Description</label>
+        <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="reported_by">Reported by</label>
+        <input type="text" class="form-control" id="reported_by" name="reported_by">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="scheduled_date">Visit date (optional)</label>
+        <input type="date" class="form-control" id="scheduled_date" name="scheduled_date">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="technician_name">Technician (optional)</label>
+        <input type="text" class="form-control" id="technician_name" name="technician_name">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-sm">Open Ticket →</button>
+    </form>
+
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Handover Certificate {{ installation.install_number }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; margin: 0; padding: 32px; font-size: 13px; }
+    .sheet { max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 14px; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: .06em; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; }
+    .muted { color: #666; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin-top: 16px; }
+    .meta div span { font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; font-size: 12px; }
+    th { background: #f0f0f0; }
+    .statement { margin-top: 24px; line-height: 1.6; }
+    .sign { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-top: 64px; }
+    .sign div { border-top: 1px solid #1a1a1a; padding-top: 6px; font-size: 12px; text-align: center; }
+    .toolbar { max-width: 800px; margin: 0 auto 16px; text-align: right; }
+    .toolbar button { padding: 8px 16px; font-size: 13px; cursor: pointer; }
+    @media print { .toolbar { display: none; } body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <div class="toolbar"><button onclick="window.print()">Print</button></div>
+
+  <div class="sheet">
+    <div class="head">
+      <div>
+        <h1>Installation Handover Certificate</h1>
+        <div class="muted">{{ current_user.tenant.name if current_user.tenant else '' }}</div>
+      </div>
+      <div style="text-align:right;">
+        <div><strong>Installation #:</strong> {{ installation.install_number }}</div>
+        <div><strong>Order #:</strong> {{ installation.order.order_number if installation.order else '—' }}</div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div><span>Status:</span> {{ installation.status_label }}</div>
+      <div><span>Scheduled:</span> {{ installation.scheduled_date.strftime('%d %b %Y') if installation.scheduled_date else '—' }}</div>
+      <div><span>Started:</span> {{ installation.started_at.strftime('%d %b %Y, %H:%M') if installation.started_at else '—' }}</div>
+      <div><span>Completed:</span> {{ installation.completed_at.strftime('%d %b %Y, %H:%M') if installation.completed_at else '—' }}</div>
+      <div><span>Team lead:</span> {{ installation.team_lead_name or '—' }}</div>
+      <div><span>Site contact:</span> {{ installation.site_contact_name or '—' }}{% if installation.site_contact_phone %} ({{ installation.site_contact_phone }}){% endif %}</div>
+      <div style="grid-column:1 / -1;"><span>Site address:</span> {{ installation.installation_address or '—' }}</div>
+    </div>
+
+    <h2>Installation Checklist</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px;">#</th>
+          <th>Opening</th>
+          <th>Fitted</th>
+          <th>Hardware</th>
+          <th>Sealed</th>
+          <th>Cleaned</th>
+          <th>Functional Test</th>
+          <th>Installed By</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in installation.items %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ item.opening.label if item.opening else item.opening_id }}</td>
+          <td>{{ '✓' if item.fitted else '✗' }}</td>
+          <td>{{ '✓' if item.hardware_adjusted else '✗' }}</td>
+          <td>{{ '✓' if item.joints_sealed else '✗' }}</td>
+          <td>{{ '✓' if item.site_cleaned else '✗' }}</td>
+          <td>{{ item.functional_test_result }}</td>
+          <td>{{ item.installed_by or '—' }}</td>
+          <td>{{ item.install_date.strftime('%d %b %Y') if item.install_date else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% set _snags = installation.items|selectattr('snag_list')|list %}
+    {% if _snags %}
+    <h2>Snag History</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Opening</th>
+          <th>Snag / Resolution</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in _snags %}
+        <tr>
+          <td>{{ item.opening.label if item.opening else item.opening_id }}</td>
+          <td style="white-space:pre-line;">{{ item.snag_list }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if installation.handover_notes %}
+    <h2>Handover Notes</h2>
+    <p>{{ installation.handover_notes }}</p>
+    {% endif %}
+
+    <p class="statement">
+      The undersigned confirms that the units listed above have been installed at the site address,
+      functionally tested, and handed over in satisfactory working condition.
+    </p>
+
+    <div class="sign">
+      <div>Installation team lead{% if installation.team_lead_name %}: {{ installation.team_lead_name }}{% endif %}</div>
+      <div>Project manager</div>
+      <div>Customer{% if installation.signed_by %}: {{ installation.signed_by }}{% endif %}
+        {% if installation.customer_signoff_at %}<br>{{ installation.customer_signoff_at.strftime('%d %b %Y') }}{% endif %}</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Warranty Certificate {{ warranty.warranty_number }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; margin: 0; padding: 32px; font-size: 13px; }
+    .sheet { max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 14px; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: .06em; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; }
+    .muted { color: #666; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin-top: 16px; }
+    .meta div span { font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; font-size: 12px; }
+    th { background: #f0f0f0; }
+    .statement { margin-top: 24px; line-height: 1.6; }
+    .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 64px; }
+    .sign div { border-top: 1px solid #1a1a1a; padding-top: 6px; font-size: 12px; text-align: center; }
+    .toolbar { max-width: 800px; margin: 0 auto 16px; text-align: right; }
+    .toolbar button { padding: 8px 16px; font-size: 13px; cursor: pointer; }
+    @media print { .toolbar { display: none; } body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <div class="toolbar"><button onclick="window.print()">Print</button></div>
+
+  <div class="sheet">
+    <div class="head">
+      <div>
+        <h1>Warranty Certificate</h1>
+        <div class="muted">{{ current_user.tenant.name if current_user.tenant else '' }}</div>
+      </div>
+      <div style="text-align:right;">
+        <div><strong>Warranty #:</strong> {{ warranty.warranty_number }}</div>
+        <div><strong>Order #:</strong> {{ warranty.order.order_number if warranty.order else '—' }}</div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div><span>Status:</span> {{ warranty.status_label }}</div>
+      <div><span>Warranty period:</span> {{ warranty.warranty_months }} months</div>
+      <div><span>Valid from:</span> {{ warranty.warranty_start_date.strftime('%d %b %Y') }}</div>
+      <div><span>Valid until:</span> {{ warranty.warranty_end_date.strftime('%d %b %Y') }}</div>
+      <div style="grid-column:1 / -1;"><span>Terms:</span> {{ warranty.terms or 'Standard manufacturing-defect warranty on frames, sashes, glazing seals and supplied hardware.' }}</div>
+    </div>
+
+    {% set _items = [] %}
+    {% if warranty.order %}
+      {% for inst in warranty.order.installations if inst.status == 'INSTALL-COMPLETED' %}
+        {% for item in inst.items %}{% set _ = _items.append((inst, item)) %}{% endfor %}
+      {% endfor %}
+    {% endif %}
+
+    {% if _items %}
+    <h2>Units Covered</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px;">#</th>
+          <th>Opening</th>
+          <th>Installation #</th>
+          <th>Installed On</th>
+          <th>Installed By</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for inst, item in _items %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ item.opening.label if item.opening else item.opening_id }}</td>
+          <td>{{ inst.install_number }}</td>
+          <td>{{ item.install_date.strftime('%d %b %Y') if item.install_date else '—' }}</td>
+          <td>{{ item.installed_by or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <p class="statement">
+      This certificate confirms that the units listed above are covered against manufacturing defects
+      for the period stated. Damage caused by misuse, unauthorised modification, accidents or lack of
+      reasonable care is not covered. After the warranty period, scheduled servicing is available under
+      an Annual Maintenance Contract.
+    </p>
+
+    <div class="sign">
+      <div>Authorised signatory</div>
+      <div>Customer acknowledgement</div>
+    </div>
+  </div>
+</body>
+</html>
