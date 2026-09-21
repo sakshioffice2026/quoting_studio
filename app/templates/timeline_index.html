@@ -8,49 +8,44 @@
     <div class="page-header">
       <div>
         <h1>Timeline</h1>
-        <div class="sub mono">{{ leads|length }} project{{ 's' if leads|length != 1 }} — pick one to open its full workflow timeline</div>
+        <div class="sub mono">Select a project to view its workflow timeline</div>
       </div>
     </div>
 
-    <div style="margin-bottom:16px;">
-      <a href="{{ url_for('leads.timeline_index') }}" class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
-      {% for code in LeadStatus.ALL %}
-      <a href="{{ url_for('leads.timeline_index', status=code) }}"
-         class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">{{ LeadStatus.LABELS[code] }}</a>
-      {% endfor %}
+    {% if leads %}
+    <div class="action-panel action-panel-wide" style="max-width:560px;">
+      <h4 class="action-title">Project</h4>
+      <div class="form-group">
+        <label class="form-label" for="timeline_project">Choose project</label>
+        <select class="form-control" id="timeline_project">
+          <option value="">Select a project…</option>
+          {% for lead in leads %}
+          <option value="{{ url_for('leads.flow', lead_id=lead.id) }}">
+            {{ lead.customer_name }} — {{ lead.status_label }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" id="timeline_open" disabled>Open Timeline →</button>
     </div>
 
-    {% if leads %}
-    <div style="overflow-x:auto;">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Customer</th>
-          <th>Contact</th>
-          <th>Lead Status</th>
-          <th>Follow-up</th>
-          <th>Assigned</th>
-          <th>Created</th>
-          <th style="width:1%;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for lead in leads %}
-        <tr>
-          <td style="font-weight:600;">{{ lead.customer_name }}</td>
-          <td class="muted" style="font-size:12px;">{{ lead.phone or lead.email or '—' }}</td>
-          <td><span class="badge">{{ lead.status_label }}</span></td>
-          <td class="mono" style="font-size:12px;">{{ lead.follow_up_status_label or '—' }}</td>
-          <td class="muted" style="font-size:12px;">{{ lead.assignee.full_name if lead.assignee else 'Unassigned' }}</td>
-          <td class="muted mono" style="font-size:12px;">{{ lead.created_at.strftime('%Y-%m-%d') if lead.created_at else '—' }}</td>
-          <td style="text-align:right; white-space:nowrap;">
-            <a href="{{ url_for('leads.flow', lead_id=lead.id) }}" class="btn btn-primary btn-sm">Open Timeline →</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
+    <script>
+      (function () {
+        var select = document.getElementById('timeline_project');
+        var button = document.getElementById('timeline_open');
+
+        function go() {
+          if (select.value) { window.location.href = select.value; }
+        }
+
+        select.addEventListener('change', function () {
+          button.disabled = !select.value;
+          go();
+        });
+        button.addEventListener('click', go);
+      })();
+    </script>
+
     {% else %}
     <div class="empty-state">
       <div class="icon">◱</div>

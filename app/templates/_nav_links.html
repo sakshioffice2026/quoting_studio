@@ -4,8 +4,7 @@
    class="dash-sidebar-item {{ 'active' if _bp in ('dashboard', 'projects', 'editor', 'quote', 'visualiser', 'model3d') }}">Projects</a>
 <a href="{{ url_for('leads.index') }}"
    class="dash-sidebar-item {{ 'active' if _bp in ('leads', 'presel', 'survey') and _ep not in ('leads.timeline_index', 'leads.flow') }}">Leads</a>
-{% set _lid = (request.view_args or {}).get('lead_id') %}
-<a href="{{ url_for('leads.flow', lead_id=_lid) if _lid else url_for('leads.timeline_index') }}"
+<a href="{{ url_for('leads.timeline_index') }}"
    class="dash-sidebar-item {{ 'active' if _ep in ('leads.timeline_index', 'leads.flow') }}">Timeline</a>
 <a href="{{ url_for('customers.index') }}"
    class="dash-sidebar-item {{ 'active' if _bp == 'customers' }}">Customers</a>
