@@ -109,7 +109,7 @@ def register():
             current_app.logger.info('New tenant registered: %s (slug=%s, user=%s)',
                                     company_name, slug, email)
             login_user(user)
-            flash(f'Welcome to Quoting Studio, {full_name}!', 'success')
+            flash(f'Welcome to FenestraOne, {full_name}!', 'success')
             return redirect(url_for('dashboard.index'))
 
         except Exception as exc:

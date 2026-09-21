@@ -4,6 +4,7 @@ from ..models import Project, Quotation, ProjectStatus, Order, Payment, Manufact
 from ..models.order import OrderStatus
 from ..models.payment import PaymentStatus
 from ..models.manufacturing_job import JobStatus
+from ..models.delivery import Delivery, DeliveryStatus
 
 reports_bp = Blueprint('reports', __name__)
 
@@ -17,6 +18,7 @@ def index():
         orders   = Order.query.filter_by(tenant_id=tid).all()
         payments = Payment.query.filter_by(tenant_id=tid).all()
         jobs     = ManufacturingJob.query.filter_by(tenant_id=tid).all()
+        deliveries = Delivery.query.filter_by(tenant_id=tid).all()
 
         total    = len(projects)
         draft    = sum(1 for p in projects if p.status == ProjectStatus.DRAFT)
@@ -52,6 +54,12 @@ def index():
         jobs_qc_hold     = sum(1 for j in jobs if j.status == JobStatus.QC_HOLD)
         jobs_completed   = sum(1 for j in jobs if j.status == JobStatus.COMPLETED)
 
+        # Delivery
+        deliveries_packed     = sum(1 for d in deliveries if d.status == DeliveryStatus.PACKED)
+        deliveries_dispatched = sum(1 for d in deliveries if d.status == DeliveryStatus.DISPATCHED)
+        deliveries_delivered  = sum(1 for d in deliveries if d.status == DeliveryStatus.DELIVERED)
+        deliveries_issues     = sum(1 for d in deliveries if d.status == DeliveryStatus.DELIVERED_WITH_ISSUES)
+
         # recent quotes
         from sqlalchemy import desc
         recent_quotes = (Quotation.query
@@ -70,6 +78,8 @@ def index():
             payments_received_total=payments_received_total,
             jobs_queued=jobs_queued, jobs_in_progress=jobs_in_progress,
             jobs_qc_hold=jobs_qc_hold, jobs_completed=jobs_completed,
+            deliveries_packed=deliveries_packed, deliveries_dispatched=deliveries_dispatched,
+            deliveries_delivered=deliveries_delivered, deliveries_issues=deliveries_issues,
         )
         return render_template('reports.html',
                                stats=stats, recent_quotes=recent_quotes)

@@ -367,6 +367,33 @@ def flow(lead_id):
             'tip': [('Current status', 'In progress')],
         }
 
+    # ---- Sections 7–12 (Quotation → Delivery) from live project data ----
+    try:
+        from ..services.domain import flow_service
+        downstream = flow_service.build_downstream(current_user.tenant_id, lead.project_id)
+    except Exception as exc:
+        current_app.logger.exception('Flow downstream stages error: %s', exc)
+        downstream = {}
+
+    downstream_groups = {
+        'quotation': 'design', 'order': 'design',
+        'advance_payment': 'payment', 'payment_journey': 'payment',
+        'manufacturing': 'manufacturing', 'delivery': 'manufacturing',
+    }
+    for s in stages:
+        d = downstream.get(s['key'])
+        if not d:
+            continue
+        s['implemented']  = True
+        s['group']        = downstream_groups.get(s['key'], s['group'])
+        s['status_label'] = d['status_label']
+        s['url']          = d['url']
+        infos[s['key']] = {
+            'date_label': d['date_label'],
+            'date':       d['date'],
+            'tip':        d['tip'],
+        }
+
     for s in stages:
         info = infos.get(s['key']) if s['implemented'] else None
         if info:

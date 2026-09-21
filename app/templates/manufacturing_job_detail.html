@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ job.job_number }} — Quoting Studio{% endblock %}
+{% block title %}{{ job.job_number }} — FenestraOne{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
@@ -48,6 +48,63 @@
         <div class="info-card-value">{{ job.qc_result or '—' }}</div>
       </div>
 
+    </div>
+
+    {# ── Stage timeline ── #}
+    {% set _cur = ProductionStage.ORDER.get(job.production_stage, 0) %}
+    {% set _all_done = job.status == JobStatus.COMPLETED %}
+    {% set _remaining = [] %}
+    {% for _st in ProductionStage.ALL %}
+      {% if not _all_done and loop.index0 > _cur %}{% set _ = _remaining.append(ProductionStage.LABELS[_st]) %}{% endif %}
+    {% endfor %}
+
+    <style>
+      .mfg-flow { display:flex; align-items:flex-start; margin:8px 0 12px; padding:16px 12px; background:#fff; border:1px solid var(--line); border-radius:8px; overflow-x:auto; }
+      .mfg-step { flex:1 1 0; min-width:84px; text-align:center; position:relative; }
+      .mfg-step::before { content:''; position:absolute; top:13px; left:-50%; width:100%; height:3px; background:var(--line); z-index:0; }
+      .mfg-step:first-child::before { display:none; }
+      .mfg-step.done::before, .mfg-step.current::before, .mfg-step.hold::before { background:var(--sage); }
+      .mfg-dot { position:relative; z-index:1; width:28px; height:28px; margin:0 auto 6px; border-radius:50%; background:#fff; border:2px solid var(--line); color:var(--steel); font-size:12px; font-weight:700; line-height:24px; }
+      .mfg-step.done .mfg-dot { background:var(--sage); border-color:var(--sage); color:#fff; }
+      .mfg-step.current .mfg-dot { background:var(--navy); border-color:var(--navy); color:#fff; box-shadow:0 0 0 4px rgba(30,50,80,.15); }
+      .mfg-step.hold .mfg-dot { background:var(--warning); border-color:var(--warning); color:#fff; box-shadow:0 0 0 4px rgba(200,140,40,.2); }
+      .mfg-name { font-size:12px; font-weight:600; color:var(--steel); }
+      .mfg-step.done .mfg-name, .mfg-step.current .mfg-name, .mfg-step.hold .mfg-name { color:var(--navy); }
+      .mfg-sub { font-size:11px; color:var(--steel); margin-top:2px; }
+      .mfg-flow-note { font-size:12px; color:var(--steel); margin-bottom:24px; }
+      .mfg-flow-note strong { color:var(--navy); }
+    </style>
+
+    <div class="mfg-flow">
+      {% for _st in ProductionStage.ALL %}
+        {% set _i = loop.index0 %}
+        {% if _all_done or _i < _cur %}
+          {% set _state = 'done' %}{% set _sub = 'Done' %}
+        {% elif _i == _cur %}
+          {% if job.status == JobStatus.QC_HOLD %}
+            {% set _state = 'hold' %}{% set _sub = 'On hold' %}
+          {% elif job.status == JobStatus.QUEUED %}
+            {% set _state = 'current' %}{% set _sub = 'Not started' %}
+          {% else %}
+            {% set _state = 'current' %}{% set _sub = 'In progress' %}
+          {% endif %}
+        {% else %}
+          {% set _state = 'pending' %}{% set _sub = 'Pending' %}
+        {% endif %}
+        <div class="mfg-step {{ _state }}">
+          <div class="mfg-dot">{% if _state == 'done' %}✓{% elif _state == 'hold' %}!{% else %}{{ _i + 1 }}{% endif %}</div>
+          <div class="mfg-name">{{ ProductionStage.LABELS[_st] }}</div>
+          <div class="mfg-sub">{{ _sub }}</div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="mfg-flow-note">
+      {% if _all_done %}
+        <strong>All stages completed.</strong>
+      {% else %}
+        <strong>Now:</strong> {{ job.stage_label }}
+        {% if _remaining %} · <strong>Remaining:</strong> {{ _remaining|join(' → ') }}{% else %} · <strong>Last stage</strong> — record QC, then mark as completed.{% endif %}
+      {% endif %}
     </div>
 
     {# ── Profile codes ── #}
@@ -106,22 +163,50 @@
     {% if job.status in (JobStatus.IN_PROGRESS, JobStatus.QC_HOLD) %}
     <div class="action-grid">
 
+      {# ── Move to stage (forward-only dropdown) ── #}
+      {% set _cur_idx  = ProductionStage.ORDER.get(job.production_stage, 0) %}
+      {% set _last_idx = ProductionStage.ALL|length - 1 %}
       <form method="POST" class="action-panel"
             action="{{ url_for('manufacturing.advance', job_id=job.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Advance Stage</h4>
-        <p class="action-note">Current: {{ job.stage_label }}</p>
+        <h4 class="action-title">Move to Stage</h4>
+        <p class="action-note">Current: {{ job.stage_label }} · stages can only move forward</p>
+
+        {% if _cur_idx < _last_idx %}
+        <div class="form-group">
+          <label class="form-label" for="target_stage">Select stage</label>
+          <select class="form-control" id="target_stage" name="target_stage" required>
+            {% for _st in ProductionStage.ALL %}
+              {% set _i = loop.index0 %}
+              {% if _i < _cur_idx %}
+                <option value="{{ _st }}" disabled>✓ {{ ProductionStage.LABELS[_st] }} — done</option>
+              {% elif _i == _cur_idx %}
+                <option value="{{ _st }}" disabled>● {{ ProductionStage.LABELS[_st] }} — current</option>
+              {% else %}
+                <option value="{{ _st }}" {{ 'selected' if _i == _cur_idx + 1 }}>{{ ProductionStage.LABELS[_st] }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </div>
         <div class="form-group">
           <label class="form-label" for="material_batch_ref">Material batch ref (optional)</label>
           <input type="text" class="form-control" id="material_batch_ref" name="material_batch_ref">
         </div>
-        <button type="submit" class="btn btn-secondary btn-sm">Advance to Next Stage →</button>
+        <button type="submit" class="btn btn-secondary btn-sm">Move to Selected Stage →</button>
+        {% else %}
+        <p class="action-note" style="margin-bottom:0;">
+          Final stage reached — record the QC result to finish this job.
+        </p>
+        {% endif %}
       </form>
 
       <form method="POST" class="action-panel"
             action="{{ url_for('manufacturing.qc', job_id=job.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <h4 class="action-title">Record QC</h4>
+        {% if job.production_stage != ProductionStage.QC %}
+        <p class="action-note">Available once the job reaches the {{ ProductionStage.LABELS[ProductionStage.QC] }} stage.</p>
+        {% endif %}
         <div class="form-group">
           <label class="form-label" for="qc_result">Result</label>
           <select class="form-control" id="qc_result" name="qc_result" required>
@@ -134,7 +219,8 @@
           <label class="form-label" for="qc_notes">Notes</label>
           <textarea class="form-control" id="qc_notes" name="qc_notes" rows="2"></textarea>
         </div>
-        <button type="submit" class="btn btn-primary btn-sm">Record QC Result</button>
+        <button type="submit" class="btn btn-primary btn-sm"
+                {{ 'disabled' if job.production_stage != ProductionStage.QC }}>Record QC Result</button>
       </form>
 
     </div>
@@ -161,9 +247,23 @@
     {% if job.status == JobStatus.COMPLETED %}
     <div class="action-panel action-panel-wide action-panel-success">
       <h4 class="action-title text-success">✓ Manufacturing Completed</h4>
-      <p class="action-note" style="margin-bottom:0;">
-        Proceed to <strong>Section 12 — Delivery</strong> once all openings on this order are completed.
+      {% set _prog = opening_progress(job.order_id) %}
+      {% set _row = (_prog.rows | selectattr('job.id', 'equalto', job.id) | list | first) %}
+      <p class="action-note" style="margin-bottom:12px;">
+        {% if _row and _row.delivery %}
+          This opening is already in <strong>{{ _row.delivery.delivery_number }}</strong> — {{ _row.label }}.
+        {% else %}
+          This opening is ready to pack and dispatch now — no need to wait for the rest of the order.
+        {% endif %}
+        <br>
+        {% set _done = _prog.rows | selectattr('job.status', 'equalto', 'MFG-COMPLETED') | list | length %}
+        {{ _done }} of {{ _prog.summary.total }} openings manufactured on this order.
       </p>
+      {% if _row and _row.delivery %}
+      <a href="{{ url_for('delivery.detail', delivery_id=_row.delivery.id) }}" class="btn btn-primary btn-sm">View Delivery →</a>
+      {% elif job.order %}
+      <a href="{{ url_for('order.detail', order_id=job.order_id) }}" class="btn btn-primary btn-sm">Pack Delivery from Order →</a>
+      {% endif %}
     </div>
     {% endif %}
 

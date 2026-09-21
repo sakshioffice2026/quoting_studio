@@ -101,6 +101,22 @@
         <div class="stat-value">{{ stats.get('jobs_completed',0) }}</div>
         <div class="stat-label">Jobs completed</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('deliveries_packed',0) }}</div>
+        <div class="stat-label">Deliveries packed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('deliveries_dispatched',0) }}</div>
+        <div class="stat-label">Deliveries in transit</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('deliveries_delivered',0) }}</div>
+        <div class="stat-label">Deliveries delivered</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.get('deliveries_issues',0) }}</div>
+        <div class="stat-label">Deliveries with issues</div>
+      </div>
     </div>
 
     <!-- Status breakdown -->

@@ -1,5 +1,5 @@
 """
-Quoting Studio — production entry point for IIS + HttpPlatformHandler.
+FenestraOne — production entry point for IIS + HttpPlatformHandler.
 
 IIS assigns a random internal port via the PORT env var (%HTTP_PLATFORM_PORT%)
 and proxies public traffic to it. This script loads .env, builds the Flask app

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ project.customer_name }} — Quoting Studio{% endblock %}
+{% block title %}{{ project.customer_name }} — FenestraOne{% endblock %}
 
 {% block body %}
 <div class="page-wrap">
@@ -287,6 +287,55 @@
     {% else %}
     <div style="font-size:13px;color:var(--steel);padding:16px 0;">
       No manufacturing jobs yet. Generate them once the order's advance payment is received.
+    </div>
+    {% endif %}
+  </div>
+
+  {# ---- Deliveries ---- #}
+  {% set _all_deliveries = [] %}
+  {% for _o in orders %}{% for _d in _o.deliveries.all() %}{% set _ = _all_deliveries.append(_d) %}{% endfor %}{% endfor %}
+  <div style="margin-bottom:32px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);font-weight:600;">
+        Deliveries ({{ _all_deliveries|length }})
+      </div>
+    </div>
+
+    {% if _all_deliveries %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Delivery #</th>
+          <th>Order</th>
+          <th>Items</th>
+          <th>Status</th>
+          <th>Delivered</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for _d in _all_deliveries %}
+        <tr>
+          <td class="mono" style="font-size:12px;font-weight:600;">{{ _d.delivery_number }}</td>
+          <td class="mono muted" style="font-size:12px;">{{ _d.order.order_number if _d.order else '—' }}</td>
+          <td class="mono muted" style="font-size:12px;">{{ _d.items|length }}</td>
+          <td>
+            <span class="badge badge-{{ _d.status|lower|replace('del-', '')|replace('_', '-') }}">{{ _d.status_label }}</span>
+          </td>
+          <td class="mono muted" style="font-size:12px;">
+            {{ _d.delivered_at.strftime('%d %b %Y') if _d.delivered_at else '—' }}
+          </td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('delivery.detail', delivery_id=_d.id) }}"
+               class="btn btn-secondary btn-sm">View →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="font-size:13px;color:var(--steel);padding:16px 0;">
+      No deliveries yet. Pack completed openings from the order once manufacturing is finished.
     </div>
     {% endif %}
   </div>

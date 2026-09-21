@@ -157,4 +157,4 @@ def setup_logging(app) -> None:
     # keep SQLAlchemy quiet (flip to DEBUG only when debugging queries)
     logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
-    app.logger.info('Quoting Studio — logging initialised (debug=%s)', app.debug)
+    app.logger.info('FenestraOne — logging initialised (debug=%s)', app.debug)

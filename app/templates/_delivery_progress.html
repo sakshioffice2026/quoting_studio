@@ -1,0 +1,83 @@
+{# Usage: {% with order_id=order.id, current_delivery_id=None %}{% include '_delivery_progress.html' %}{% endwith %} #}
+{% set _prog = opening_progress(order_id) %}
+{% set _sum = _prog.summary %}
+{% if _prog.rows %}
+<style>
+  .dp-wrap { margin-bottom:24px; }
+  .dp-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .dp-chip { font-size:12px; padding:5px 10px; border-radius:999px; border:1px solid var(--line); background:#fff; color:var(--steel); }
+  .dp-chip strong { color:var(--navy); margin-right:4px; }
+  .dp-chip.main { background:var(--navy); border-color:var(--navy); color:#fff; }
+  .dp-chip.main strong { color:#fff; }
+  .dp-chip.ready { border-color:var(--sage); color:var(--sage); }
+  .dp-chip.warn { border-color:var(--warning); color:var(--warning); }
+  .dp-bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; margin-bottom:14px; display:flex; }
+  .dp-bar span { display:block; height:100%; }
+  .dp-bar .b-delivered { background:var(--navy); }
+  .dp-bar .b-transit   { background:#5B7DB1; }
+  .dp-bar .b-packed    { background:#B8863B; }
+  .dp-bar .b-ready     { background:var(--sage); }
+  .dp-pill { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; }
+  .dp-pill.in_production { background:#F0EEEA; color:var(--steel); }
+  .dp-pill.ready         { background:#E4EDE9; color:var(--sage); }
+  .dp-pill.packed        { background:#EFEAE0; color:#8A7A5A; }
+  .dp-pill.in_transit    { background:#E8EEF5; color:var(--navy); }
+  .dp-pill.delivered     { background:var(--navy); color:#fff; }
+  .dp-pill.issue         { background:#FBF1DC; color:var(--warning); }
+  .dp-row-done td { opacity:.6; }
+  .dp-row-current td { background:#FBF7EE; }
+</style>
+
+<div class="dp-wrap">
+  <div class="section-title">Openings Progress</div>
+
+  <div class="dp-chips">
+    <span class="dp-chip main"><strong>{{ _sum.delivered }} of {{ _sum.total }}</strong> delivered</span>
+    {% if _sum.pending %}<span class="dp-chip"><strong>{{ _sum.pending }}</strong> pending</span>{% endif %}
+    {% if _sum.ready %}<span class="dp-chip ready"><strong>{{ _sum.ready }}</strong> ready to pack</span>{% endif %}
+    {% if _sum.packed %}<span class="dp-chip"><strong>{{ _sum.packed }}</strong> packed</span>{% endif %}
+    {% if _sum.in_transit %}<span class="dp-chip"><strong>{{ _sum.in_transit }}</strong> in transit</span>{% endif %}
+    {% if _sum.in_production %}<span class="dp-chip"><strong>{{ _sum.in_production }}</strong> still in production</span>{% endif %}
+    {% if _sum.issue %}<span class="dp-chip warn"><strong>{{ _sum.issue }}</strong> with open issue</span>{% endif %}
+  </div>
+
+  <div class="dp-bar" title="Delivery progress">
+    {% if _sum.total %}
+    <span class="b-delivered" style="width:{{ (_sum.delivered + _sum.issue) * 100 / _sum.total }}%"></span>
+    <span class="b-transit"   style="width:{{ _sum.in_transit * 100 / _sum.total }}%"></span>
+    <span class="b-packed"    style="width:{{ _sum.packed * 100 / _sum.total }}%"></span>
+    <span class="b-ready"     style="width:{{ _sum.ready * 100 / _sum.total }}%"></span>
+    {% endif %}
+  </div>
+
+  <div style="overflow-x:auto;">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Opening</th>
+        <th>Manufacturing</th>
+        <th>Delivery status</th>
+        <th>Delivery</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in _prog.rows %}
+      <tr class="{{ 'dp-row-done' if r.state == 'delivered' }} {{ 'dp-row-current' if current_delivery_id and r.delivery and r.delivery.id == current_delivery_id }}">
+        <td>{{ r.opening.label if r.opening else r.job.opening_id }}</td>
+        <td class="mono" style="font-size:12px;">
+          <a href="{{ url_for('manufacturing.detail', job_id=r.job.id) }}">{{ r.job.job_number }}</a>
+          · {{ r.job.status_label }}{% if r.job.status != 'MFG-COMPLETED' %} ({{ r.job.stage_label }}){% endif %}
+        </td>
+        <td><span class="dp-pill {{ r.state }}">{{ r.label }}</span></td>
+        <td class="mono" style="font-size:12px;">
+          {% if r.delivery %}
+            <a href="{{ url_for('delivery.detail', delivery_id=r.delivery.id) }}">{{ r.delivery.delivery_number }}</a>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}

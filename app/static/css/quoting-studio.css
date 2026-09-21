@@ -793,26 +793,8 @@ textarea.form-control { resize: vertical; min-height: 80px; }
   .action-panel { max-width: 100%; }
 }
 
-/* ================================================================
-   ORDERS / PAYMENTS / MANUFACTURING — status badges
-   (class = badge-<status lowercased, prefix stripped, _ → ->)
-   ================================================================ */
-
-/* orders */
-.badge-pending-signature { background: #FBF1DC; color: var(--warning); }
-.badge-confirmed         { background: #E8F5EE; color: var(--success); }
-.badge-cancelled         { background: #F5E8E8; color: #A04040; }
-
-/* payments */
-.badge-invoiced      { background: #E8EEF5; color: var(--navy); }
-.badge-partial       { background: #FBF1DC; color: var(--warning); }
-.badge-received      { background: #E8F5EE; color: var(--success); }
-.badge-overdue       { background: #FDECEC; color: var(--error); }
-.badge-hold-applied  { background: #F0EEEA; color: var(--navy); }
-.badge-closed        { background: var(--navy); color: var(--paper); }
-
-/* manufacturing */
-.badge-queued        { background: #EFEAE0; color: #8A7A5A; }
-.badge-in-progress   { background: #E8EEF5; color: var(--navy); }
-.badge-qc-hold       { background: #FBF1DC; color: var(--warning); }
-.badge-completed     { background: #E8F5EE; color: var(--success); }
+/* status badges — delivery lifecycle */
+.badge-packed                { background: #EFEAE0; color: #8A7A5A; }
+.badge-dispatched            { background: #E8EEF5; color: var(--navy); }
+.badge-delivered             { background: var(--navy); color: var(--paper); }
+.badge-delivered-with-issues { background: #FBF1DC; color: var(--warning); }

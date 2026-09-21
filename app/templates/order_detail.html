@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ order.order_number }} — Quoting Studio{% endblock %}
+{% block title %}{{ order.order_number }} — FenestraOne{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
@@ -143,6 +143,94 @@
       </form>
       {% endif %}
     </div>
+    {% endif %}
+
+    {# ── DELIVERY (Section 12) ── #}
+    {% if order.status == OrderStatus.CONFIRMED and order.manufacturing_jobs.first() %}
+    {% set _ns = namespace(taken=[]) %}
+    {% set _deliveries = order.deliveries.all() %}
+    {% for _d in _deliveries %}{% for _i in _d.items %}{% set _ns.taken = _ns.taken + [_i.opening_id] %}{% endfor %}{% endfor %}
+    {% set _ready = [] %}
+    {% for _j in order.manufacturing_jobs.all() %}
+      {% if _j.status == 'MFG-COMPLETED' and _j.opening_id not in _ns.taken %}{% set _ = _ready.append(_j) %}{% endif %}
+    {% endfor %}
+
+    {% with order_id=order.id, current_delivery_id=None %}{% include '_delivery_progress.html' %}{% endwith %}
+
+    <div class="section-title">Deliveries</div>
+
+    {% if _deliveries %}
+    <div style="overflow-x:auto; margin-bottom:16px;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Delivery #</th>
+          <th>Items</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for _d in _deliveries %}
+        <tr>
+          <td class="mono" style="font-size:12px; font-weight:600;">{{ _d.delivery_number }}</td>
+          <td class="mono" style="font-size:12px;">{{ _d.items|length }}</td>
+          <td><span class="badge badge-{{ _d.status|lower|replace('del-', '')|replace('_', '-') }}">{{ _d.status_label }}</span></td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('delivery.detail', delivery_id=_d.id) }}" class="btn btn-secondary btn-sm">View →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% endif %}
+
+    {% if _ready %}
+    <form method="POST" class="action-panel action-panel-wide"
+          action="{{ url_for('delivery.create', order_id=order.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h4 class="action-title">Pack Delivery</h4>
+      <p class="action-note">
+        {{ _ready|length }} finished opening{{ 's' if _ready|length != 1 }} ready.
+        Select the ones to send now — the rest can be packed and dispatched later as they are completed.
+      </p>
+
+      <div style="margin-bottom:16px;">
+        {% for _j in _ready %}
+        <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px;">
+          <input type="checkbox" name="opening_ids" value="{{ _j.opening_id }}" checked>
+          <span>{{ _j.opening.label if _j.opening else _j.opening_id }}</span>
+          <span class="mono muted" style="font-size:11px;">{{ _j.job_number }}</span>
+          <input type="text" class="form-control" name="package_label_{{ _j.opening_id }}"
+                 placeholder="Package label (optional)" style="width:200px; margin-left:auto;">
+        </label>
+        {% endfor %}
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="delivery_address">Delivery address</label>
+        <textarea class="form-control" id="delivery_address" name="delivery_address" rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="site_contact_name">Site contact name</label>
+        <input type="text" class="form-control" id="site_contact_name" name="site_contact_name">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="site_contact_phone">Site contact phone</label>
+        <input type="text" class="form-control" id="site_contact_phone" name="site_contact_phone">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="scheduled_dispatch_date">Scheduled dispatch date (optional)</label>
+        <input type="date" class="form-control" id="scheduled_dispatch_date" name="scheduled_dispatch_date">
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Pack Delivery →</button>
+    </form>
+    {% else %}
+    <div style="font-size:13px; color:var(--steel); padding:8px 0 24px;">
+      Nothing is ready to pack right now. Each opening becomes available here as soon as its manufacturing job is completed — no need to wait for the whole order.
+    </div>
+    {% endif %}
     {% endif %}
 
     {# ── CANCELLED ── #}

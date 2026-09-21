@@ -42,8 +42,23 @@
     return g;
   }
 
+  function isGridGroup(node) {
+    if (node.tagName.toLowerCase() !== 'g') return false;
+    if (node.classList && node.classList.contains('qs-grid-layer')) return true;
+    const first = node.firstElementChild;
+    return !!(first && first.tagName.toLowerCase() === 'line' &&
+              first.getAttribute('stroke') === '#e8e4da');
+  }
+
+  function isDropShadow(node) {
+    return /qsBlur/.test(node.getAttribute('filter') || '');
+  }
+
   function classifyNode(node) {
     if (!node || node.nodeType !== 1) return 'other';
+
+    // Canvas grid + drop shadow must stay BEHIND the window, never overlay it.
+    if (isGridGroup(node) || isDropShadow(node)) return 'background';
 
     const part = node.getAttribute('data-qs-clickable-part');
     if (part === 'sash') return 'sash';
@@ -75,6 +90,7 @@
     );
 
     const layers = {
+      background: makeLayer('qs-layer-background', 'Grid/Shadow'),
       glass: makeLayer('qs-layer-glass', 'Glass/Fill'),
       sash: makeLayer('qs-layer-sash', 'Sash'),
       arch: makeLayer('qs-layer-arch-transom', 'Arch/Transom'),
@@ -102,7 +118,8 @@
         continue;
       }
 
-      if (kind === 'glass') layers.glass.appendChild(node);
+      if (kind === 'background') layers.background.appendChild(node);
+      else if (kind === 'glass') layers.glass.appendChild(node);
       else if (kind === 'sash') layers.sash.appendChild(node);
       else if (kind === 'arch' || kind === 'transom') layers.arch.appendChild(node);
       else if (kind === 'frame') layers.frame.appendChild(node);
@@ -110,12 +127,14 @@
     }
 
     if (defs) svg.appendChild(defs);
+    layers.background.setAttribute('pointer-events', 'none');
+    svg.appendChild(layers.background);
     svg.appendChild(layers.glass);
     svg.appendChild(layers.sash);
     svg.appendChild(layers.arch);
     svg.appendChild(layers.frame);
     svg.appendChild(layers.other);
-    svg.setAttribute('data-qs-display-order', 'glass,sash,arch-transom,frame,overlay');
+    svg.setAttribute('data-qs-display-order', 'background,glass,sash,arch-transom,frame,overlay');
   }
 
   CanvasCtor.prototype.render = function () {

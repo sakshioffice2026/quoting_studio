@@ -16,10 +16,12 @@
    class="dash-sidebar-item {{ 'active' if _bp == 'payment' }}">Payments</a>
 <a href="{{ url_for('manufacturing.index') }}"
    class="dash-sidebar-item {{ 'active' if _bp == 'manufacturing' }}">Manufacturing</a>
+<a href="{{ url_for('delivery.index') }}"
+   class="dash-sidebar-item {{ 'active' if _bp == 'delivery' }}">Deliveries</a>
 <a href="{{ url_for('reports.index') }}"
    class="dash-sidebar-item {{ 'active' if _bp == 'reports' }}">Reports</a>
 {% if current_user.is_admin %}
-<div class="dash-sidebar-heading">Settings</div>
+<!-- <div class="dash-sidebar-heading">Settings</div>
 <a href="{{ url_for('settings.pricing') }}"
    class="dash-sidebar-item {{ 'active' if _ep == 'settings.pricing' }}">Products &amp; pricing</a>
 <a href="{{ url_for('settings.company') }}"
@@ -36,4 +38,4 @@
    class="dash-sidebar-item {{ 'active' if _ep in ('settings.glass_library', 'settings.create_glass') }}">Glass Units</a>
 {% endif %}
 <a href="{{ url_for('settings.profile') }}"
-   class="dash-sidebar-item {{ 'active' if _ep == 'settings.profile' }}">My profile</a>
+   class="dash-sidebar-item {{ 'active' if _ep == 'settings.profile' }}">My profile</a> -->

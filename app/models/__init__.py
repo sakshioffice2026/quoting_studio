@@ -20,6 +20,7 @@ from .design_approval import DesignApproval, DesignApprovalStatus
 from .order import Order, OrderStatus
 from .payment import Payment, PaymentStatus, PaymentStage
 from .manufacturing_job import ManufacturingJob, JobStatus, ProductionStage, QcResult
+from .delivery import Delivery, DeliveryItem, DeliveryStatus
 
 __all__ = [
     'Tenant',
@@ -44,4 +45,5 @@ __all__ = [
     'Order', 'OrderStatus',
     'Payment', 'PaymentStatus', 'PaymentStage',
     'ManufacturingJob', 'JobStatus', 'ProductionStage', 'QcResult',
+    'Delivery', 'DeliveryItem', 'DeliveryStatus',
 ]

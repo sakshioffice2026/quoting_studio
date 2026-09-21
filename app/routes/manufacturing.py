@@ -88,11 +88,17 @@ def start(job_id):
 @login_required
 def advance(job_id):
     material_batch_ref = request.form.get('material_batch_ref') or None
+    target_stage       = request.form.get('target_stage') or None
+    if target_stage and target_stage not in ProductionStage.ALL:
+        flash('Please select a valid stage.', 'error')
+        return redirect(url_for('manufacturing.detail', job_id=job_id))
     try:
         job = manufacturing_service.advance_stage(
-            current_user.tenant_id, job_id, material_batch_ref=material_batch_ref
+            current_user.tenant_id, job_id,
+            material_batch_ref=material_batch_ref,
+            target_stage=target_stage,
         )
-        flash(f'Job {job.job_number} advanced to {job.stage_label}.', 'success')
+        flash(f'Job {job.job_number} moved to {job.stage_label}.', 'success')
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
     return redirect(url_for('manufacturing.detail', job_id=job_id))

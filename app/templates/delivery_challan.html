@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Delivery Challan {{ delivery.challan_number or delivery.delivery_number }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; margin: 0; padding: 32px; font-size: 13px; }
+    .sheet { max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 14px; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: .06em; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; }
+    .muted { color: #666; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin-top: 16px; }
+    .meta div span { font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; font-size: 12px; }
+    th { background: #f0f0f0; }
+    .sign { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-top: 64px; }
+    .sign div { border-top: 1px solid #1a1a1a; padding-top: 6px; font-size: 12px; text-align: center; }
+    .toolbar { max-width: 800px; margin: 0 auto 16px; text-align: right; }
+    .toolbar button { padding: 8px 16px; font-size: 13px; cursor: pointer; }
+    @media print { .toolbar { display: none; } body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <div class="toolbar"><button onclick="window.print()">Print</button></div>
+
+  <div class="sheet">
+    <div class="head">
+      <div>
+        <h1>Delivery Challan</h1>
+        <div class="muted">{{ current_user.tenant.name if current_user.tenant else '' }}</div>
+      </div>
+      <div style="text-align:right;">
+        <div><strong>Challan #:</strong> {{ delivery.challan_number or '—' }}</div>
+        <div><strong>Delivery #:</strong> {{ delivery.delivery_number }}</div>
+        <div><strong>Order #:</strong> {{ delivery.order.order_number if delivery.order else '—' }}</div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div><span>Status:</span> {{ delivery.status_label }}</div>
+      <div><span>Packed:</span> {{ delivery.packed_at.strftime('%d %b %Y') if delivery.packed_at else '—' }}</div>
+      <div><span>Dispatch date:</span> {{ delivery.dispatch_date.strftime('%d %b %Y, %H:%M') if delivery.dispatch_date else '—' }}</div>
+      <div><span>Vehicle:</span> {{ delivery.vehicle_ref or '—' }}</div>
+      <div><span>Transporter:</span> {{ delivery.transporter_name or '—' }}</div>
+      <div><span>Driver:</span> {{ delivery.driver_name or '—' }}{% if delivery.driver_phone %} ({{ delivery.driver_phone }}){% endif %}</div>
+      <div style="grid-column:1 / -1;"><span>Delivery address:</span> {{ delivery.delivery_address or '—' }}</div>
+      <div><span>Site contact:</span> {{ delivery.site_contact_name or '—' }}</div>
+      <div><span>Contact phone:</span> {{ delivery.site_contact_phone or '—' }}</div>
+    </div>
+
+    <h2>Packing List</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px;">#</th>
+          <th>Opening</th>
+          <th>Package Label</th>
+          <th>Packages</th>
+          <th>Job #</th>
+          <th>Remarks</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in delivery.items %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ item.opening.label if item.opening else item.opening_id }}</td>
+          <td>{{ item.package_label or '—' }}</td>
+          <td>{{ item.package_count }}</td>
+          <td>{{ item.job.job_number if item.job else '—' }}</td>
+          <td>
+            {% if item.is_damaged %}Damaged{% endif %}{% if item.is_damaged and item.is_short %}, {% endif %}{% if item.is_short %}Short{% endif %}
+            {% if item.issue_notes %} — {{ item.issue_notes }}{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td colspan="3" style="text-align:right;"><strong>Total packages</strong></td>
+          <td><strong>{{ delivery.items|sum(attribute='package_count') }}</strong></td>
+          <td colspan="2"></td>
+        </tr>
+      </tbody>
+    </table>
+
+    {% if delivery.damage_shortage_notes %}
+    <h2>Damage / Shortage Notes</h2>
+    <p>{{ delivery.damage_shortage_notes }}</p>
+    {% endif %}
+
+    <div class="sign">
+      <div>Prepared by (Dispatch)</div>
+      <div>Driver signature</div>
+      <div>Received by{% if delivery.received_by %}: {{ delivery.received_by }}{% endif %}</div>
+    </div>
+  </div>
+</body>
+</html>
