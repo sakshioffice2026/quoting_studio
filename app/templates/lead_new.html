@@ -10,6 +10,12 @@
     <form method="POST" style="max-width:520px;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-group">
+        <label class="form-label" for="project_name">Project name</label>
+        <input class="form-control" type="text" id="project_name" name="project_name"
+               placeholder="e.g. Harwood Villa – Whitefield" required>
+      </div>
+
+      <div class="form-group">
         <label class="form-label" for="customer_name">Customer name</label>
         <input class="form-control" type="text" id="customer_name" name="customer_name" required>
       </div>

@@ -28,7 +28,7 @@
       <tbody>
         {% for a in approvals %}
         <tr>
-          <td style="font-weight:600;">{{ a.project.customer_name if a.project else '—' }}</td>
+          <td style="font-weight:600;">{{ a.project.display_name if a.project else '—' }}</td>
           <td class="mono" style="font-size:12px;">Rev {{ a.revision_number }}</td>
           <td>
             <span class="badge">{{ a.status_label }}</span>

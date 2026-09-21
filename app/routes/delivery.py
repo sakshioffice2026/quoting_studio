@@ -172,7 +172,9 @@ def confirm(delivery_id):
         delivery = delivery_service.confirm_delivery(
             tenant_id             = current_user.tenant_id,
             delivery_id           = delivery_id,
-            received_by           = (request.form.get('received_by') or '').strip(),
+            received_by           = (delivery.order.project.customer_name
+                                     if delivery.order is not None and delivery.order.project is not None
+                                     else (request.form.get('received_by') or '').strip()),
             item_issues           = item_issues,
             damage_shortage_notes = request.form.get('damage_shortage_notes') or None,
             pod_file_path         = pod_path,

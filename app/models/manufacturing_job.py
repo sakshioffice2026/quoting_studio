@@ -101,7 +101,6 @@ class ManufacturingJob(db.Model):
         existing = [
             j.job_number for j in
             ManufacturingJob.query.filter(
-                ManufacturingJob.tenant_id == tenant_id,
                 ManufacturingJob.job_number.like(f"{prefix}-%")
             ).with_entities(ManufacturingJob.job_number).all()
         ]

@@ -10,6 +10,9 @@
     <div class="page-header">
       <div>
         <h1>Delivery {{ delivery.delivery_number }}</h1>
+        {% if delivery.order and delivery.order.project %}
+        <div class="sub mono">Project: <strong>{{ delivery.order.project.display_name }}</strong> · Customer: {{ delivery.order.project.customer_name }}</div>
+        {% endif %}
         <div class="sub mono">
           {{ delivery.challan_number or 'No challan' }}
           · <span class="badge badge-{{ delivery.status|lower|replace('del-', '')|replace('_', '-') }}">{{ delivery.status_label }}</span>
@@ -165,7 +168,9 @@
 
       <div class="form-group">
         <label class="form-label" for="received_by">Received by *</label>
-        <input type="text" class="form-control" id="received_by" name="received_by" required>
+        <input type="text" class="form-control" id="received_by" name="received_by"
+               value="{{ delivery.order.project.customer_name }}" readonly
+               style="background:#F5F1E8;cursor:not-allowed;" title="Locked — registered at Lead creation">
       </div>
 
       <div style="overflow-x:auto; margin-bottom:16px;">

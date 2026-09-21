@@ -384,7 +384,7 @@ body { overflow:hidden; }
   <!-- top bar -->
   <div class="dz-top">
     <div class="dz-crumb">
-      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.customer_name }}</a>
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.display_name }}</a>
       &nbsp;/&nbsp;{{ window.label }}
       &nbsp;·&nbsp;<span style="color:#5A6A80;">Window {{ current_idx+1 }} of {{ all_windows|length }}</span>
     </div>

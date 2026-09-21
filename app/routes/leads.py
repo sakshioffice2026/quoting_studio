@@ -40,6 +40,7 @@ def new():
             lead = lead_service.create_lead(
                 tenant_id=current_user.tenant_id,
                 customer_name=request.form.get('customer_name', ''),
+                project_name=(request.form.get('project_name') or '').strip() or None,
                 phone=request.form.get('phone') or None,
                 email=request.form.get('email') or None,
                 source_channel=request.form.get('source_channel') or 'website',

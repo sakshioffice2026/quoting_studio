@@ -45,15 +45,49 @@
       </div>
     </div>
 
+    {# Search #}
+    <style>
+      .dash-search { display:flex; gap:8px; align-items:center; margin:0 0 16px; max-width:640px; }
+      .dash-search .form-control { flex:1; }
+      .stage-name { font-weight:600; font-size:13px; }
+      .stage-badge {
+        display:inline-block; padding:3px 9px; border-radius:999px;
+        font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size:11px; letter-spacing:.02em; white-space:nowrap;
+      }
+      .stage-badge.tone-info    { background:#E6ECF5; color:#2F4A78; }
+      .stage-badge.tone-success { background:#E4EDE9; color:#2F6B4F; }
+      .stage-badge.tone-warn    { background:#FBF0DC; color:#8A5A12; }
+      .stage-badge.tone-danger  { background:#F5E8E8; color:#A04040; }
+      .stage-badge.tone-neutral { background:#EFEAE0; color:#8A7A5A; }
+    </style>
+    <form method="GET" action="{{ url_for('dashboard.index') }}" class="dash-search" role="search">
+      <input type="search" name="q" value="{{ q or '' }}" class="form-control"
+             placeholder="Search project name, customer, phone or project no. (e.g. PRJ-0030)"
+             autocomplete="off">
+      <button type="submit" class="btn btn-primary btn-sm">Search</button>
+      {% if q %}
+      <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary btn-sm">Clear</a>
+      {% endif %}
+    </form>
+    {% if q %}
+    <div class="sub mono" style="margin:-8px 0 12px;">
+      {{ projects|length }} of {{ stats.total }} project{{ 's' if stats.total != 1 }} match “{{ q }}”
+    </div>
+    {% endif %}
+
     {# Project table #}
     {% if projects %}
     <table class="data-table">
       <thead>
         <tr>
+          <th>Project No.</th>
+          <th>Project</th>
           <th>Customer</th>
           <th>Address</th>
           <th>Windows</th>
           <th>Latest quote</th>
+          <th>Stage</th>
           <th>Status</th>
           <th>Updated</th>
           <th></th>
@@ -61,10 +95,13 @@
       </thead>
       <tbody>
         {% for p in projects %}
+        {% set info = stage_info.get(p.id) if stage_info else none %}
         <tr>
+          <td class="mono" style="font-size:12px;">{{ info.project_no if info else 'PRJ-%04d'|format(p.id) }}</td>
           <td class="link-cell">
-            <a href="{{ url_for('projects.detail', project_id=p.id) }}">{{ p.customer_name }}</a>
+            <a href="{{ url_for('projects.detail', project_id=p.id) }}">{{ p.display_name }}</a>
           </td>
+          <td>{{ p.customer_name }}</td>
           <td class="muted">{{ p.address or '—' }}</td>
           <td class="mono" style="font-size:12px;">{{ p.window_count }}</td>
           <td class="mono" style="font-size:12px;">
@@ -75,7 +112,14 @@
             {% endif %}
           </td>
           <td>
-            <span class="badge badge-{{ p.status }}">{{ p.status_label }}</span>
+            {% if info %}<span class="stage-name">{{ info.stage }}</span>{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td>
+            {% if info %}
+              <span class="stage-badge tone-{{ info.tone }}" title="{{ info.label }}">{{ info.code }}</span>
+            {% else %}
+              <span class="badge badge-{{ p.status }}">{{ p.status_label }}</span>
+            {% endif %}
           </td>
           <td class="muted mono" style="font-size:11px;">
             {{ p.updated_at.strftime('%d %b %Y') }}
@@ -92,8 +136,13 @@
     {% else %}
     <div class="empty-state">
       <div class="icon">◱</div>
+      {% if q %}
+      <p>No projects match “{{ q }}”.</p>
+      <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">Clear search</a>
+      {% else %}
       <p>No projects yet. Create your first one to start quoting.</p>
       <a href="{{ url_for('projects.new') }}" class="btn btn-primary">+ New Project</a>
+      {% endif %}
     </div>
     {% endif %}
 

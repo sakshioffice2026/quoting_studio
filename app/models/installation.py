@@ -151,7 +151,6 @@ class Installation(db.Model):
         existing = [
             i.install_number for i in
             Installation.query.filter(
-                Installation.tenant_id == tenant_id,
                 Installation.install_number.like(f"{prefix}-%")
             ).with_entities(Installation.install_number).all()
         ]

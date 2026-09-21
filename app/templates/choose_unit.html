@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Add unit — {{ project.customer_name }} — FenestraOne{% endblock %}
+{% block title %}Add unit — {{ project.display_name }} — FenestraOne{% endblock %}
 
 {% block head %}
 <script src="{{ url_for('static', filename='js/drawing-engine.js') }}"></script>
@@ -46,7 +46,7 @@
 <div class="cu-wrap">
   <div class="cu-head">
     <h1>Add a unit</h1>
-    <div class="sub">{{ project.customer_name }}{% if project.address %} · {{ project.address }}{% endif %}</div>
+    <div class="sub">{{ project.display_name }}{% if project.address %} · {{ project.address }}{% endif %}</div>
     {% if opening %}
     <div style="margin-top:10px; background:#FCF7F1; border:1px solid var(--copper); border-radius:8px; padding:10px 14px; font-size:13px;">
       From survey opening <strong>{{ opening.opening_label }}</strong>{% if opening.location_room %} · {{ opening.location_room }}{% endif %}

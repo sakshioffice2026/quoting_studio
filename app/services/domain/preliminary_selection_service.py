@@ -29,6 +29,8 @@ def _get_or_create_project_for_lead(tenant_id: int, lead, created_by: int) -> Pr
         tenant_id=tenant_id,
         created_by=created_by,
         customer_name=lead.customer_name,
+        customer_id=lead.customer_id,
+        project_name=lead.project_name or None,
         address=lead.project_address,
         status=ProjectStatus.DRAFT,
     )

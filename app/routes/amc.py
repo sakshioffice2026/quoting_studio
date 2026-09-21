@@ -10,7 +10,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from ..models.amc import (
-    AmcStatus, AmcTier, TicketStatus, ServiceType, Coverage,
+    AmcContract, AmcStatus, AmcTier, TicketStatus, ServiceType, Coverage,
 )
 from ..services.domain import amc_service, installation_service
 
@@ -163,11 +163,16 @@ def detail(contract_id):
 @amc_bp.route('/amc/<int:contract_id>/activate', methods=['POST'])
 @login_required
 def activate(contract_id):
+    _contract = AmcContract.query.filter_by(
+        id=contract_id, tenant_id=current_user.tenant_id).first()
+    _customer = (_contract.order.project.customer_name
+                 if _contract is not None and _contract.order is not None
+                 and _contract.order.project is not None else None)
     try:
         contract = amc_service.activate_amc(
             tenant_id          = current_user.tenant_id,
             contract_id        = contract_id,
-            signed_by          = (request.form.get('signed_by') or '').strip(),
+            signed_by          = _customer or (request.form.get('signed_by') or '').strip(),
             amc_start_date     = _parse_date(request.form.get('amc_start_date')),
             contract_file_path = _save_contract(request.files.get('contract_file')),
         )

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Survey — {{ lead.customer_name }}{% endblock %}
+{% block title %}Survey — {{ lead.display_name }}{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
@@ -9,7 +9,7 @@
       <div>
         <h1>Survey</h1>
         <div class="sub mono">
-          {{ lead.customer_name }} · {{ survey.status_label }}
+          {{ lead.display_name }} · {{ survey.status_label }}
           {% if survey.project_id %} · Project #{{ survey.project_id }}{% endif %}
           {% if survey.scheduled_date %} · Scheduled {{ survey.scheduled_date.strftime('%Y-%m-%d') }}{% endif %}
         </div>

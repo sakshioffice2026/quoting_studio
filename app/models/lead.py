@@ -63,6 +63,7 @@ class Lead(db.Model):
     # raw enquiry capture (kept even after dedup/merge into a Customer)
     source_channel     = db.Column(db.String(30), nullable=False, default=SourceChannel.WEBSITE)
     customer_name      = db.Column(db.String(200), nullable=False)
+    project_name       = db.Column(db.String(200), nullable=True)
     phone              = db.Column(db.String(30), nullable=True, index=True)
     email              = db.Column(db.String(200), nullable=True, index=True)
     project_city       = db.Column(db.String(120), nullable=True)
@@ -100,6 +101,11 @@ class Lead(db.Model):
     def follow_up_status_label(self) -> str:
         return FollowUpStatus.LABELS.get(self.follow_up_status, self.follow_up_status or '')
 
+    @property
+    def display_name(self) -> str:
+        """Project name shown everywhere; falls back to the customer name."""
+        return (self.project_name or '').strip() or self.customer_name
+
     def to_dict(self) -> dict:
         return {
             'id':                self.id,
@@ -108,6 +114,7 @@ class Lead(db.Model):
             'project_id':        self.project_id,
             'source_channel':    self.source_channel,
             'customer_name':     self.customer_name,
+            'project_name':      self.project_name,
             'phone':             self.phone,
             'email':             self.email,
             'project_city':      self.project_city,

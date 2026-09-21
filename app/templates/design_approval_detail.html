@@ -7,7 +7,7 @@
   <div class="dash-content">
     <div class="page-header">
       <div>
-        <h1>{{ approval.project.customer_name if approval.project else 'Design Approval' }}</h1>
+        <h1>{{ approval.project.display_name if approval.project else 'Design Approval' }}</h1>
         <div class="sub mono">Revision {{ approval.revision_number }}
           · <span class="badge">{{ approval.status_label }}</span>
           {% if approval.status == DesignApprovalStatus.APPROVAL_SENT and approval.days_until_expiry is not none %}

@@ -129,7 +129,6 @@ class Delivery(db.Model):
         existing = [
             d.delivery_number for d in
             Delivery.query.filter(
-                Delivery.tenant_id == tenant_id,
                 Delivery.delivery_number.like(f"{prefix}-%")
             ).with_entities(Delivery.delivery_number).all()
         ]

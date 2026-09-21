@@ -36,6 +36,7 @@
         <div><strong>Challan #:</strong> {{ delivery.challan_number or '—' }}</div>
         <div><strong>Delivery #:</strong> {{ delivery.delivery_number }}</div>
         <div><strong>Order #:</strong> {{ delivery.order.order_number if delivery.order else '—' }}</div>
+        <div><strong>Project:</strong> {{ delivery.order.project.display_name if delivery.order and delivery.order.project else '—' }}</div>
       </div>
     </div>
 

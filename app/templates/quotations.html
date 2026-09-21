@@ -44,7 +44,7 @@
           <td class="mono" style="font-size:12px; font-weight:600;">{{ q.quotation_number }}</td>
           <td class="link-cell">
             {% if q.project %}
-              <a href="{{ url_for('projects.detail', project_id=q.project_id) }}">{{ q.project.customer_name }}</a>
+              <a href="{{ url_for('projects.detail', project_id=q.project_id) }}">{{ q.project.display_name }}</a>
             {% else %}—{% endif %}
           </td>
           <td class="mono" style="font-size:12px; text-align:center;">v{{ q.quotation_version }}</td>

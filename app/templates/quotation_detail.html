@@ -9,7 +9,7 @@
     {# ── Page header ── #}
     <div class="page-header">
       <div>
-        <h1>{{ quotation.project.customer_name if quotation.project else 'Quotation' }}</h1>
+        <h1>{{ quotation.project.display_name if quotation.project else 'Quotation' }}</h1>
         <div class="sub mono">
           {{ quotation.quotation_number }} · v{{ quotation.quotation_version }}
           · <span class="badge badge-{{ quotation.status|lower|replace('quote-', '')|replace('_', '-') }}">{{ quotation.status_label }}</span>
@@ -199,10 +199,6 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <h4 class="action-title">Accept Quotation</h4>
         <div class="form-group">
-          <label class="form-label" for="accepted_by_name">Customer name</label>
-          <input type="text" class="form-control" id="accepted_by_name" name="accepted_by_name" required>
-        </div>
-        <div class="form-group">
           <label class="form-label" for="acceptance_method">Method</label>
           <select class="form-control" id="acceptance_method" name="acceptance_method">
             <option value="email">Email</option>
@@ -237,10 +233,6 @@
             action="{{ url_for('quotation.accept', quotation_id=quotation.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <h4 class="action-title">Accept Quotation</h4>
-        <div class="form-group">
-          <label class="form-label" for="accepted_by_name_neg">Customer name</label>
-          <input type="text" class="form-control" id="accepted_by_name_neg" name="accepted_by_name" required>
-        </div>
         <div class="form-group">
           <label class="form-label" for="acceptance_method_neg">Method</label>
           <select class="form-control" id="acceptance_method_neg" name="acceptance_method">

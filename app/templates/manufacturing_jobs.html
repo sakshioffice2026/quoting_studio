@@ -29,6 +29,7 @@
       <thead>
         <tr>
           <th>Job #</th>
+          <th>Project</th>
           <th>Order</th>
           <th>Opening</th>
           <th>Stage</th>
@@ -43,6 +44,11 @@
         {% for j in jobs %}
         <tr>
           <td class="mono" style="font-size:12px; font-weight:600;">{{ j.job_number }}</td>
+          <td class="link-cell">
+            {% if j.order and j.order.project %}
+              <a href="{{ url_for('projects.detail', project_id=j.order.project_id) }}">{{ j.order.project.display_name }}</a>
+            {% else %}—{% endif %}
+          </td>
           <td class="link-cell">
             {% if j.order %}
               <a href="{{ url_for('order.detail', order_id=j.order_id) }}">{{ j.order.order_number }}</a>

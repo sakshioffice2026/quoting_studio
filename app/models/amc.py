@@ -91,7 +91,6 @@ def _next_number(model, column, tenant_id: int, prefix_code: str) -> str:
     existing = [
         row[0] for row in
         model.query.filter(
-            model.tenant_id == tenant_id,
             column.like(f"{prefix}-%")
         ).with_entities(column).all()
     ]

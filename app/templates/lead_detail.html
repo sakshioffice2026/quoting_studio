@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ lead.customer_name }} — Lead{% endblock %}
+{% block title %}{{ lead.display_name }} — Lead{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
@@ -7,7 +7,8 @@
   <div class="dash-content">
     <div class="page-header">
       <div>
-        <h1>{{ lead.customer_name }}</h1>
+        <h1>{{ lead.display_name }}</h1>
+        <div class="sub mono">Customer: {{ lead.customer_name }}</div>
         <div class="sub mono">{{ lead.status_label }} · {{ lead.follow_up_status_label or 'No follow-up yet' }}</div>
       </div>
       <a href="{{ url_for('leads.flow', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">View Timeline →</a>

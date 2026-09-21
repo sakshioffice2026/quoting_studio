@@ -3,7 +3,7 @@ from flask import Blueprint, render_template, redirect, url_for, flash, request,
 from flask_login import login_required, current_user
 
 from ..extensions import db
-from ..models import Project, ProjectStatus, Window, Pane
+from ..models import Project, ProjectStatus, Window, Pane, Customer
 
 projects_bp = Blueprint('projects', __name__, url_prefix='/projects')
 
@@ -14,28 +14,42 @@ projects_bp = Blueprint('projects', __name__, url_prefix='/projects')
 @projects_bp.route('/new', methods=['GET', 'POST'])
 @login_required
 def new():
-    if request.method == 'POST':
-        customer_name = request.form.get('customer_name', '').strip()
-        address       = request.form.get('address', '').strip()
-        notes         = request.form.get('notes', '').strip()
+    customers = (
+        Customer.query
+        .filter_by(tenant_id=current_user.tenant_id)
+        .order_by(Customer.name.asc())
+        .all()
+    )
 
-        if not customer_name:
-            flash('Customer name is required.', 'error')
-            return render_template('projects/new.html')
+    if request.method == 'POST':
+        customer_id  = request.form.get('customer_id', type=int)
+        project_name = request.form.get('project_name', '').strip()
+        address      = request.form.get('address', '').strip()
+        notes        = request.form.get('notes', '').strip()
+
+        customer = next((c for c in customers if c.id == customer_id), None)
+        if customer is None:
+            flash('Select a customer. New customer? Register a Lead first.', 'error')
+            return render_template('projects/new.html', customers=customers)
+        if not project_name:
+            flash('Project name is required.', 'error')
+            return render_template('projects/new.html', customers=customers)
 
         try:
             project = Project(
                 tenant_id=current_user.tenant_id,
                 created_by=current_user.id,
-                customer_name=customer_name,
-                address=address or None,
+                customer_id=customer.id,
+                customer_name=customer.name,
+                project_name=project_name,
+                address=address or customer.address or None,
                 notes=notes or None,
             )
             db.session.add(project)
             db.session.commit()
 
             current_app.logger.info('Project created: id=%d customer=%s tenant=%d',
-                                     project.id, customer_name, current_user.tenant_id)
+                                     project.id, customer.name, current_user.tenant_id)
             flash('Project created. Choose the first unit to add.', 'success')
             # New flow: land on the unit chooser (window/door → template) rather
             # than defaulting straight to a blank window in the editor.
@@ -47,7 +61,7 @@ def new():
                                           current_user.tenant_id, exc)
             flash('Failed to create project. Please try again.', 'error')
 
-    return render_template('projects/new.html')
+    return render_template('projects/new.html', customers=customers)
 
 
 # ------------------------------------------------------------------ #
@@ -157,7 +171,7 @@ def edit(project_id):
         project = _own_project(project_id)
 
         if request.method == 'POST':
-            project.customer_name = request.form.get('customer_name', '').strip() or project.customer_name
+            project.project_name  = request.form.get('project_name', '').strip() or project.project_name
             project.address       = request.form.get('address', '').strip() or None
             project.notes         = request.form.get('notes', '').strip() or None
             status                = request.form.get('status')

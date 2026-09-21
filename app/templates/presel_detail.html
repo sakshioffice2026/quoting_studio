@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Preliminary Selection — {{ lead.customer_name }}{% endblock %}
+{% block title %}Preliminary Selection — {{ lead.display_name }}{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
@@ -9,7 +9,7 @@
       <div>
         <h1>Preliminary Selection</h1>
         <div class="sub mono">
-          {{ lead.customer_name }} · {{ presel.status_label }}
+          {{ lead.display_name }} · {{ presel.status_label }}
           {% if presel.project_id %} · Project #{{ presel.project_id }}{% endif %}
         </div>
       </div>

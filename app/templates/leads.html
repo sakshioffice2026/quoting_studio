@@ -25,6 +25,7 @@
     <table class="data-table">
       <thead>
         <tr>
+          <th>Project</th>
           <th>Customer</th>
           <th>Contact</th>
           <th>Source</th>
@@ -37,7 +38,8 @@
       <tbody>
         {% for lead in leads %}
         <tr>
-          <td style="font-weight:600;">{{ lead.customer_name }}</td>
+          <td style="font-weight:600;">{{ lead.display_name }}</td>
+          <td>{{ lead.customer_name }}</td>
           <td class="muted" style="font-size:12px;">{{ lead.phone or lead.email or '—' }}</td>
           <td class="mono" style="font-size:12px;">{{ lead.source_channel }}</td>
           <td><span class="badge">{{ lead.status_label }}</span></td>

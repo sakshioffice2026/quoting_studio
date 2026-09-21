@@ -10,6 +10,9 @@
     <div class="page-header">
       <div>
         <h1>{{ job.opening.label if job.opening else 'Manufacturing Job' }}</h1>
+        {% if job.order and job.order.project %}
+        <div class="sub mono">Project: <strong>{{ job.order.project.display_name }}</strong> · Customer: {{ job.order.project.customer_name }}</div>
+        {% endif %}
         <div class="sub mono">
           {{ job.job_number }} · {{ job.stage_label }}
           · <span class="badge badge-{{ job.status|lower|replace('mfg-', '')|replace('_', '-') }}">{{ job.status_label }}</span>

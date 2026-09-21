@@ -12,6 +12,9 @@
     <div class="page-header">
       <div>
         <h1>AMC {{ contract.amc_number }}</h1>
+        {% if contract.order and contract.order.project %}
+        <div class="sub mono">Project: <strong>{{ contract.order.project.display_name }}</strong> · Customer: {{ contract.order.project.customer_name }}</div>
+        {% endif %}
         <div class="sub mono">
           {{ contract.order.order_number if contract.order else '' }}
           · <span class="badge badge-amc-{{ _badge }}">{{ contract.status_label }}</span>
@@ -125,7 +128,9 @@
       <h4 class="action-title">Activate AMC</h4>
       <div class="form-group">
         <label class="form-label" for="signed_by">Signed by (customer) *</label>
-        <input type="text" class="form-control" id="signed_by" name="signed_by" required>
+        <input type="text" class="form-control" id="signed_by" name="signed_by"
+               value="{{ contract.order.project.customer_name }}" readonly
+               style="background:#F5F1E8;cursor:not-allowed;" title="Locked — registered at Lead creation">
       </div>
       <div class="form-group">
         <label class="form-label" for="amc_start_date">Start date (blank = after warranty / previous term)</label>

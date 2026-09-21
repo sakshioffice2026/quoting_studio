@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Visualiser — {{ window.label }} — {{ project.customer_name }}{% endblock %}
+{% block title %}Visualiser — {{ window.label }} — {{ project.display_name }}{% endblock %}
 
 {% block head %}
 <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -139,7 +139,7 @@ input[type=range] { width:100%;accent-color:var(--copper); }
   <!-- Frame bar -->
   <div class="ed-framebar">
     <div class="ed-crumb">
-      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.customer_name }}</a>
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.display_name }}</a>
       &nbsp;/&nbsp;
       <a href="{{ url_for('editor.edit', project_id=project.id, window_id=window.id) }}">{{ window.label }}</a>
       &nbsp;/&nbsp;Visualiser

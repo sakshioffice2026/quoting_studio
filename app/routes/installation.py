@@ -8,7 +8,7 @@ from flask import (
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
-from ..models.installation import InstallationStatus, TestResult
+from ..models.installation import Installation, InstallationStatus, TestResult
 from ..services.domain import installation_service
 
 installation_bp = Blueprint('installation', __name__)
@@ -226,12 +226,17 @@ def resolve_all(installation_id):
 @installation_bp.route('/installations/<int:installation_id>/signoff', methods=['POST'])
 @login_required
 def signoff(installation_id):
+    _inst = Installation.query.filter_by(
+        id=installation_id, tenant_id=current_user.tenant_id).first()
+    _customer = (_inst.order.project.customer_name
+                 if _inst is not None and _inst.order is not None
+                 and _inst.order.project is not None else None)
     try:
         file_path    = _save_handover(request.files.get('handover_file'))
         installation = installation_service.sign_off(
             tenant_id          = current_user.tenant_id,
             installation_id    = installation_id,
-            signed_by          = (request.form.get('signed_by') or '').strip(),
+            signed_by          = _customer or (request.form.get('signed_by') or '').strip(),
             handover_notes     = request.form.get('handover_notes') or None,
             handover_file_path = file_path,
         )

@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 
-from ..models.order import OrderStatus
+from ..models.order import Order, OrderStatus
 from ..services.domain import order_service
 
 order_bp = Blueprint('order', __name__)
@@ -72,11 +72,15 @@ def create(quotation_id):
 @order_bp.route('/orders/<int:order_id>/confirm', methods=['POST'])
 @login_required
 def confirm(order_id):
-    order_confirmed_by_name = request.form.get('order_confirmed_by_name', '').strip()
+    order = Order.query.filter_by(id=order_id, tenant_id=current_user.tenant_id).first()
+    if order is not None and order.project is not None:
+        order_confirmed_by_name = order.project.customer_name
+    else:
+        order_confirmed_by_name = request.form.get('order_confirmed_by_name', '').strip()
     confirmation_method     = request.form.get('confirmation_method', 'email')
     assigned_project_manager = request.form.get('assigned_project_manager', type=int)
     if not order_confirmed_by_name:
-        flash('Customer confirmation name is required.', 'error')
+        flash('Customer name is missing on this project.', 'error')
         return redirect(url_for('order.detail', order_id=order_id))
     try:
         o = order_service.confirm_order(

@@ -156,7 +156,7 @@
         {% for q in recent_quotes %}
         <tr>
           <td class="mono" style="font-size:12px;">{{ q.quotation_number }}</td>
-          <td>{{ q.project.customer_name if q.project else '—' }}</td>
+          <td>{{ q.project.display_name if q.project else '—' }}</td>
           <td class="muted mono" style="font-size:11px;">{{ q.created_at.strftime('%d %b %Y') }}</td>
           <td class="mono" style="font-weight:600;color:var(--copper);">
             £{{ '%.2f'|format(q.grand_total) if q.grand_total else '—' }}

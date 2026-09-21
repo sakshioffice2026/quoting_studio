@@ -9,8 +9,9 @@
     {# ── Page header ── #}
     <div class="page-header">
       <div>
-        <h1>{{ payment.order.project.customer_name if payment.order and payment.order.project else 'Payment' }}</h1>
+        <h1>{{ payment.order.project.display_name if payment.order and payment.order.project else 'Payment' }}</h1>
         <div class="sub mono">
+          Customer: {{ payment.order.project.customer_name if payment.order and payment.order.project else '—' }}<br>
           {{ payment.payment_number }} · {{ payment.stage_label }}
           · <span class="badge badge-{{ payment.status|lower|replace('pay-', '')|replace('_', '-') }}">{{ payment.status_label }}</span>
           {% if payment.is_overdue and payment.status != PaymentStatus.OVERDUE %}

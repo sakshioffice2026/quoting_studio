@@ -22,6 +22,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="inst-card-head">
         <div class="inst-card-title">
+          <strong>{{ row.order.project.display_name if row.order.project else '—' }}</strong> ·
           <a href="{{ url_for('order.detail', order_id=row.order.id) }}">{{ row.order.order_number }}</a>
           · {{ row.pending|length }} delivered opening{{ 's' if row.pending|length != 1 else '' }} awaiting installation
         </div>
@@ -82,6 +83,7 @@
       <thead>
         <tr>
           <th>Installation #</th>
+          <th>Project</th>
           <th>Order</th>
           <th>Openings</th>
           <th>Status</th>
@@ -95,6 +97,11 @@
         {% for i in installations %}
         <tr>
           <td class="mono" style="font-size:12px; font-weight:600;">{{ i.install_number }}</td>
+          <td class="link-cell">
+            {% if i.order and i.order.project %}
+              <a href="{{ url_for('projects.detail', project_id=i.order.project_id) }}">{{ i.order.project.display_name }}</a>
+            {% else %}—{% endif %}
+          </td>
           <td class="link-cell">
             {% if i.order %}
               <a href="{{ url_for('order.detail', order_id=i.order_id) }}">{{ i.order.order_number }}</a>

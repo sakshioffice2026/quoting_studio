@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Facade — {{ project.customer_name }} — FenestraOne{% endblock %}
+{% block title %}Facade — {{ project.display_name }} — FenestraOne{% endblock %}
 
 {% block head %}
 <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -33,7 +33,7 @@ body{overflow:hidden;}
 <div class="fac-wrap">
   <div class="fac-top">
     <div class="fac-crumb">
-      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.customer_name }}</a>
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.display_name }}</a>
       &nbsp;/&nbsp;Facade View
     </div>
     <div class="fac-acts">

@@ -93,7 +93,6 @@ class Payment(db.Model):
         existing = [
             p.payment_number for p in
             Payment.query.filter(
-                Payment.tenant_id == tenant_id,
                 Payment.payment_number.like(f"{prefix}-%")
             ).with_entities(Payment.payment_number).all()
         ]

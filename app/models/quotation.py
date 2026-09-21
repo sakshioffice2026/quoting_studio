@@ -109,7 +109,6 @@ class Quotation(db.Model):
         existing = [
             q.quotation_number for q in
             Quotation.query.filter(
-                Quotation.tenant_id == tenant_id,
                 Quotation.quotation_number.like(f"{prefix}-%")
             ).with_entities(Quotation.quotation_number).all()
         ]

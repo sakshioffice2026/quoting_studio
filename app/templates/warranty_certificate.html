@@ -36,6 +36,7 @@
       <div style="text-align:right;">
         <div><strong>Warranty #:</strong> {{ warranty.warranty_number }}</div>
         <div><strong>Order #:</strong> {{ warranty.order.order_number if warranty.order else '—' }}</div>
+        <div><strong>Project:</strong> {{ warranty.order.project.display_name if warranty.order and warranty.order.project else '—' }}</div>
       </div>
     </div>
 

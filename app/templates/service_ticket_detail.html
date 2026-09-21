@@ -12,6 +12,9 @@
     <div class="page-header">
       <div>
         <h1>Ticket {{ ticket.ticket_number }}</h1>
+        {% if ticket.order and ticket.order.project %}
+        <div class="sub mono">Project: <strong>{{ ticket.order.project.display_name }}</strong> · Customer: {{ ticket.order.project.customer_name }}</div>
+        {% endif %}
         <div class="sub mono">
           {{ ticket.order.order_number if ticket.order else '' }}
           · <span class="badge badge-tkt-{{ _badge }}">{{ ticket.status_label }}</span>

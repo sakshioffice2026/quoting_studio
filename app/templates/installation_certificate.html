@@ -36,6 +36,7 @@
       <div style="text-align:right;">
         <div><strong>Installation #:</strong> {{ installation.install_number }}</div>
         <div><strong>Order #:</strong> {{ installation.order.order_number if installation.order else '—' }}</div>
+        <div><strong>Project:</strong> {{ installation.order.project.display_name if installation.order and installation.order.project else '—' }}</div>
       </div>
     </div>
 

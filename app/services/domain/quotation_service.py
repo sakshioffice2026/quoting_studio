@@ -254,8 +254,8 @@ def mark_negotiation(tenant_id: int, quotation_id: int, notes: str | None = None
 def accept_quotation(
     tenant_id:         int,
     quotation_id:      int,
-    accepted_by_name:  str,
-    acceptance_method: str  = 'email',
+    acceptance_method: str = 'email',
+    accepted_by_name:  str | None = None,
 ) -> Quotation:
     q = get_quotation(tenant_id, quotation_id)
     if not q:
@@ -267,7 +267,7 @@ def accept_quotation(
         )
     now = datetime.utcnow()
     q.status            = QuotationStatus.ACCEPTED
-    q.accepted_by_name  = accepted_by_name
+    q.accepted_by_name  = (accepted_by_name or '').strip() or q.project.customer_name
     q.accepted_at       = now
     q.acceptance_method = acceptance_method
     q.updated_at        = now

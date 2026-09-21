@@ -78,7 +78,6 @@ class Order(db.Model):
         existing = [
             o.order_number for o in
             Order.query.filter(
-                Order.tenant_id == tenant_id,
                 Order.order_number.like(f"{prefix}-%")
             ).with_entities(Order.order_number).all()
         ]

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Timeline — {{ lead.customer_name }}{% endblock %}
+{% block title %}Timeline — {{ lead.display_name }}{% endblock %}
 {% block head %}
 <style>
   .flow-wrap { max-width: 980px; margin: 0 auto; padding-bottom: 60px; }
@@ -168,7 +168,7 @@
     <div class="page-header">
       <div>
         <h1>Timeline</h1>
-        <div class="sub mono">{{ lead.customer_name }}</div>
+        <div class="sub mono">{{ lead.display_name }} · {{ lead.customer_name }}</div>
       </div>
     </div>
 

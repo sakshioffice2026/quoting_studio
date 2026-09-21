@@ -29,6 +29,7 @@
       <thead>
         <tr>
           <th>Delivery #</th>
+          <th>Project</th>
           <th>Challan #</th>
           <th>Order</th>
           <th>Items</th>
@@ -43,6 +44,11 @@
         {% for d in deliveries %}
         <tr>
           <td class="mono" style="font-size:12px; font-weight:600;">{{ d.delivery_number }}</td>
+          <td class="link-cell">
+            {% if d.order and d.order.project %}
+              <a href="{{ url_for('projects.detail', project_id=d.order.project_id) }}">{{ d.order.project.display_name }}</a>
+            {% else %}—{% endif %}
+          </td>
           <td class="mono" style="font-size:12px;">{{ d.challan_number or '—' }}</td>
           <td class="link-cell">
             {% if d.order %}

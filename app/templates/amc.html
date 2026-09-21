@@ -26,6 +26,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="amc-card-head">
         <div class="amc-card-title">
+          <strong>{{ row.order.project.display_name if row.order.project else '—' }}</strong> ·
           <a href="{{ url_for('order.detail', order_id=row.order.id) }}">{{ row.order.order_number }}</a>
           · all openings installed &amp; signed off
         </div>
@@ -60,6 +61,7 @@
       <thead>
         <tr>
           <th>AMC #</th>
+          <th>Project</th>
           <th>Order</th>
           <th>Plan</th>
           <th>Ends</th>
@@ -71,6 +73,11 @@
         {% for c in expiring %}
         <tr>
           <td class="mono" style="font-size:12px; font-weight:600;">{{ c.amc_number }}</td>
+          <td class="link-cell">
+            {% if c.order and c.order.project %}
+              <a href="{{ url_for('projects.detail', project_id=c.order.project_id) }}">{{ c.order.project.display_name }}</a>
+            {% else %}—{% endif %}
+          </td>
           <td class="link-cell">
             <a href="{{ url_for('order.detail', order_id=c.order_id) }}">{{ c.order.order_number if c.order else c.order_id }}</a>
           </td>
@@ -94,6 +101,7 @@
     <div class="amc-card">
       <div class="amc-card-head">
         <div class="amc-card-title">
+          <strong>{{ w.order.project.display_name if w.order and w.order.project else '—' }}</strong> ·
           {{ w.warranty_number }}
           · <a href="{{ url_for('order.detail', order_id=w.order_id) }}">{{ w.order.order_number if w.order else w.order_id }}</a>
         </div>
@@ -170,6 +178,7 @@
       <thead>
         <tr>
           <th>AMC #</th>
+          <th>Project</th>
           <th>Order</th>
           <th>Plan</th>
           <th>Status</th>
@@ -183,6 +192,11 @@
         <tr>
           <td class="mono" style="font-size:12px; font-weight:600;">
             {{ c.amc_number }}{% if c.renewal_of_id %} <span class="muted">(renewal)</span>{% endif %}
+          </td>
+          <td class="link-cell">
+            {% if c.order and c.order.project %}
+              <a href="{{ url_for('projects.detail', project_id=c.order.project_id) }}">{{ c.order.project.display_name }}</a>
+            {% else %}—{% endif %}
           </td>
           <td class="link-cell">
             <a href="{{ url_for('order.detail', order_id=c.order_id) }}">{{ c.order.order_number if c.order else c.order_id }}</a>

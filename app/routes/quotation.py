@@ -134,16 +134,11 @@ def mark_negotiation(quotation_id):
 @quotation_bp.route('/quotations/<int:quotation_id>/accept', methods=['POST'])
 @login_required
 def accept(quotation_id):
-    accepted_by_name  = request.form.get('accepted_by_name', '').strip()
     acceptance_method = request.form.get('acceptance_method', 'email')
-    if not accepted_by_name:
-        flash('Customer name is required to accept a quotation.', 'error')
-        return redirect(url_for('quotation.detail', quotation_id=quotation_id))
     try:
         q = quotation_service.accept_quotation(
             tenant_id         = current_user.tenant_id,
             quotation_id      = quotation_id,
-            accepted_by_name  = accepted_by_name,
             acceptance_method = acceptance_method,
         )
         flash(f'Quotation {q.quotation_number} accepted — proceed to Order Acceptance.', 'success')

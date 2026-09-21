@@ -24,6 +24,8 @@ class Project(db.Model):
     tenant_id     = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, index=True)
     created_by    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     customer_name = db.Column(db.String(200), nullable=False)
+    customer_id   = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=True, index=True)
+    project_name  = db.Column(db.String(200), nullable=True, index=True)
     address       = db.Column(db.String(500), nullable=True)
     notes         = db.Column(db.Text, nullable=True)
     facade_json   = db.Column(db.Text, nullable=True)
@@ -33,6 +35,8 @@ class Project(db.Model):
         db.DateTime, default=datetime.utcnow,
         onupdate=datetime.utcnow, nullable=False
     )
+
+    customer = db.relationship('Customer', foreign_keys=[customer_id])
 
     windows = db.relationship(
         'Window', backref='project', lazy='dynamic',
@@ -58,6 +62,11 @@ class Project(db.Model):
                 .filter_by(project_id=self.id)
                 .order_by(desc(Quotation.created_at))
                 .first())
+
+    @property
+    def display_name(self) -> str:
+        """Project name shown everywhere; falls back to the customer name."""
+        return (self.project_name or '').strip() or self.customer_name
 
     @property
     def status_label(self) -> str:

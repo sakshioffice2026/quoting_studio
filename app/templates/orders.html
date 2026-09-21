@@ -44,7 +44,7 @@
           <td class="mono" style="font-size:12px; font-weight:600;">{{ o.order_number }}</td>
           <td class="link-cell">
             {% if o.project %}
-              <a href="{{ url_for('projects.detail', project_id=o.project_id) }}">{{ o.project.customer_name }}</a>
+              <a href="{{ url_for('projects.detail', project_id=o.project_id) }}">{{ o.project.display_name }}</a>
             {% else %}—{% endif %}
           </td>
           <td class="mono" style="font-size:12px;">

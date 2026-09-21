@@ -9,6 +9,9 @@
     <div class="page-header">
       <div>
         <h1>New Service Ticket</h1>
+        {% if order.project %}
+        <div class="sub mono">Project: <strong>{{ order.project.display_name }}</strong> · Customer: {{ order.project.customer_name }}</div>
+        {% endif %}
         <div class="sub mono">
           {{ order.order_number }}
           · <span class="amc-pill {{ coverage }}">Covered by: {{ coverage }}</span>

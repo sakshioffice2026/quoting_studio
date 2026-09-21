@@ -21,7 +21,7 @@
           <option value="">Select a project…</option>
           {% for lead in leads %}
           <option value="{{ url_for('leads.flow', lead_id=lead.id) }}">
-            {{ lead.customer_name }} — {{ lead.status_label }}
+            {{ lead.display_name }} ({{ lead.customer_name }}) — {{ lead.status_label }}
           </option>
           {% endfor %}
         </select>

@@ -127,7 +127,7 @@ input[type=range] { width:100%; accent-color:var(--copper); }
   <!-- top bar -->
   <div class="m3d-bar">
     <div class="m3d-crumb">
-      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.customer_name }}</a>
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.display_name }}</a>
       &nbsp;/&nbsp;
       <a href="{{ url_for('editor.edit', project_id=project.id, window_id=window.id) }}">{{ window.label }}</a>
       &nbsp;/&nbsp;3D Model
