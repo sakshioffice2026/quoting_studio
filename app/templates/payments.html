@@ -1,10 +1,18 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill %}
 {% block title %}Payments — FenestraOne{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
+
+    {% set tone_map = {
+      'PAY-INVOICED': 'info', 'PAY-PARTIAL': 'warn', 'PAY-RECEIVED': 'success',
+      'PAY-OVERDUE': 'danger', 'PAY-HOLD_APPLIED': 'warn', 'PAY-CLOSED': 'neutral'
+    } %}
+
+    {# =================== 1. HEADER =================== #}
     <div class="page-header">
       <div>
         <h1>Payments</h1>
@@ -12,80 +20,90 @@
       </div>
     </div>
 
-    {# Status filter pills #}
-    <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:6px;">
-      <a href="{{ url_for('payment.index') }}"
-         class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
-      {% for code in PaymentStatus.ALL %}
-      <a href="{{ url_for('payment.index', status=code) }}"
-         class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">
-        {{ PaymentStatus.LABELS[code] }}
-      </a>
-      {% endfor %}
-    </div>
+    <style>
+      .p-filters { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+      .p-name { font-weight:600; color:var(--navy); }
+      .p-name:hover { color:var(--copper); }
+    </style>
 
-    {% if payments %}
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Payment #</th>
-          <th>Project</th>
-          <th>Order</th>
-          <th>Stage</th>
-          <th>Status</th>
-          <th style="text-align:right;">Invoice</th>
-          <th style="text-align:right;">Received</th>
-          <th style="text-align:right;">Balance</th>
-          <th>Due</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in payments %}
-        <tr>
-          <td class="mono" style="font-size:12px; font-weight:600;">{{ p.payment_number }}</td>
-          <td class="link-cell">
-            {% if p.order and p.order.project %}
-              <a href="{{ url_for('projects.detail', project_id=p.order.project_id) }}">{{ p.order.project.display_name }}</a>
-            {% else %}—{% endif %}
-          </td>
-          <td class="link-cell">
-            {% if p.order %}
-              <a href="{{ url_for('order.detail', order_id=p.order_id) }}">{{ p.order.order_number }}</a>
-            {% else %}—{% endif %}
-          </td>
-          <td class="mono" style="font-size:12px;">{{ p.stage_label }}</td>
-          <td>
-            <span class="badge badge-{{ p.status|lower|replace('pay-', '')|replace('_', '-') }}">{{ p.status_label }}</span>
-            {% if p.is_overdue and p.status != PaymentStatus.OVERDUE %}
-              <span class="expiry-tag text-error">Overdue</span>
-            {% endif %}
-          </td>
-          <td class="num-cell">{{ '₹{:,.2f}'.format(p.invoice_amount|float) if p.invoice_amount else '—' }}</td>
-          <td class="num-cell">{{ '₹{:,.2f}'.format(p.amount_received|float) if p.amount_received else '—' }}</td>
-          <td class="num-cell" style="font-weight:600; color:var(--copper);">
-            {{ '₹{:,.2f}'.format(p.balance|float) if p.balance else '—' }}
-          </td>
-          <td class="muted mono" style="font-size:12px;">
-            {% if p.due_date %}
-              <span class="{{ 'text-error' if p.is_overdue else '' }}">{{ p.due_date.strftime('%Y-%m-%d') }}</span>
-            {% else %}—{% endif %}
-          </td>
-          <td style="text-align:right;">
-            <a href="{{ url_for('payment.detail', payment_id=p.id) }}" class="btn btn-secondary btn-sm">View →</a>
-          </td>
-        </tr>
+    {# =================== 2. FILTERS + TABLE =================== #}
+    <div class="ui-card">
+      <div class="p-filters">
+        <a href="{{ url_for('payment.index') }}"
+           class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
+        {% for code in PaymentStatus.ALL %}
+        <a href="{{ url_for('payment.index', status=code) }}"
+           class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">
+          {{ PaymentStatus.LABELS[code] }}
+        </a>
         {% endfor %}
-      </tbody>
-    </table>
+      </div>
 
-    {% else %}
-    <div class="empty-state">
-      <div class="icon">💳</div>
-      <p>No payments yet. Raise an invoice from a confirmed order.</p>
-      <a href="{{ url_for('order.index') }}" class="btn btn-primary">Go to Orders</a>
+      {% if payments %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Payment #</th>
+            <th>Project</th>
+            <th>Order</th>
+            <th>Stage</th>
+            <th>Status</th>
+            <th style="text-align:right;">Invoice</th>
+            <th style="text-align:right;">Received</th>
+            <th style="text-align:right;">Balance</th>
+            <th>Due</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in payments %}
+          <tr>
+            <td class="mono" style="font-size:12px; font-weight:600;">{{ p.payment_number }}</td>
+            <td>
+              {% if p.order and p.order.project %}
+                <a href="{{ url_for('projects.detail', project_id=p.order.project_id) }}" class="p-name">{{ p.order.project.display_name }}</a>
+              {% else %}—{% endif %}
+            </td>
+            <td class="mono" style="font-size:12px;">
+              {% if p.order %}
+                <a href="{{ url_for('order.detail', order_id=p.order_id) }}">{{ p.order.order_number }}</a>
+              {% else %}—{% endif %}
+            </td>
+            <td>{{ pill(p.stage_label, 'neutral') }}</td>
+            <td>
+              {{ pill(p.status_label, tone_map.get(p.status, 'neutral')) }}
+              {% if p.is_overdue and p.status != PaymentStatus.OVERDUE %}
+                <span class="expiry-tag text-error">Overdue</span>
+              {% endif %}
+            </td>
+            <td class="num-cell">{{ '₹{:,.2f}'.format(p.invoice_amount|float) if p.invoice_amount else '—' }}</td>
+            <td class="num-cell">{{ '₹{:,.2f}'.format(p.amount_received|float) if p.amount_received else '—' }}</td>
+            <td class="num-cell" style="font-weight:600; color:var(--copper);">
+              {{ '₹{:,.2f}'.format(p.balance|float) if p.balance else '—' }}
+            </td>
+            <td class="muted mono" style="font-size:12px;">
+              {% if p.due_date %}
+                <span class="{{ 'text-error' if p.is_overdue else '' }}">{{ p.due_date.strftime('%d %b %Y') }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('payment.detail', payment_id=p.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">💳</div>
+        <p>No payments yet. Raise an invoice from a confirmed order.</p>
+        <a href="{{ url_for('order.index') }}" class="btn btn-primary">Go to Orders</a>
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
 
   </div>
 </div>

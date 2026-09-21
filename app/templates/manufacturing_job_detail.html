@@ -1,59 +1,65 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, stage_tracker %}
 {% block title %}{{ job.job_number }} — FenestraOne{% endblock %}
+
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
 
-    {# ── Page header ── #}
-    <div class="page-header">
-      <div>
-        <h1>{{ job.opening.label if job.opening else 'Manufacturing Job' }}</h1>
-        {% if job.order and job.order.project %}
-        <div class="sub mono">Project: <strong>{{ job.order.project.display_name }}</strong> · Customer: {{ job.order.project.customer_name }}</div>
-        {% endif %}
-        <div class="sub mono">
-          {{ job.job_number }} · {{ job.stage_label }}
-          · <span class="badge badge-{{ job.status|lower|replace('mfg-', '')|replace('_', '-') }}">{{ job.status_label }}</span>
+    {% set tone_map = {
+      'MFG-QUEUED': 'neutral', 'MFG-IN_PROGRESS': 'info', 'MFG-QC_HOLD': 'warn', 'MFG-COMPLETED': 'success'
+    } %}
+    {% set project = job.order.project if job.order and job.order.project else None %}
+
+    {# =================== 1. HEADER CARD =================== #}
+    <div class="ui-card lead-header-card">
+      <div class="lead-header-top">
+        <div class="lead-header-title">
+          <h1>{{ job.opening.label if job.opening else 'Manufacturing Job' }}</h1>
+          <span class="customer-chip">{{ job.job_number }}</span>
+        </div>
+        <div class="lead-header-actions" style="display:flex; gap:8px;">
+          {% if job.order %}
+          <a href="{{ url_for('order.detail', order_id=job.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+          {% endif %}
+          <a href="{{ url_for('manufacturing.index') }}" class="btn btn-secondary btn-sm">← All Jobs</a>
         </div>
       </div>
-      <div class="flex gap-8">
-        {% if job.order %}
-        <a href="{{ url_for('order.detail', order_id=job.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+
+      <div class="lead-header-pills">
+        {{ pill(job.status_label, tone_map.get(job.status, 'neutral')) }}
+        {{ pill(job.stage_label, 'neutral') }}
+        {% if job.qc_result %}
+          {{ pill('QC: ' ~ job.qc_result, 'success' if job.qc_result == QcResult.PASS else 'warn') }}
         {% endif %}
-        <a href="{{ url_for('manufacturing.index') }}" class="btn btn-secondary btn-sm">← All Jobs</a>
       </div>
+
+      {{ stage_tracker(11 if job.status == JobStatus.COMPLETED else 10, job.status == JobStatus.QC_HOLD) }}
     </div>
 
-    {# ── Summary cards ── #}
+    {# =================== 2. KEY NUMBERS =================== #}
     <div class="info-card-row">
-
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Current Stage</div>
         <div class="info-card-value">{{ job.stage_label }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Material Batch</div>
         <div class="info-card-value">{{ job.material_batch_ref or '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Planned Completion</div>
-        <div class="info-card-value">
-          {{ job.planned_completion_date.strftime('%Y-%m-%d') if job.planned_completion_date else '—' }}
-        </div>
+        <div class="info-card-value">{{ job.planned_completion_date.strftime('%d %b %Y') if job.planned_completion_date else '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">QC Result</div>
         <div class="info-card-value">{{ job.qc_result or '—' }}</div>
       </div>
-
     </div>
 
-    {# ── Stage timeline ── #}
+    {# =================== 3. PRODUCTION FLOW =================== #}
     {% set _cur = ProductionStage.ORDER.get(job.production_stage, 0) %}
     {% set _all_done = job.status == JobStatus.COMPLETED %}
     {% set _remaining = [] %}
@@ -62,7 +68,7 @@
     {% endfor %}
 
     <style>
-      .mfg-flow { display:flex; align-items:flex-start; margin:8px 0 12px; padding:16px 12px; background:#fff; border:1px solid var(--line); border-radius:8px; overflow-x:auto; }
+      .mfg-flow { display:flex; align-items:flex-start; padding:8px 4px 4px; overflow-x:auto; }
       .mfg-step { flex:1 1 0; min-width:84px; text-align:center; position:relative; }
       .mfg-step::before { content:''; position:absolute; top:13px; left:-50%; width:100%; height:3px; background:var(--line); z-index:0; }
       .mfg-step:first-child::before { display:none; }
@@ -74,87 +80,105 @@
       .mfg-name { font-size:12px; font-weight:600; color:var(--steel); }
       .mfg-step.done .mfg-name, .mfg-step.current .mfg-name, .mfg-step.hold .mfg-name { color:var(--navy); }
       .mfg-sub { font-size:11px; color:var(--steel); margin-top:2px; }
-      .mfg-flow-note { font-size:12px; color:var(--steel); margin-bottom:24px; }
+      .mfg-flow-note { font-size:12px; color:var(--steel); margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
       .mfg-flow-note strong { color:var(--navy); }
     </style>
 
-    <div class="mfg-flow">
-      {% for _st in ProductionStage.ALL %}
-        {% set _i = loop.index0 %}
-        {% if _all_done or _i < _cur %}
-          {% set _state = 'done' %}{% set _sub = 'Done' %}
-        {% elif _i == _cur %}
-          {% if job.status == JobStatus.QC_HOLD %}
-            {% set _state = 'hold' %}{% set _sub = 'On hold' %}
-          {% elif job.status == JobStatus.QUEUED %}
-            {% set _state = 'current' %}{% set _sub = 'Not started' %}
+    <div class="ui-card">
+      <div class="ui-card-title">Production Flow</div>
+      <div class="mfg-flow">
+        {% for _st in ProductionStage.ALL %}
+          {% set _i = loop.index0 %}
+          {% if _all_done or _i < _cur %}
+            {% set _state = 'done' %}{% set _sub = 'Done' %}
+          {% elif _i == _cur %}
+            {% if job.status == JobStatus.QC_HOLD %}
+              {% set _state = 'hold' %}{% set _sub = 'On hold' %}
+            {% elif job.status == JobStatus.QUEUED %}
+              {% set _state = 'current' %}{% set _sub = 'Not started' %}
+            {% else %}
+              {% set _state = 'current' %}{% set _sub = 'In progress' %}
+            {% endif %}
           {% else %}
-            {% set _state = 'current' %}{% set _sub = 'In progress' %}
+            {% set _state = 'pending' %}{% set _sub = 'Pending' %}
           {% endif %}
+          <div class="mfg-step {{ _state }}">
+            <div class="mfg-dot">{% if _state == 'done' %}✓{% elif _state == 'hold' %}!{% else %}{{ _i + 1 }}{% endif %}</div>
+            <div class="mfg-name">{{ ProductionStage.LABELS[_st] }}</div>
+            <div class="mfg-sub">{{ _sub }}</div>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="mfg-flow-note">
+        {% if _all_done %}
+          <strong>All stages completed.</strong>
         {% else %}
-          {% set _state = 'pending' %}{% set _sub = 'Pending' %}
+          <strong>Now:</strong> {{ job.stage_label }}
+          {% if _remaining %} · <strong>Remaining:</strong> {{ _remaining|join(' → ') }}{% else %} · <strong>Last stage</strong> — record QC, then mark as completed.{% endif %}
         {% endif %}
-        <div class="mfg-step {{ _state }}">
-          <div class="mfg-dot">{% if _state == 'done' %}✓{% elif _state == 'hold' %}!{% else %}{{ _i + 1 }}{% endif %}</div>
-          <div class="mfg-name">{{ ProductionStage.LABELS[_st] }}</div>
-          <div class="mfg-sub">{{ _sub }}</div>
-        </div>
-      {% endfor %}
-    </div>
-    <div class="mfg-flow-note">
-      {% if _all_done %}
-        <strong>All stages completed.</strong>
-      {% else %}
-        <strong>Now:</strong> {{ job.stage_label }}
-        {% if _remaining %} · <strong>Remaining:</strong> {{ _remaining|join(' → ') }}{% else %} · <strong>Last stage</strong> — record QC, then mark as completed.{% endif %}
-      {% endif %}
+      </div>
     </div>
 
-    {# ── Profile codes ── #}
+    {# =================== 4. DETAILS CARD =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Job Details</div>
+      <div class="info-grid">
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Project</div>
+          <div class="info-grid-value">{{ project.display_name if project else '—' }}</div>
+        </div></div>
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Customer</div>
+          <div class="info-grid-value">{{ project.customer_name if project else '—' }}</div>
+        </div></div>
+        {% if job.qc_checked_at %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Last QC</div>
+          <div class="info-grid-value">{{ job.qc_checked_at.strftime('%d %b %Y, %H:%M') }} — {{ job.qc_result }}{% if job.qc_notes %} ({{ job.qc_notes }}){% endif %}</div>
+        </div></div>
+        {% endif %}
+        {% if job.actual_completion_date %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Completed</div>
+          <div class="info-grid-value">{{ job.actual_completion_date.strftime('%d %b %Y') }}</div>
+        </div></div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# =================== 5. PROFILE CODES =================== #}
     {% set codes = job.profile_codes %}
     {% if codes %}
-    <div class="section-title">Profile Codes Consumed</div>
-    <div style="overflow-x:auto; margin-bottom:32px;">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Profile Code</th>
-          <th>Qty</th>
-          <th>Length (mm)</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in codes %}
-        <tr>
-          <td class="mono" style="font-size:12px;">{{ c.profile_code or '—' }}</td>
-          <td class="mono" style="font-size:12px;">{{ c.qty or '—' }}</td>
-          <td class="mono" style="font-size:12px;">{{ c.length_mm or '—' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="ui-card">
+      <div class="ui-card-title">Profile Codes Consumed</div>
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Profile Code</th>
+            <th>Qty</th>
+            <th>Length (mm)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in codes %}
+          <tr>
+            <td class="mono" style="font-size:12px;">{{ c.profile_code or '—' }}</td>
+            <td class="mono" style="font-size:12px;">{{ c.qty or '—' }}</td>
+            <td class="mono" style="font-size:12px;">{{ c.length_mm or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
     </div>
     {% endif %}
 
-    {# ── Timeline info ── #}
-    <div class="quote-meta">
-      {% if job.qc_checked_at %}
-        <p><strong>Last QC:</strong> {{ job.qc_checked_at.strftime('%Y-%m-%d %H:%M') }}
-          — {{ job.qc_result }}{% if job.qc_notes %} ({{ job.qc_notes }}){% endif %}</p>
-      {% endif %}
-      {% if job.actual_completion_date %}
-        <p><strong>Completed:</strong> {{ job.actual_completion_date.strftime('%Y-%m-%d') }}</p>
-      {% endif %}
-    </div>
+    {# =================== 6. ACTION CARDS =================== #}
 
-    {# ══════════════════════════════════════════════
-       ACTION PANELS
-       ══════════════════════════════════════════════ #}
-
-    {# ── QUEUED → Start ── #}
     {% if job.status == JobStatus.QUEUED %}
-    <div class="action-panel action-panel-wide">
-      <h4 class="action-title">Start Job</h4>
+    <div class="ui-card" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:10px;">Start Job</div>
       <form method="POST" action="{{ url_for('manufacturing.start', job_id=job.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-primary btn-sm">Start Production →</button>
@@ -162,17 +186,15 @@
     </div>
     {% endif %}
 
-    {# ── IN_PROGRESS / QC_HOLD → Advance Stage / Record QC ── #}
     {% if job.status in (JobStatus.IN_PROGRESS, JobStatus.QC_HOLD) %}
     <div class="action-grid">
 
-      {# ── Move to stage (forward-only dropdown) ── #}
       {% set _cur_idx  = ProductionStage.ORDER.get(job.production_stage, 0) %}
       {% set _last_idx = ProductionStage.ALL|length - 1 %}
-      <form method="POST" class="action-panel"
+      <form method="POST" class="ui-card action-panel"
             action="{{ url_for('manufacturing.advance', job_id=job.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Move to Stage</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Move to Stage</div>
         <p class="action-note">Current: {{ job.stage_label }} · stages can only move forward</p>
 
         {% if _cur_idx < _last_idx %}
@@ -203,10 +225,10 @@
         {% endif %}
       </form>
 
-      <form method="POST" class="action-panel"
+      <form method="POST" class="ui-card action-panel"
             action="{{ url_for('manufacturing.qc', job_id=job.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Record QC</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Record QC</div>
         {% if job.production_stage != ProductionStage.QC %}
         <p class="action-note">Available once the job reaches the {{ ProductionStage.LABELS[ProductionStage.QC] }} stage.</p>
         {% endif %}
@@ -229,8 +251,8 @@
     </div>
 
     {% if job.production_stage == ProductionStage.QC and job.qc_result == QcResult.PASS %}
-    <div class="action-panel action-panel-wide action-panel-success">
-      <h4 class="action-title text-success">✓ QC Passed</h4>
+    <div class="ui-card action-panel-success" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:10px; color:var(--success);">✓ QC Passed</div>
       <form method="POST" action="{{ url_for('manufacturing.complete', job_id=job.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-primary btn-sm">Mark as Completed →</button>
@@ -239,17 +261,16 @@
     {% endif %}
 
     {% if job.status == JobStatus.QC_HOLD %}
-    <div class="action-panel action-panel-wide action-panel-warning">
-      <h4 class="action-title">QC Hold — {{ job.qc_result }}</h4>
+    <div class="ui-card action-panel-warning" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px;">QC Hold — {{ job.qc_result }}</div>
       <p class="action-note" style="margin-bottom:0;">{{ job.qc_notes or 'Rework required before proceeding.' }}</p>
     </div>
     {% endif %}
     {% endif %}
 
-    {# ── COMPLETED — terminal ── #}
     {% if job.status == JobStatus.COMPLETED %}
-    <div class="action-panel action-panel-wide action-panel-success">
-      <h4 class="action-title text-success">✓ Manufacturing Completed</h4>
+    <div class="ui-card action-panel-success" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Manufacturing Completed</div>
       {% set _prog = opening_progress(job.order_id) %}
       {% set _row = (_prog.rows | selectattr('job.id', 'equalto', job.id) | list | first) %}
       <p class="action-note" style="margin-bottom:12px;">

@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, avatar %}
 {% block title %}{{ customer.name if customer else 'Customer' }} — Quoting Studio{% endblock %}
 {% block body %}
 <div class="dash-layout">
@@ -6,32 +7,113 @@
 
   <div class="dash-content">
     {% if customer %}
-    <div class="page-header"><h1>{{ customer.name }}</h1></div>
-    <div style="max-width:640px;">
-      <p><strong>Phone:</strong> {{ customer.phone or '—' }}</p>
-      <p><strong>Email:</strong> {{ customer.email or '—' }}</p>
-      <p><strong>City:</strong> {{ customer.city or '—' }}</p>
-      <p><strong>Address:</strong> {{ customer.address or '—' }}</p>
+
+    {% set name_parts = customer.name.split() %}
+    {% set customer_initials = ((name_parts[0][0] if name_parts|length > 0 else '?') ~ (name_parts[1][0] if name_parts|length > 1 else '')) | upper %}
+    {% set wa_number = (customer.phone or '') | replace('+', '') | replace(' ', '') | replace('-', '') %}
+    {% set lead_tone = {'LEAD-DUPLICATE': 'danger', 'LEAD-INVALID': 'danger'} %}
+
+    {# =================== 1. HEADER CARD =================== #}
+    <div class="ui-card lead-header-card">
+      <div class="lead-header-top">
+        <div class="lead-header-title">
+          {{ avatar(customer_initials) }}
+          <h1>{{ customer.name }}</h1>
+          {% if customer.city %}<span class="customer-chip">{{ customer.city }}</span>{% endif %}
+        </div>
+        <div class="lead-header-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+          {% if customer.phone %}
+          <a href="tel:{{ customer.phone }}" class="btn btn-secondary btn-sm">Call</a>
+          <a href="https://wa.me/{{ wa_number }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">WhatsApp</a>
+          {% endif %}
+          {% if customer.email %}
+          <a href="mailto:{{ customer.email }}" class="btn btn-secondary btn-sm">Email</a>
+          {% endif %}
+          <a href="{{ url_for('customers.index') }}" class="btn btn-secondary btn-sm">← All Customers</a>
+        </div>
+      </div>
+
+      <div class="lead-header-pills">
+        {{ pill(customer.leads.count() ~ ' lead' ~ ('s' if customer.leads.count() != 1 else ''), 'info') }}
+      </div>
     </div>
 
-    <h2 style="margin-top:32px;">Leads</h2>
-    <table class="data-table">
-      <thead><tr><th>Date</th><th>Status</th><th>Follow-up</th><th></th></tr></thead>
-      <tbody>
-        {% for lead in customer.leads %}
-        <tr>
-          <td class="mono" style="font-size:12px;">{{ lead.created_at.strftime('%Y-%m-%d') }}</td>
-          <td>{{ lead.status_label }}</td>
-          <td>{{ lead.follow_up_status_label or '—' }}</td>
-          <td style="text-align:right;">
-            <a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">View →</a>
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="4" class="muted">No leads yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    {# =================== 2. CONTACT & DETAILS =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Contact &amp; Details</div>
+      <div class="info-grid">
+
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">Phone</div>
+            <div class="info-grid-value">
+              {% if customer.phone %}<a href="tel:{{ customer.phone }}">{{ customer.phone }}</a>{% else %}<span class="muted-value">—</span>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 6l-10 7L2 6"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">Email</div>
+            <div class="info-grid-value">
+              {% if customer.email %}<a href="mailto:{{ customer.email }}">{{ customer.email }}</a>{% else %}<span class="muted-value">—</span>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">City</div>
+            <div class="info-grid-value">{% if customer.city %}{{ customer.city }}{% else %}<span class="muted-value">—</span>{% endif %}</div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <span class="info-grid-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          </span>
+          <div>
+            <div class="info-grid-label">Address</div>
+            <div class="info-grid-value">{% if customer.address %}{{ customer.address }}{% else %}<span class="muted-value">—</span>{% endif %}</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    {# =================== 3. LEADS =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Leads ({{ customer.leads.count() }})</div>
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead><tr><th>Date</th><th>Status</th><th>Follow-up</th><th></th></tr></thead>
+        <tbody>
+          {% for lead in customer.leads %}
+          <tr>
+            <td class="mono" style="font-size:12px;">{{ lead.created_at.strftime('%d %b %Y') }}</td>
+            <td>{{ pill(lead.status_label, lead_tone.get(lead.status, 'neutral')) }}</td>
+            <td>{{ lead.follow_up_status_label or '—' }}</td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="muted">No leads yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+
     {% else %}
     <div class="empty-state"><p>Customer not found.</p></div>
     {% endif %}

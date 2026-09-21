@@ -1,12 +1,27 @@
 from flask import Blueprint, render_template, current_app
 from flask_login import login_required, current_user
-from ..models import Project, Quotation, ProjectStatus, Order, Payment, ManufacturingJob
+from ..models import Project, Quotation, QuotationStatus, ProjectStatus, Order, Payment, ManufacturingJob
 from ..models.order import OrderStatus
 from ..models.payment import PaymentStatus
 from ..models.manufacturing_job import JobStatus
 from ..models.delivery import Delivery, DeliveryStatus
 
 reports_bp = Blueprint('reports', __name__)
+
+
+def derive_project_status(project, project_quotes):
+    """Project state from the live quotation workflow.
+    Falls back to the legacy Project.status when a project has no quotations."""
+    if not project_quotes:
+        return project.status
+    statuses = {q.status for q in project_quotes}
+    if QuotationStatus.ACCEPTED in statuses:
+        return ProjectStatus.WON
+    if statuses & {QuotationStatus.SENT, QuotationStatus.NEGOTIATION}:
+        return ProjectStatus.SENT
+    if QuotationStatus.LOST in statuses:
+        return ProjectStatus.LOST
+    return ProjectStatus.DRAFT
 
 @reports_bp.route('/reports')
 @login_required
@@ -20,17 +35,30 @@ def index():
         jobs     = ManufacturingJob.query.filter_by(tenant_id=tid).all()
         deliveries = Delivery.query.filter_by(tenant_id=tid).all()
 
+        quotes_by_project = {}
+        for q in quotes:
+            quotes_by_project.setdefault(q.project_id, []).append(q)
+
+        derived = {p.id: derive_project_status(p, quotes_by_project.get(p.id, []))
+                   for p in projects}
+
         total    = len(projects)
-        draft    = sum(1 for p in projects if p.status == ProjectStatus.DRAFT)
-        sent     = sum(1 for p in projects if p.status == ProjectStatus.SENT)
-        won      = sum(1 for p in projects if p.status == ProjectStatus.WON)
-        lost     = sum(1 for p in projects if p.status == ProjectStatus.LOST)
+        draft    = sum(1 for s in derived.values() if s == ProjectStatus.DRAFT)
+        sent     = sum(1 for s in derived.values() if s == ProjectStatus.SENT)
+        won      = sum(1 for s in derived.values() if s == ProjectStatus.WON)
+        lost     = sum(1 for s in derived.values() if s == ProjectStatus.LOST)
         win_rate = round(won / (sent + won + lost) * 100) if (sent + won + lost) else 0
 
-        pipeline = sum(float(q.grand_total or 0) for q in quotes
-                       if q.project and q.project.status != ProjectStatus.LOST)
-        won_value= sum(float(q.grand_total or 0) for q in quotes
-                       if q.project and q.project.status == ProjectStatus.WON)
+        # Pipeline = latest quotation per open (not lost) project
+        pipeline = 0.0
+        for pid, pq in quotes_by_project.items():
+            if derived.get(pid) == ProjectStatus.LOST:
+                continue
+            latest = max(pq, key=lambda x: x.created_at)
+            pipeline += float(latest.grand_total or 0)
+
+        won_value = sum(float(q.grand_total or 0) for q in quotes
+                        if q.status == QuotationStatus.ACCEPTED)
         avg_quote= round(sum(float(q.grand_total or 0) for q in quotes) / len(quotes), 2) \
                    if quotes else 0
 

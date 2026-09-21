@@ -1,0 +1,290 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard — FenestraOne{% endblock %}
+
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    {% macro icon(key) -%}
+    {% set paths = {
+      'payment':  'M3 5h18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M1 10h22',
+      'qc':       'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z',
+      'snag':     'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z M12 9v4 M12 17h.01',
+      'delivery': 'M1 3h15v13H1z M16 8h4l3 3v5h-7V8z M5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z M18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+      'quote':    'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8',
+      'design':   'M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
+      'order':    'M12 20h9 M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z',
+      'amc':      'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+      'lead':     'M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M20 8v6 M23 11h-6'
+    } %}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ paths.get(key, '') }}"/></svg>
+    {%- endmacro %}
+
+    <style>
+      /* ============ HERO ============ */
+      .hm-hero {
+        background: linear-gradient(135deg, #1B2A44 0%, #24375B 60%, #2E4670 100%);
+        color: #fff; border-radius: 16px; padding: 28px 30px 24px; margin-bottom: 20px;
+        position: relative; overflow: hidden;
+      }
+      .hm-hero::after {
+        content:''; position:absolute; right:-70px; top:-70px; width:240px; height:240px; border-radius:50%;
+        background: radial-gradient(circle, rgba(201,120,58,.35) 0%, rgba(201,120,58,0) 70%);
+        pointer-events:none;
+      }
+      .hm-hero-top { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; position:relative; z-index:1; }
+      .hm-date { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:#E3A574; }
+      .hm-hero h1 { font-family: var(--font-display); font-size:32px; font-weight:600; margin:6px 0 6px; color:#fff; }
+      .hm-hero-sub { font-size:14px; color:#C8D2E6; max-width:520px; }
+      .hm-hero-sub strong { color:#fff; }
+      .hm-hero-actions { display:flex; gap:8px; flex-wrap:wrap; }
+      .hm-hero-actions .btn-ghost {
+        background: rgba(255,255,255,.10); color:#fff; border:1px solid rgba(255,255,255,.25);
+      }
+      .hm-hero-actions .btn-ghost:hover { background: rgba(255,255,255,.2); }
+      .hm-signals { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; margin-top:22px; position:relative; z-index:1; }
+      .hm-signal { background: rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:14px 16px; }
+      .hm-signal-num { font-family: var(--font-display); font-size:30px; line-height:1; color:#fff; }
+      .hm-signal-label { font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:#AEBBD4; margin-top:8px; }
+
+      /* ============ JOURNEY ============ */
+      .hm-card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:20px; }
+      .hm-card-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+      .hm-card-title { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--steel); font-weight:700; }
+      .hm-card-hint { font-size:12px; color:var(--steel); }
+
+      .hm-track { display:flex; overflow-x:auto; padding:6px 2px 10px; scrollbar-width:thin; }
+      .hm-stage { flex:0 0 138px; position:relative; padding:0 6px 12px; text-align:center; border-radius:12px; }
+      .hm-stage::before {
+        content:''; position:absolute; top:23px; left:-50%; width:100%; height:3px; background:var(--line); z-index:0;
+      }
+      .hm-stage:first-child::before { display:none; }
+      .hm-stage.has-work::before { background: var(--sage); }
+      .hm-stage.is-busiest { background: #FCF7F1; }
+
+      .hm-node {
+        position:relative; z-index:1; width:40px; height:40px; margin:4px auto 8px; border-radius:50%;
+        display:flex; align-items:center; justify-content:center;
+        font-size:13px; font-weight:700; background:#fff; border:2px solid var(--line); color:var(--steel);
+      }
+      .hm-stage.has-work .hm-node { background: var(--navy); border-color: var(--navy); color:#fff; }
+      .hm-stage.hot .hm-node { background:#D9A441; border-color:#D9A441; color:#fff; animation: hm-pulse 2s infinite; }
+      @keyframes hm-pulse {
+        0%   { box-shadow: 0 0 0 0 rgba(217,164,65,.55); }
+        70%  { box-shadow: 0 0 0 10px rgba(217,164,65,0); }
+        100% { box-shadow: 0 0 0 0 rgba(217,164,65,0); }
+      }
+      .hm-stage-label { font-size:12px; font-weight:600; color:var(--navy); min-height:30px; line-height:1.25; }
+      .hm-stage-count { font-family: var(--font-display); font-size:28px; color:var(--navy); margin:4px 0 8px; line-height:1; }
+      .hm-stage-count.zero { color:#CFC8B8; }
+
+      .hm-tokens { display:flex; flex-direction:column; gap:6px; align-items:stretch; }
+      .hm-token {
+        display:flex; align-items:center; gap:8px; padding:4px 8px 4px 4px; border-radius:999px;
+        background:#FAF8F3; border:1px solid var(--line); text-decoration:none; color:var(--navy);
+        transition: transform .12s ease, box-shadow .12s ease;
+      }
+      .hm-token:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(27,42,68,.12); }
+      .hm-token-dot {
+        flex:0 0 26px; width:26px; height:26px; border-radius:50%; background:#fff; border:2px solid #C9BFA8;
+        display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--navy);
+      }
+      .hm-token.tone-info    .hm-token-dot { border-color:#5B7DB1; }
+      .hm-token.tone-success .hm-token-dot { border-color:var(--sage); }
+      .hm-token.tone-warn    .hm-token-dot { border-color:#D9A441; }
+      .hm-token.tone-danger  .hm-token-dot { border-color:#C26A6A; }
+      .hm-token-name { font-size:11.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
+      .hm-more { font-size:11px; color:var(--steel); text-decoration:none; padding-top:2px; }
+      .hm-more:hover { color:var(--copper); }
+
+      /* ============ ATTENTION ============ */
+      .hm-att-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:14px; }
+      .hm-att {
+        background:#fff; border:1px solid var(--line); border-top:4px solid #C9BFA8; border-radius:12px;
+        padding:16px 18px 14px; display:flex; flex-direction:column; gap:10px;
+      }
+      .hm-att.tone-danger { border-top-color:#C26A6A; }
+      .hm-att.tone-warn   { border-top-color:#D9A441; }
+      .hm-att.tone-info   { border-top-color:#5B7DB1; }
+      .hm-att-head { display:flex; align-items:center; gap:12px; }
+      .hm-att-icon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex:0 0 38px; }
+      .hm-att-icon svg { width:19px; height:19px; }
+      .hm-att.tone-danger .hm-att-icon { background:#F5E8E8; color:#A04040; }
+      .hm-att.tone-warn   .hm-att-icon { background:#FBF0DC; color:#8A5A12; }
+      .hm-att.tone-info   .hm-att-icon { background:#E6ECF5; color:#2F4A78; }
+      .hm-att-title { font-weight:700; font-size:14px; color:var(--navy); line-height:1.25; }
+      .hm-att-hint { font-size:12px; color:var(--steel); }
+      .hm-att-count { margin-left:auto; font-family: var(--font-display); font-size:30px; line-height:1; color:var(--navy); }
+      .hm-chips { display:flex; flex-wrap:wrap; gap:6px; }
+      .hm-chip {
+        font-size:11.5px; padding:4px 10px; border-radius:999px; background:#FAF8F3; border:1px solid var(--line);
+        color:var(--navy); text-decoration:none; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      }
+      .hm-chip:hover { border-color:var(--copper); color:var(--copper); }
+      .hm-chip.more { background:transparent; border-style:dashed; color:var(--steel); }
+      .hm-att-foot { margin-top:auto; font-size:12px; font-weight:600; }
+      .hm-att-foot a { color:var(--copper); text-decoration:none; }
+      .hm-att-foot a:hover { text-decoration:underline; }
+
+      .hm-clear { display:flex; align-items:center; gap:16px; padding:22px 24px; border-radius:12px; background:#EEF7F1; border:1px solid #CFE5D8; }
+      .hm-clear-icon { width:44px; height:44px; border-radius:50%; background:var(--sage); color:#fff; display:flex; align-items:center; justify-content:center; font-size:22px; }
+      .hm-clear strong { display:block; color:var(--navy); font-size:15px; }
+      .hm-clear span { font-size:13px; color:var(--steel); }
+
+      /* ============ MONEY ============ */
+      .hm-flow { display:flex; align-items:stretch; gap:0; flex-wrap:wrap; }
+      .hm-money { flex:1 1 180px; padding:14px 18px; border-radius:12px; background:#FAF8F3; border:1px solid var(--line); min-width:170px; }
+      .hm-money.is-key { border-color:var(--copper); background:#FCF7F1; }
+      .hm-money-label { font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--steel); font-weight:600; }
+      .hm-money-value { font-family: var(--font-display); font-size:26px; color:var(--navy); margin-top:6px; }
+      .hm-money-sub { font-size:12px; color:var(--steel); margin-top:4px; }
+      .hm-arrow { flex:0 0 34px; display:flex; align-items:center; justify-content:center; color:#C9BFA8; }
+      .hm-arrow svg { width:20px; height:20px; }
+      @media (max-width: 900px) { .hm-arrow { display:none; } .hm-flow { gap:10px; } }
+    </style>
+
+    {# =================== 1. HERO =================== #}
+    <div class="hm-hero">
+      <div class="hm-hero-top">
+        <div>
+          <div class="hm-date">{{ today }}</div>
+          <h1>{{ greeting }}{% if first_name %}, {{ first_name }}{% endif %}.</h1>
+          <div class="hm-hero-sub">
+            {% if attention_total %}
+              <strong>{{ attention_total }} item{{ 's' if attention_total != 1 }}</strong> across your pipeline need a hand today.
+            {% else %}
+              Everything is moving. Nothing needs you right now.
+            {% endif %}
+          </div>
+        </div>
+        <div class="hm-hero-actions">
+          <a href="{{ url_for('leads.new') }}" class="btn btn-primary">+ New Lead</a>
+          <a href="{{ url_for('projects.new') }}" class="btn btn-ghost">+ New Project</a>
+          <a href="{{ url_for('dashboard.index') }}" class="btn btn-ghost">All Projects →</a>
+        </div>
+      </div>
+
+      <div class="hm-signals">
+        <div class="hm-signal"><div class="hm-signal-num">{{ signals.projects }}</div><div class="hm-signal-label">Live projects</div></div>
+        <div class="hm-signal"><div class="hm-signal-num">{{ signals.awaiting_customer }}</div><div class="hm-signal-label">Waiting on customers</div></div>
+        <div class="hm-signal"><div class="hm-signal-num">{{ signals.in_production }}</div><div class="hm-signal-label">On the factory floor</div></div>
+        <div class="hm-signal"><div class="hm-signal-num">{{ signals.on_site }}</div><div class="hm-signal-label">On site</div></div>
+      </div>
+    </div>
+
+    {# =================== 2. THE JOURNEY =================== #}
+    <div class="hm-card">
+      <div class="hm-card-head">
+        <div class="hm-card-title">The Journey · where every project is right now</div>
+        <div class="hm-card-hint">Amber pulse = something in that stage needs attention · click a project to open it</div>
+      </div>
+
+      {% if stages %}
+      <div class="hm-track">
+        {% for s in stages %}
+        <div class="hm-stage {{ 'has-work' if s.count }} {{ 'hot' if s.hot }} {{ 'is-busiest' if busiest and busiest.count and busiest.step == s.step }}">
+          <div class="hm-node">{{ s.step }}</div>
+          <div class="hm-stage-label">{{ s.label }}</div>
+          <div class="hm-stage-count {{ 'zero' if not s.count }}">{{ s.count if s.count else '—' }}</div>
+          <div class="hm-tokens">
+            {% for t in s.tokens %}
+            <a class="hm-token tone-{{ t.tone }}" href="{{ url_for('projects.detail', project_id=t.id) }}"
+               title="{{ t.name }} · {{ t.customer }} · {{ t.label }}">
+              <span class="hm-token-dot">{{ t.initials }}</span>
+              <span class="hm-token-name">{{ t.name }}</span>
+            </a>
+            {% endfor %}
+            {% if s.more %}
+            <a class="hm-more" href="{{ url_for('dashboard.index') }}">+{{ s.more }} more</a>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">◱</div>
+        <p>No projects yet. Start with a lead and watch it travel the journey.</p>
+        <a href="{{ url_for('leads.new') }}" class="btn btn-primary">+ New Lead</a>
+      </div>
+      {% endif %}
+    </div>
+
+    {# =================== 3. NEEDS YOU NOW =================== #}
+    <div class="hm-card">
+      <div class="hm-card-head">
+        <div class="hm-card-title">Needs you now</div>
+        <div class="hm-card-hint">Most urgent first</div>
+      </div>
+
+      {% if attention %}
+      <div class="hm-att-grid">
+        {% for a in attention %}
+        <div class="hm-att tone-{{ a.tone }}">
+          <div class="hm-att-head">
+            <span class="hm-att-icon">{{ icon(a.key) }}</span>
+            <div>
+              <div class="hm-att-title">{{ a.title }}</div>
+              <div class="hm-att-hint">{{ a.hint }}</div>
+            </div>
+            <div class="hm-att-count">{{ a.count }}</div>
+          </div>
+          <div class="hm-chips">
+            {% for label, url in a.chips %}
+            <a class="hm-chip" href="{{ url }}" title="{{ label }}">{{ label }}</a>
+            {% endfor %}
+            {% if a.more %}<span class="hm-chip more">+{{ a.more }} more</span>{% endif %}
+          </div>
+          <div class="hm-att-foot"><a href="{{ a.href }}">Open all →</a></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="hm-clear">
+        <div class="hm-clear-icon">✓</div>
+        <div>
+          <strong>All clear</strong>
+          <span>No overdue payments, holds, snags or lapsing quotes. Good time to chase new leads.</span>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    {# =================== 4. MONEY IN MOTION =================== #}
+    <div class="hm-card">
+      <div class="hm-card-head">
+        <div class="hm-card-title">Money in motion</div>
+        <div class="hm-card-hint">From open quotations to cash in the bank</div>
+      </div>
+      <div class="hm-flow">
+        <div class="hm-money">
+          <div class="hm-money-label">Open quotations</div>
+          <div class="hm-money-value">{{ money.pipeline }}</div>
+          <div class="hm-money-sub">Draft &amp; sent, latest version</div>
+        </div>
+        <div class="hm-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
+        <div class="hm-money">
+          <div class="hm-money-label">Confirmed orders</div>
+          <div class="hm-money-value">{{ money.order_value }}</div>
+          <div class="hm-money-sub">Signed and locked</div>
+        </div>
+        <div class="hm-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
+        <div class="hm-money">
+          <div class="hm-money-label">Collected</div>
+          <div class="hm-money-value">{{ money.collected }}</div>
+          <div class="hm-money-sub">{{ money.collected_pct }}% of confirmed orders</div>
+        </div>
+        <div class="hm-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
+        <div class="hm-money is-key">
+          <div class="hm-money-label">Still to collect</div>
+          <div class="hm-money-value">{{ money.outstanding }}</div>
+          <div class="hm-money-sub"><a href="{{ url_for('payment.index') }}">View payments →</a></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

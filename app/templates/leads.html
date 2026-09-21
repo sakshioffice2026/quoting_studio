@@ -1,10 +1,16 @@
 {% extends 'base.html' %}
-{% block title %}Leads — FenestraOne {% endblock %}
+{% from '_ui_macros.html' import pill, avatar %}
+{% block title %}Leads — FenestraOne{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
+
+    {% set lead_tone = {'LEAD-DUPLICATE': 'danger', 'LEAD-INVALID': 'danger'} %}
+    {% set fup_tone = {'FUP-QUALIFIED': 'success', 'FUP-NURTURE': 'warn', 'FUP-LOST': 'danger'} %}
+
+    {# =================== 1. HEADER =================== #}
     <div class="page-header">
       <div>
         <h1>Leads</h1>
@@ -13,52 +19,88 @@
       <a href="{{ url_for('leads.new') }}" class="btn btn-primary">+ New Lead</a>
     </div>
 
-    <div style="margin-bottom:16px;">
-      <a href="{{ url_for('leads.index') }}" class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
-      {% for code in LeadStatus.ALL %}
-      <a href="{{ url_for('leads.index', status=code) }}"
-         class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">{{ LeadStatus.LABELS[code] }}</a>
-      {% endfor %}
+    <style>
+      .lead-filters { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+      .lead-cell { display:flex; align-items:center; gap:10px; }
+      .lead-name { font-weight:600; color:var(--navy); }
+      .lead-name:hover { color:var(--copper); }
+      .lead-sub { font-size:11px; color:var(--steel); }
+    </style>
+
+    {# =================== 2. FILTERS + TABLE =================== #}
+    <div class="ui-card">
+      <div class="lead-filters">
+        <a href="{{ url_for('leads.index') }}" class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
+        {% for code in LeadStatus.ALL %}
+        <a href="{{ url_for('leads.index', status=code) }}"
+           class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">{{ LeadStatus.LABELS[code] }}</a>
+        {% endfor %}
+      </div>
+
+      {% if leads %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Customer</th>
+            <th>Contact</th>
+            <th>Source</th>
+            <th>Status</th>
+            <th>Follow-up</th>
+            <th>Assigned</th>
+            <th style="width:1%;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for lead in leads %}
+          {% set _parts = lead.customer_name.split() %}
+          {% set _initials = ((_parts[0][0] if _parts|length > 0 else '?') ~ (_parts[1][0] if _parts|length > 1 else '')) | upper %}
+          <tr>
+            <td>
+              <a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="lead-name">{{ lead.display_name }}</a>
+            </td>
+            <td>
+              <div class="lead-cell">{{ avatar(_initials, 'sm') }}<span>{{ lead.customer_name }}</span></div>
+            </td>
+            <td class="muted" style="font-size:12px;">{{ lead.phone or lead.email or '—' }}</td>
+            <td>{{ pill(lead.source_channel.replace('_', ' ')|title, 'neutral') }}</td>
+            <td>{{ pill(lead.status_label, lead_tone.get(lead.status, 'neutral')) }}</td>
+            <td>
+              {% if lead.follow_up_status_label %}
+                {{ pill(lead.follow_up_status_label, fup_tone.get(lead.follow_up_status, 'neutral')) }}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if lead.assignee %}
+                <div class="lead-cell">
+                  {% set _ap = lead.assignee.full_name.split() %}
+                  {{ avatar(((_ap[0][0] if _ap|length > 0 else '?') ~ (_ap[1][0] if _ap|length > 1 else ''))|upper, 'sm') }}
+                  <span style="font-size:12px;">{{ lead.assignee.full_name }}</span>
+                </div>
+              {% else %}
+                <span class="muted" style="font-size:12px;">Unassigned</span>
+              {% endif %}
+            </td>
+            <td style="text-align:right; white-space:nowrap;">
+              <a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">◱</div>
+        <p>No leads yet.</p>
+        <a href="{{ url_for('leads.new') }}" class="btn btn-primary">+ New Lead</a>
+      </div>
+      {% endif %}
     </div>
 
-    {% if leads %}
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Project</th>
-          <th>Customer</th>
-          <th>Contact</th>
-          <th>Source</th>
-          <th>Status</th>
-          <th>Follow-up</th>
-          <th>Assigned</th>
-          <th style="width:1%;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for lead in leads %}
-        <tr>
-          <td style="font-weight:600;">{{ lead.display_name }}</td>
-          <td>{{ lead.customer_name }}</td>
-          <td class="muted" style="font-size:12px;">{{ lead.phone or lead.email or '—' }}</td>
-          <td class="mono" style="font-size:12px;">{{ lead.source_channel }}</td>
-          <td><span class="badge">{{ lead.status_label }}</span></td>
-          <td class="mono" style="font-size:12px;">{{ lead.follow_up_status_label or '—' }}</td>
-          <td class="muted" style="font-size:12px;">{{ lead.assignee.full_name if lead.assignee else 'Unassigned' }}</td>
-          <td style="text-align:right; white-space:nowrap;">
-            <a href="{{ url_for('leads.detail', lead_id=lead.id) }}" class="btn btn-secondary btn-sm">View →</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-      <div class="icon">◱</div>
-      <p>No leads yet.</p>
-      <a href="{{ url_for('leads.new') }}" class="btn btn-primary">+ New Lead</a>
-    </div>
-    {% endif %}
   </div>
 </div>
 {% endblock %}

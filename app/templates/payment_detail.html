@@ -1,82 +1,118 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, stage_tracker %}
 {% block title %}{{ payment.payment_number }} — FenestraOne{% endblock %}
+
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
 
-    {# ── Page header ── #}
-    <div class="page-header">
-      <div>
-        <h1>{{ payment.order.project.display_name if payment.order and payment.order.project else 'Payment' }}</h1>
-        <div class="sub mono">
-          Customer: {{ payment.order.project.customer_name if payment.order and payment.order.project else '—' }}<br>
-          {{ payment.payment_number }} · {{ payment.stage_label }}
-          · <span class="badge badge-{{ payment.status|lower|replace('pay-', '')|replace('_', '-') }}">{{ payment.status_label }}</span>
-          {% if payment.is_overdue and payment.status != PaymentStatus.OVERDUE %}
-            · <span class="expiry-tag text-error">Overdue</span>
+    {% set tone_map = {
+      'PAY-INVOICED': 'info', 'PAY-PARTIAL': 'warn', 'PAY-RECEIVED': 'success',
+      'PAY-OVERDUE': 'danger', 'PAY-HOLD_APPLIED': 'warn', 'PAY-CLOSED': 'neutral'
+    } %}
+    {% set step_map = {'Advance': 9, 'Pre-Dispatch': 11, 'On-Installation': 12, 'Retention': 13} %}
+    {% set current_step = step_map.get(payment.payment_stage, 9) %}
+    {% set project = payment.order.project if payment.order and payment.order.project else None %}
+
+    {# =================== 1. HEADER CARD =================== #}
+    <div class="ui-card lead-header-card">
+      <div class="lead-header-top">
+        <div class="lead-header-title">
+          <h1>{{ project.display_name if project else 'Payment' }}</h1>
+          <span class="customer-chip">{{ payment.payment_number }}</span>
+        </div>
+        <div class="lead-header-actions" style="display:flex; gap:8px;">
+          {% if payment.order %}
+          <a href="{{ url_for('order.detail', order_id=payment.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
           {% endif %}
+          <a href="{{ url_for('payment.index') }}" class="btn btn-secondary btn-sm">← All Payments</a>
         </div>
       </div>
-      <div class="flex gap-8">
-        {% if payment.order %}
-        <a href="{{ url_for('order.detail', order_id=payment.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+
+      <div class="lead-header-pills">
+        {{ pill(payment.status_label, tone_map.get(payment.status, 'neutral')) }}
+        {{ pill(payment.stage_label, 'neutral') }}
+        {% if payment.is_overdue and payment.status != PaymentStatus.OVERDUE %}
+          {{ pill('Overdue', 'danger') }}
         {% endif %}
-        <a href="{{ url_for('payment.index') }}" class="btn btn-secondary btn-sm">← All Payments</a>
+        {% if payment.hold_flag %}
+          {{ pill('On Hold', 'warn') }}
+        {% endif %}
       </div>
+
+      {{ stage_tracker(current_step, payment.status == PaymentStatus.OVERDUE) }}
     </div>
 
-    {# ── Summary cards ── #}
+    {# =================== 2. KEY NUMBERS =================== #}
     <div class="info-card-row">
-
       <div class="info-card">
         <div class="info-card-label">Invoice Amount</div>
         <div class="info-card-value">{{ '₹{:,.2f}'.format(payment.invoice_amount|float) if payment.invoice_amount else '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Received</div>
         <div class="info-card-value">{{ '₹{:,.2f}'.format(payment.amount_received|float) if payment.amount_received else '—' }}</div>
       </div>
-
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Balance</div>
         <div class="info-card-value">{{ '₹{:,.2f}'.format(payment.balance|float) if payment.balance else '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Due Date</div>
         <div class="info-card-value {{ 'text-error' if payment.is_overdue else '' }}">
-          {{ payment.due_date.strftime('%Y-%m-%d') if payment.due_date else '—' }}
+          {{ payment.due_date.strftime('%d %b %Y') if payment.due_date else '—' }}
         </div>
       </div>
-
     </div>
 
-    {# ── Timeline info ── #}
-    <div class="quote-meta">
-      {% if payment.received_at %}
-        <p><strong>Last receipt:</strong> {{ payment.received_at.strftime('%Y-%m-%d %H:%M') }}
-          via {{ payment.payment_mode }}{% if payment.transaction_ref %} (ref: {{ payment.transaction_ref }}){% endif %}</p>
-      {% endif %}
-      {% if payment.hold_flag %}
-        <p><strong>On hold:</strong> {{ payment.hold_reason }}</p>
-      {% endif %}
+    {# =================== 3. DETAILS CARD =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Payment Details</div>
+      <div class="info-grid">
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Customer</div>
+          <div class="info-grid-value">{{ project.customer_name if project else '—' }}</div>
+        </div></div>
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Milestone</div>
+          <div class="info-grid-value">{{ payment.stage_label }}</div>
+        </div></div>
+        {% if payment.received_at %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Last Receipt</div>
+          <div class="info-grid-value">{{ payment.received_at.strftime('%d %b %Y, %H:%M') }}</div>
+        </div></div>
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Mode</div>
+          <div class="info-grid-value">{{ payment.payment_mode or '—' }}</div>
+        </div></div>
+        {% if payment.transaction_ref %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Transaction Ref</div>
+          <div class="info-grid-value">{{ payment.transaction_ref }}</div>
+        </div></div>
+        {% endif %}
+        {% endif %}
+        {% if payment.hold_flag %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Hold Reason</div>
+          <div class="info-grid-value">{{ payment.hold_reason }}</div>
+        </div></div>
+        {% endif %}
+      </div>
     </div>
 
-    {# ══════════════════════════════════════════════
-       ACTION PANELS
-       ══════════════════════════════════════════════ #}
+    {# =================== 4. ACTION CARDS =================== #}
 
-    {# ── INVOICED / PARTIAL / OVERDUE → Record Receipt / Hold ── #}
     {% if payment.status in (PaymentStatus.INVOICED, PaymentStatus.PARTIAL, PaymentStatus.OVERDUE) %}
     <div class="action-grid">
 
-      <form method="POST" class="action-panel"
+      <form method="POST" class="ui-card action-panel"
             action="{{ url_for('payment.record_receipt', payment_id=payment.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Record Receipt</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Record Receipt</div>
         <div class="form-group">
           <label class="form-label" for="amount_received">Amount received</label>
           <input type="number" step="0.01" class="form-control" id="amount_received" name="amount_received" required>
@@ -97,10 +133,10 @@
         <button type="submit" class="btn btn-primary btn-sm">Record Receipt</button>
       </form>
 
-      <form method="POST" class="action-panel"
+      <form method="POST" class="ui-card action-panel"
             action="{{ url_for('payment.apply_hold', payment_id=payment.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <h4 class="action-title">Apply Hold</h4>
+        <div class="ui-card-title" style="margin-bottom:6px;">Apply Hold</div>
         <div class="form-group">
           <label class="form-label" for="hold_reason">Reason</label>
           <textarea class="form-control" id="hold_reason" name="hold_reason" rows="2" required></textarea>
@@ -111,11 +147,10 @@
     </div>
     {% endif %}
 
-    {# ── HOLD_APPLIED → Release Hold ── #}
     {% if payment.status == PaymentStatus.HOLD_APPLIED %}
-    <div class="action-panel action-panel-wide action-panel-warning">
-      <h4 class="action-title">Payment On Hold</h4>
-      <p class="action-note">{{ payment.hold_reason }}</p>
+    <div class="ui-card action-panel-warning" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px;">Payment On Hold</div>
+      <p class="action-note" style="margin-bottom:12px;">{{ payment.hold_reason }}</p>
       <form method="POST" action="{{ url_for('payment.release_hold', payment_id=payment.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-primary btn-sm">Release Hold</button>
@@ -123,12 +158,11 @@
     </div>
     {% endif %}
 
-    {# ── RECEIVED → Close ── #}
     {% if payment.status == PaymentStatus.RECEIVED %}
-    <div class="action-panel action-panel-wide action-panel-success">
-      <h4 class="action-title text-success">✓ Payment Received</h4>
+    <div class="ui-card action-panel-success" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Payment Received</div>
       {% if payment.payment_stage == 'Advance' %}
-      <p class="action-note">
+      <p class="action-note" style="margin-bottom:12px;">
         Order released to Manufacturing. Close this milestone once reconciled, or generate the work orders now.
       </p>
       {% if not payment.order.manufacturing_jobs.first() %}
@@ -144,9 +178,7 @@
       <a href="{{ url_for('manufacturing.index') }}" class="btn btn-secondary btn-sm" style="margin-bottom:16px; display:inline-block;">View Manufacturing Jobs →</a>
       {% endif %}
       {% else %}
-      <p class="action-note">
-        Close this milestone once reconciled.
-      </p>
+      <p class="action-note" style="margin-bottom:12px;">Close this milestone once reconciled.</p>
       {% endif %}
       <form method="POST" action="{{ url_for('payment.close', payment_id=payment.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -155,10 +187,9 @@
     </div>
     {% endif %}
 
-    {# ── CLOSED — terminal ── #}
     {% if payment.status == PaymentStatus.CLOSED %}
-    <div class="action-panel action-panel-wide action-panel-success">
-      <h4 class="action-title text-success">✓ Payment Closed</h4>
+    <div class="ui-card action-panel-success" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:0; color:var(--success);">✓ Payment Closed</div>
     </div>
     {% endif %}
 

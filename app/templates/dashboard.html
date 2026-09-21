@@ -1,16 +1,15 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, avatar %}
 {% block title %}Projects — FenestraOne{% endblock %}
 
 {% block body %}
 <div class="dash-layout">
 
-  {# ---- Sidebar ---- #}
   {% include '_nav_sidebar.html' %}
 
-  {# ---- Main content ---- #}
   <div class="dash-content">
 
-    {# Page header #}
+    {# =================== 1. HEADER =================== #}
     <div class="page-header">
       <div>
         <h1>Projects</h1>
@@ -19,133 +18,126 @@
       <a href="{{ url_for('projects.new') }}" class="btn btn-primary">+ New Project</a>
     </div>
 
-    {# Stats row #}
-    <div class="stat-row">
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.total }}</div>
-        <div class="stat-label">Total projects</div>
+    {# =================== 2. KEY NUMBERS =================== #}
+    <div class="info-card-row">
+      <div class="info-card">
+        <div class="info-card-label">Total projects</div>
+        <div class="info-card-value">{{ stats.total }}</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.sent }}</div>
-        <div class="stat-label">Quotes sent</div>
+      <div class="info-card">
+        <div class="info-card-label">Quotes sent</div>
+        <div class="info-card-value">{{ stats.sent }}</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.won }}</div>
-        <div class="stat-label">Won</div>
+      <div class="info-card">
+        <div class="info-card-label">Won</div>
+        <div class="info-card-value">{{ stats.won }}</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.win_rate }}%</div>
-        <div class="stat-label">Win rate</div>
+      <div class="info-card">
+        <div class="info-card-label">Win rate</div>
+        <div class="info-card-value">{{ stats.win_rate }}%</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value" style="font-size:22px;">
-          £{{ '{:,.0f}'.format(stats.pipeline) }}
-        </div>
-        <div class="stat-label">Pipeline value</div>
+      <div class="info-card info-card-highlight">
+        <div class="info-card-label">Pipeline value</div>
+        <div class="info-card-value">₹{{ '{:,.0f}'.format(stats.pipeline) }}</div>
       </div>
     </div>
 
-    {# Search #}
+    {# =================== 3. SEARCH + TABLE =================== #}
     <style>
       .dash-search { display:flex; gap:8px; align-items:center; margin:0 0 16px; max-width:640px; }
       .dash-search .form-control { flex:1; }
-      .stage-name { font-weight:600; font-size:13px; }
-      .stage-badge {
-        display:inline-block; padding:3px 9px; border-radius:999px;
-        font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size:11px; letter-spacing:.02em; white-space:nowrap;
-      }
-      .stage-badge.tone-info    { background:#E6ECF5; color:#2F4A78; }
-      .stage-badge.tone-success { background:#E4EDE9; color:#2F6B4F; }
-      .stage-badge.tone-warn    { background:#FBF0DC; color:#8A5A12; }
-      .stage-badge.tone-danger  { background:#F5E8E8; color:#A04040; }
-      .stage-badge.tone-neutral { background:#EFEAE0; color:#8A7A5A; }
+      .proj-cell { display:flex; align-items:center; gap:10px; }
+      .proj-cell .proj-name { font-weight:600; color:var(--navy); }
+      .proj-cell .proj-name:hover { color:var(--copper); }
+      .proj-sub { font-size:11px; color:var(--steel); }
     </style>
-    <form method="GET" action="{{ url_for('dashboard.index') }}" class="dash-search" role="search">
-      <input type="search" name="q" value="{{ q or '' }}" class="form-control"
-             placeholder="Search project name, customer, phone or project no. (e.g. PRJ-0030)"
-             autocomplete="off">
-      <button type="submit" class="btn btn-primary btn-sm">Search</button>
+
+    <div class="ui-card">
+      <form method="GET" action="{{ url_for('dashboard.index') }}" class="dash-search" role="search">
+        <input type="search" name="q" value="{{ q or '' }}" class="form-control"
+               placeholder="Search project name, customer, phone or project no. (e.g. PRJ-0030)"
+               autocomplete="off">
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
+        {% if q %}
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary btn-sm">Clear</a>
+        {% endif %}
+      </form>
       {% if q %}
-      <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary btn-sm">Clear</a>
+      <div class="sub mono" style="margin:-4px 0 12px;">
+        {{ projects|length }} of {{ stats.total }} project{{ 's' if stats.total != 1 }} match “{{ q }}”
+      </div>
       {% endif %}
-    </form>
-    {% if q %}
-    <div class="sub mono" style="margin:-8px 0 12px;">
-      {{ projects|length }} of {{ stats.total }} project{{ 's' if stats.total != 1 }} match “{{ q }}”
-    </div>
-    {% endif %}
 
-    {# Project table #}
-    {% if projects %}
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Project No.</th>
-          <th>Project</th>
-          <th>Customer</th>
-          <th>Address</th>
-          <th>Windows</th>
-          <th>Latest quote</th>
-          <th>Stage</th>
-          <th>Status</th>
-          <th>Updated</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in projects %}
-        {% set info = stage_info.get(p.id) if stage_info else none %}
-        <tr>
-          <td class="mono" style="font-size:12px;">{{ info.project_no if info else 'PRJ-%04d'|format(p.id) }}</td>
-          <td class="link-cell">
-            <a href="{{ url_for('projects.detail', project_id=p.id) }}">{{ p.display_name }}</a>
-          </td>
-          <td>{{ p.customer_name }}</td>
-          <td class="muted">{{ p.address or '—' }}</td>
-          <td class="mono" style="font-size:12px;">{{ p.window_count }}</td>
-          <td class="mono" style="font-size:12px;">
-            {% if p.latest_quote and p.latest_quote.grand_total %}
-              £{{ '{:,.2f}'.format(p.latest_quote.grand_total) }}
-            {% else %}
-              <span class="muted">—</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if info %}<span class="stage-name">{{ info.stage }}</span>{% else %}<span class="muted">—</span>{% endif %}
-          </td>
-          <td>
-            {% if info %}
-              <span class="stage-badge tone-{{ info.tone }}" title="{{ info.label }}">{{ info.code }}</span>
-            {% else %}
-              <span class="badge badge-{{ p.status }}">{{ p.status_label }}</span>
-            {% endif %}
-          </td>
-          <td class="muted mono" style="font-size:11px;">
-            {{ p.updated_at.strftime('%d %b %Y') }}
-          </td>
-          <td style="text-align:right;">
-            <a href="{{ url_for('projects.detail', project_id=p.id) }}"
-               class="btn btn-secondary btn-sm">Open</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+      {% if projects %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Customer</th>
+            <th>Windows</th>
+            <th>Latest quote</th>
+            <th>Stage</th>
+            <th>Status</th>
+            <th>Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in projects %}
+          {% set info = stage_info.get(p.id) if stage_info else none %}
+          {% set _parts = p.customer_name.split() %}
+          {% set _initials = ((_parts[0][0] if _parts|length > 0 else '?') ~ (_parts[1][0] if _parts|length > 1 else '')) | upper %}
+          <tr>
+            <td>
+              <a href="{{ url_for('projects.detail', project_id=p.id) }}" class="proj-name">{{ p.display_name }}</a>
+              <div class="proj-sub mono">{{ info.project_no if info else 'PRJ-%04d'|format(p.id) }}{% if p.address %} · {{ p.address }}{% endif %}</div>
+            </td>
+            <td>
+              <div class="proj-cell">{{ avatar(_initials, 'sm') }}<span>{{ p.customer_name }}</span></div>
+            </td>
+            <td class="mono" style="font-size:12px;">{{ p.window_count }}</td>
+            <td class="mono" style="font-size:12px;">
+              {% if p.latest_quote and p.latest_quote.grand_total %}
+                ₹{{ '{:,.2f}'.format(p.latest_quote.grand_total|float) }}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if info %}<span style="font-weight:600; font-size:13px;">{{ info.stage }}</span>{% else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td>
+              {% if info %}
+                <span title="{{ info.label }}">{{ pill(info.code, info.tone) }}</span>
+              {% else %}
+                <span class="badge badge-{{ p.status }}">{{ p.status_label }}</span>
+              {% endif %}
+            </td>
+            <td class="muted mono" style="font-size:11px;">{{ p.updated_at.strftime('%d %b %Y') }}</td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('projects.detail', project_id=p.id) }}" class="btn btn-secondary btn-sm">Open</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
 
-    {% else %}
-    <div class="empty-state">
-      <div class="icon">◱</div>
-      {% if q %}
-      <p>No projects match “{{ q }}”.</p>
-      <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">Clear search</a>
       {% else %}
-      <p>No projects yet. Create your first one to start quoting.</p>
-      <a href="{{ url_for('projects.new') }}" class="btn btn-primary">+ New Project</a>
+      <div class="empty-state">
+        <div class="icon">◱</div>
+        {% if q %}
+        <p>No projects match “{{ q }}”.</p>
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">Clear search</a>
+        {% else %}
+        <p>No projects yet. Create your first one to start quoting.</p>
+        <a href="{{ url_for('projects.new') }}" class="btn btn-primary">+ New Project</a>
+        {% endif %}
+      </div>
       {% endif %}
     </div>
-    {% endif %}
 
-  </div>{# /dash-content #}
-</div>{# /dash-layout #}
+  </div>
+</div>
 {% endblock %}

@@ -1,0 +1,354 @@
+{% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, stage_tracker %}
+{% block title %}{{ project.customer_name }} — FenestraOne{% endblock %}
+
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    {% set _all_deliveries = [] %}
+    {% for _o in orders %}{% for _d in _o.deliveries.all() %}{% set _ = _all_deliveries.append(_d) %}{% endfor %}{% endfor %}
+
+    {# ---- Derive current stage from project progress ---- #}
+    {% set ns = namespace(step=5) %}
+    {% if latest_design_approval and latest_design_approval.status == 'DESIGN-SUBMITTED' %}{% set ns.step = 6 %}{% endif %}
+    {% if latest_design_approval and latest_design_approval.status == 'DESIGN-APPROVED' %}{% set ns.step = 7 %}{% endif %}
+    {% if quotes %}{% set ns.step = 7 %}{% endif %}
+    {% if orders %}{% set ns.step = 8 %}{% endif %}
+    {% for _o in orders %}{% if _o.status == 'ORDER-CONFIRMED' %}{% set ns.step = 9 %}{% endif %}{% endfor %}
+    {% if jobs %}{% set ns.step = 10 %}{% endif %}
+    {% if _all_deliveries %}{% set ns.step = 11 %}{% endif %}
+
+    {% set design_tone = {
+      'DESIGN-SUBMITTED': 'info', 'DESIGN-APPROVED': 'success',
+      'DESIGN-REVISION_REQUESTED': 'warn', 'DESIGN-SUPERSEDED': 'neutral'
+    } %}
+
+    {# =================== 1. HEADER CARD =================== #}
+    <div class="ui-card lead-header-card">
+      <div class="lead-header-top">
+        <div class="lead-header-title">
+          <h1>{{ project.customer_name }}</h1>
+          <span class="customer-chip">{{ project.address or 'No address' }}</span>
+        </div>
+        <div class="lead-header-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a href="{{ url_for('projects.facade', project_id=project.id) }}" class="btn btn-primary btn-sm">🏠 Facade View</a>
+          {% if latest_design_approval %}
+          <a href="{{ url_for('design_approval.detail', approval_id=latest_design_approval.id) }}" class="btn btn-secondary btn-sm">Design: {{ latest_design_approval.status_label }}</a>
+          {% endif %}
+          <a href="{{ url_for('projects.edit', project_id=project.id) }}" class="btn btn-secondary btn-sm">Edit project</a>
+          <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary btn-sm">← Dashboard</a>
+        </div>
+      </div>
+
+      <div class="lead-header-pills">
+        <span class="badge badge-{{ project.status }}">{{ project.status_label }}</span>
+        {% if latest_design_approval %}
+          {{ pill('Design: ' ~ latest_design_approval.status_label, design_tone.get(latest_design_approval.status, 'neutral')) }}
+        {% endif %}
+      </div>
+
+      {{ stage_tracker(ns.step) }}
+    </div>
+
+    {# =================== 2. KEY NUMBERS =================== #}
+    <div class="info-card-row">
+      <div class="info-card info-card-highlight">
+        <div class="info-card-label">Windows &amp; Doors</div>
+        <div class="info-card-value">{{ windows|length }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Quotations</div>
+        <div class="info-card-value">{{ quotes|length }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Orders</div>
+        <div class="info-card-value">{{ orders|length }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Deliveries</div>
+        <div class="info-card-value">{{ _all_deliveries|length }}</div>
+      </div>
+    </div>
+
+    {# =================== 3. NEXT STEP =================== #}
+    {% if windows %}
+      {% if not latest_design_approval or latest_design_approval.status in ('DESIGN-REVISION_REQUESTED', 'DESIGN-SUPERSEDED') %}
+      <div class="ui-card" style="border-color:var(--copper); background:#FCF7F1; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+        <div>
+          <strong>Next step:</strong> {{ windows|length }} unit{{ 's' if windows|length != 1 }} added.
+          {% if latest_design_approval %}A revision was requested — resubmit once changes are made.{% else %}Ready to submit this design for customer approval.{% endif %}
+        </div>
+        <form method="POST" action="{{ url_for('design_approval.submit', project_id=project.id) }}" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary btn-sm">{{ 'Resubmit' if latest_design_approval else 'Submit' }} for Design Approval →</button>
+        </form>
+      </div>
+      {% elif latest_design_approval.status == 'DESIGN-SUBMITTED' %}
+      <div class="ui-card" style="border-color:var(--navy); background:#eef3fb;">
+        <strong>Next step:</strong> Design submitted (revision {{ latest_design_approval.revision_number }}) — waiting on approval decision.
+        <a href="{{ url_for('design_approval.detail', approval_id=latest_design_approval.id) }}" style="margin-left:8px;">Review &amp; approve →</a>
+      </div>
+      {% elif latest_design_approval.status == 'DESIGN-APPROVED' %}
+      <div class="ui-card action-panel-success">
+        <strong style="color:var(--success);">✓ Design approved and locked</strong> (revision {{ latest_design_approval.revision_number }}). Ready to generate a quotation.
+      </div>
+      {% endif %}
+    {% else %}
+    <div class="ui-card" style="background:#f5f5f0;">
+      <strong>Next step:</strong> Add at least one window or door before this design can be submitted for approval.
+    </div>
+    {% endif %}
+
+    {# =================== 4. WINDOWS & DOORS =================== #}
+    <div class="ui-card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div class="ui-card-title" style="margin-bottom:0;">Windows &amp; doors ({{ windows|length }})</div>
+        <a href="{{ url_for('projects.choose_unit', project_id=project.id) }}" class="btn btn-secondary btn-sm">+ Add window or door</a>
+      </div>
+
+      {% if windows %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Label</th>
+            <th>Dimensions</th>
+            <th>Material</th>
+            <th>Frame colour</th>
+            <th>Panes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in windows %}
+          <tr>
+            <td class="mono muted" style="font-size:11px;">{{ loop.index }}</td>
+            <td class="link-cell">
+              <a href="{{ url_for('editor.edit', project_id=project.id, window_id=w.id) }}">
+                {{ w.label or ('Window ' ~ loop.index) }}
+              </a>
+            </td>
+            <td class="mono" style="font-size:12px;">{{ w.width_mm }} × {{ w.height_mm }} mm</td>
+            <td>{{ w.material }}</td>
+            <td>
+              <span style="display:inline-flex;align-items:center;gap:6px;">
+                <span style="width:14px;height:14px;border-radius:50%;background:{{ w.frame_colour_hex }};
+                             border:1px solid var(--line);display:inline-block;"></span>
+                {{ w.frame_colour_name }}
+              </span>
+            </td>
+            <td class="mono" style="font-size:12px;">{{ w.panes.count() }}</td>
+            <td style="text-align:right; white-space:nowrap;">
+              <a href="{{ url_for('editor.edit', project_id=project.id, window_id=w.id) }}"
+                 class="btn btn-primary btn-sm">Edit →</a>
+              <form method="POST" style="display:inline-block;margin-left:4px;"
+                    action="{{ url_for('projects.delete_window', project_id=project.id, window_id=w.id) }}"
+                    onsubmit="return confirm('Delete « {{ w.label }} »? This cannot be undone.')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger btn-sm" style="padding:5px 9px;">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">◱</div>
+        <p>No windows added yet. Use “Add window or door” to add the first one.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    {# =================== 5. QUOTATIONS =================== #}
+    <div class="ui-card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div class="ui-card-title" style="margin-bottom:0;">Quotations ({{ quotes|length }})</div>
+        <form method="POST" action="{{ url_for('quotation.generate', project_id=project.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary btn-sm">+ Generate Quotation</button>
+        </form>
+      </div>
+
+      {% if quotes %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Quotation #</th>
+            <th>Version</th>
+            <th>Date</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set badge_map = {
+            'QUOTE-SENT': 'sent', 'QUOTE-NEGOTIATION': 'sent',
+            'QUOTE-ACCEPTED': 'won', 'QUOTE-LOST': 'lost'
+          } %}
+          {% for q in quotes %}
+          <tr>
+            <td class="mono" style="font-size:12px;font-weight:600;">{{ q.quotation_number }}</td>
+            <td class="mono muted" style="font-size:12px;">v{{ q.quotation_version }}</td>
+            <td class="muted" style="font-size:12px;">{{ q.created_at.strftime('%d %b %Y') }}</td>
+            <td class="mono" style="font-size:13px;font-weight:600;color:var(--copper);">
+              {{ '₹{:,.2f}'.format(q.grand_total|float) if q.grand_total else '—' }}
+            </td>
+            <td><span class="badge badge-{{ badge_map.get(q.status, 'draft') }}">{{ q.status_label }}</span></td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="muted" style="font-size:13px;">No quotations yet. Get your design approved then click Generate Quotation.</div>
+      {% endif %}
+    </div>
+
+    {# =================== 6. ORDERS =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Orders ({{ orders|length }})</div>
+
+      {% if orders %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Order #</th>
+            <th>Quotation</th>
+            <th>Date</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set order_badge_map = {
+            'ORDER-PENDING_SIGNATURE': 'sent', 'ORDER-CONFIRMED': 'won', 'ORDER-CANCELLED': 'lost'
+          } %}
+          {% for o in orders %}
+          <tr>
+            <td class="mono" style="font-size:12px;font-weight:600;">{{ o.order_number }}</td>
+            <td class="mono muted" style="font-size:12px;">{% if o.quotation %}{{ o.quotation.quotation_number }}{% else %}—{% endif %}</td>
+            <td class="muted" style="font-size:12px;">{{ o.created_at.strftime('%d %b %Y') }}</td>
+            <td class="mono" style="font-size:13px;font-weight:600;color:var(--copper);">
+              {{ '₹{:,.2f}'.format(o.total_amount|float) if o.total_amount else '—' }}
+            </td>
+            <td><span class="badge badge-{{ order_badge_map.get(o.status, 'draft') }}">{{ o.status_label }}</span></td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('order.detail', order_id=o.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="muted" style="font-size:13px;">No orders yet. Accept a quotation to raise one.</div>
+      {% endif %}
+    </div>
+
+    {# =================== 7. MANUFACTURING JOBS =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Manufacturing Jobs ({{ jobs|length }})</div>
+
+      {% if jobs %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Job #</th>
+            <th>Opening</th>
+            <th>Stage</th>
+            <th>Status</th>
+            <th>QC</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set job_badge_map = {
+            'MFG-QUEUED': 'draft', 'MFG-IN_PROGRESS': 'sent', 'MFG-QC_HOLD': 'lost', 'MFG-COMPLETED': 'won'
+          } %}
+          {% for j in jobs %}
+          <tr>
+            <td class="mono" style="font-size:12px;font-weight:600;">{{ j.job_number }}</td>
+            <td class="muted" style="font-size:12px;">{{ j.opening.label if j.opening else '—' }}</td>
+            <td class="mono muted" style="font-size:12px;">{{ j.stage_label }}</td>
+            <td><span class="badge badge-{{ job_badge_map.get(j.status, 'draft') }}">{{ j.status_label }}</span></td>
+            <td class="mono muted" style="font-size:12px;">{{ j.qc_result or '—' }}</td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('manufacturing.detail', job_id=j.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="muted" style="font-size:13px;">No manufacturing jobs yet. Generate them once the order's advance payment is received.</div>
+      {% endif %}
+    </div>
+
+    {# =================== 8. DELIVERIES =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Deliveries ({{ _all_deliveries|length }})</div>
+
+      {% if _all_deliveries %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Delivery #</th>
+            <th>Order</th>
+            <th>Items</th>
+            <th>Status</th>
+            <th>Delivered</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for _d in _all_deliveries %}
+          <tr>
+            <td class="mono" style="font-size:12px;font-weight:600;">{{ _d.delivery_number }}</td>
+            <td class="mono muted" style="font-size:12px;">{{ _d.order.order_number if _d.order else '—' }}</td>
+            <td class="mono muted" style="font-size:12px;">{{ _d.items|length }}</td>
+            <td><span class="badge badge-{{ _d.status|lower|replace('del-', '')|replace('_', '-') }}">{{ _d.status_label }}</span></td>
+            <td class="mono muted" style="font-size:12px;">{{ _d.delivered_at.strftime('%d %b %Y') if _d.delivered_at else '—' }}</td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('delivery.detail', delivery_id=_d.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="muted" style="font-size:13px;">No deliveries yet. Pack completed openings from the order once manufacturing is finished.</div>
+      {% endif %}
+    </div>
+
+    {# =================== 9. FOOTER =================== #}
+    <div style="display:flex; align-items:center; justify-content:space-between; padding-top:8px;">
+      <div style="font-size:12px; color:var(--steel);">
+        Created {{ project.created_at.strftime('%d %b %Y') }} by {{ project.creator.full_name }}
+      </div>
+      <form method="POST" action="{{ url_for('projects.delete', project_id=project.id) }}"
+            onsubmit="return confirm('Delete this project and all its windows? This cannot be undone.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-danger btn-sm">Delete project</button>
+      </form>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

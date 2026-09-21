@@ -1,180 +1,207 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill %}
 {% block title %}Reports — Quoting Studio{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
+
+    {% set _draft = stats.get('draft', 0) %}
+    {% set _sent  = stats.get('sent', 0) %}
+    {% set _won   = stats.get('won', 0) %}
+    {% set _lost  = stats.get('lost', 0) %}
+    {% set _sum   = _draft + _sent + _won + _lost %}
+    {% set badge_map = {
+      'QUOTE-SENT': ('info', 'Sent'), 'QUOTE-NEGOTIATION': ('warn', 'Negotiation'),
+      'QUOTE-ACCEPTED': ('success', 'Accepted'), 'QUOTE-LOST': ('danger', 'Lost')
+    } %}
+
+    <style>
+      .rep-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:12px; }
+      .rep-grid .info-card { margin:0; }
+      .rep-bar { display:flex; height:10px; border-radius:999px; overflow:hidden; background:#EFEAE0; margin:14px 0 12px; }
+      .rep-bar span { display:block; height:100%; }
+      .rep-bar .b-draft { background:#C9BFA8; }
+      .rep-bar .b-sent  { background:#5B7DB1; }
+      .rep-bar .b-won   { background:var(--sage); }
+      .rep-bar .b-lost  { background:#C26A6A; }
+      .rep-legend { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; }
+      .rep-legend strong { font-family:var(--font-display); font-size:18px; margin-left:6px; color:var(--navy); }
+    </style>
+
+    {# =================== 1. HEADER =================== #}
     <div class="page-header">
       <div><h1>Reports</h1><div class="sub mono">Pipeline overview</div></div>
     </div>
 
-    <!-- Stats grid -->
-    <div class="stat-row" style="flex-wrap:wrap;gap:12px;">
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('total',0) }}</div>
-        <div class="stat-label">Total projects</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('sent',0) }}</div>
-        <div class="stat-label">Quotes sent</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('won',0) }}</div>
-        <div class="stat-label">Won</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('win_rate',0) }}%</div>
-        <div class="stat-label">Win rate</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="font-size:20px;">
-          £{{ '{:,.0f}'.format(stats.get('pipeline',0)) }}
+    {# =================== 2. PIPELINE =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Sales Pipeline</div>
+      <div class="rep-grid">
+        <div class="info-card">
+          <div class="info-card-label">Total projects</div>
+          <div class="info-card-value">{{ stats.get('total', 0) }}</div>
         </div>
-        <div class="stat-label">Pipeline value</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="font-size:20px;">
-          £{{ '{:,.0f}'.format(stats.get('won_value',0)) }}
+        <div class="info-card">
+          <div class="info-card-label">Quotes sent</div>
+          <div class="info-card-value">{{ stats.get('sent', 0) }}</div>
         </div>
-        <div class="stat-label">Won value</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('quote_count',0) }}</div>
-        <div class="stat-label">Quotes generated</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="font-size:20px;">
-          £{{ '{:,.0f}'.format(stats.get('avg_quote',0)) }}
+        <div class="info-card">
+          <div class="info-card-label">Won</div>
+          <div class="info-card-value">{{ stats.get('won', 0) }}</div>
         </div>
-        <div class="stat-label">Avg quote value</div>
+        <div class="info-card">
+          <div class="info-card-label">Win rate</div>
+          <div class="info-card-value">{{ stats.get('win_rate', 0) }}%</div>
+        </div>
+        <div class="info-card info-card-highlight">
+          <div class="info-card-label">Pipeline value</div>
+          <div class="info-card-value">₹{{ '{:,.0f}'.format(stats.get('pipeline', 0)) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Won value</div>
+          <div class="info-card-value">₹{{ '{:,.0f}'.format(stats.get('won_value', 0)) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Quotes generated</div>
+          <div class="info-card-value">{{ stats.get('quote_count', 0) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Avg quote value</div>
+          <div class="info-card-value">₹{{ '{:,.0f}'.format(stats.get('avg_quote', 0)) }}</div>
+        </div>
       </div>
     </div>
 
-    <!-- Orders / Payments / Manufacturing overview -->
-    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;
-                color:var(--steel);font-weight:600;margin:24px 0 12px;">Order Fulfilment</div>
-    <div class="stat-row" style="flex-wrap:wrap;gap:12px;margin-bottom:24px;">
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('orders_confirmed',0) }}</div>
-        <div class="stat-label">Orders confirmed</div>
+    {# =================== 3. STATUS BREAKDOWN =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Quote Status Breakdown</div>
+      {% if _sum %}
+      <div class="rep-bar" title="Draft / Sent / Won / Lost">
+        <span class="b-draft" style="width:{{ _draft * 100 / _sum }}%"></span>
+        <span class="b-sent"  style="width:{{ _sent  * 100 / _sum }}%"></span>
+        <span class="b-won"   style="width:{{ _won   * 100 / _sum }}%"></span>
+        <span class="b-lost"  style="width:{{ _lost  * 100 / _sum }}%"></span>
       </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('orders_pending',0) }}</div>
-        <div class="stat-label">Orders pending signature</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="font-size:20px;">
-          ₹{{ '{:,.0f}'.format(stats.get('order_value',0)) }}
-        </div>
-        <div class="stat-label">Confirmed order value</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="font-size:20px;">
-          ₹{{ '{:,.0f}'.format(stats.get('payments_received_total',0)) }}
-        </div>
-        <div class="stat-label">Payments received</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" style="font-size:20px;">
-          ₹{{ '{:,.0f}'.format(stats.get('payments_outstanding',0)) }}
-        </div>
-        <div class="stat-label">Payments outstanding</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('payments_overdue',0) }}</div>
-        <div class="stat-label">Payments overdue</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('jobs_queued',0) }}</div>
-        <div class="stat-label">Jobs queued</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('jobs_in_progress',0) }}</div>
-        <div class="stat-label">Jobs in progress</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('jobs_qc_hold',0) }}</div>
-        <div class="stat-label">Jobs on QC hold</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('jobs_completed',0) }}</div>
-        <div class="stat-label">Jobs completed</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('deliveries_packed',0) }}</div>
-        <div class="stat-label">Deliveries packed</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('deliveries_dispatched',0) }}</div>
-        <div class="stat-label">Deliveries in transit</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('deliveries_delivered',0) }}</div>
-        <div class="stat-label">Deliveries delivered</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.get('deliveries_issues',0) }}</div>
-        <div class="stat-label">Deliveries with issues</div>
+      {% endif %}
+      <div class="rep-legend">
+        <span>{{ pill('Draft', 'neutral') }}<strong>{{ _draft }}</strong></span>
+        <span>{{ pill('Sent', 'info') }}<strong>{{ _sent }}</strong></span>
+        <span>{{ pill('Won', 'success') }}<strong>{{ _won }}</strong></span>
+        <span>{{ pill('Lost', 'danger') }}<strong>{{ _lost }}</strong></span>
       </div>
     </div>
 
-    <!-- Status breakdown -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:24px;">
-      {% for status, label, cls in [
-        ('draft','Draft','badge-draft'),('sent','Sent','badge-sent'),
-        ('won','Won','badge-won'),('lost','Lost','badge-lost')
-      ] %}
-      <div style="background:white;border:1px solid var(--line);border-radius:6px;
-                  padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
-        <span class="badge {{ cls }}">{{ label }}</span>
-        <span style="font-family:var(--font-display);font-size:22px;">
-          {{ stats.get(status, 0) }}
-        </span>
+    {# =================== 4. ORDER FULFILMENT =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Orders &amp; Payments</div>
+      <div class="rep-grid">
+        <div class="info-card">
+          <div class="info-card-label">Orders confirmed</div>
+          <div class="info-card-value">{{ stats.get('orders_confirmed', 0) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Orders pending signature</div>
+          <div class="info-card-value">{{ stats.get('orders_pending', 0) }}</div>
+        </div>
+        <div class="info-card info-card-highlight">
+          <div class="info-card-label">Confirmed order value</div>
+          <div class="info-card-value">₹{{ '{:,.0f}'.format(stats.get('order_value', 0)) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Payments received</div>
+          <div class="info-card-value">₹{{ '{:,.0f}'.format(stats.get('payments_received_total', 0)) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Payments outstanding</div>
+          <div class="info-card-value">₹{{ '{:,.0f}'.format(stats.get('payments_outstanding', 0)) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Payments overdue</div>
+          <div class="info-card-value {{ 'text-error' if stats.get('payments_overdue', 0) }}">{{ stats.get('payments_overdue', 0) }}</div>
+        </div>
       </div>
-      {% endfor %}
     </div>
 
-    <!-- Recent quotations -->
+    <div class="ui-card">
+      <div class="ui-card-title">Manufacturing</div>
+      <div class="rep-grid">
+        <div class="info-card">
+          <div class="info-card-label">Jobs queued</div>
+          <div class="info-card-value">{{ stats.get('jobs_queued', 0) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Jobs in progress</div>
+          <div class="info-card-value">{{ stats.get('jobs_in_progress', 0) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Jobs on QC hold</div>
+          <div class="info-card-value {{ 'text-warning' if stats.get('jobs_qc_hold', 0) }}">{{ stats.get('jobs_qc_hold', 0) }}</div>
+        </div>
+        <div class="info-card info-card-highlight">
+          <div class="info-card-label">Jobs completed</div>
+          <div class="info-card-value">{{ stats.get('jobs_completed', 0) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ui-card">
+      <div class="ui-card-title">Deliveries</div>
+      <div class="rep-grid">
+        <div class="info-card">
+          <div class="info-card-label">Deliveries packed</div>
+          <div class="info-card-value">{{ stats.get('deliveries_packed', 0) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Deliveries in transit</div>
+          <div class="info-card-value">{{ stats.get('deliveries_dispatched', 0) }}</div>
+        </div>
+        <div class="info-card info-card-highlight">
+          <div class="info-card-label">Deliveries delivered</div>
+          <div class="info-card-value">{{ stats.get('deliveries_delivered', 0) }}</div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-label">Deliveries with issues</div>
+          <div class="info-card-value {{ 'text-warning' if stats.get('deliveries_issues', 0) }}">{{ stats.get('deliveries_issues', 0) }}</div>
+        </div>
+      </div>
+    </div>
+
+    {# =================== 5. RECENT QUOTATIONS =================== #}
     {% if recent_quotes %}
-    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;
-                color:var(--steel);font-weight:600;margin-bottom:12px;">Recent quotations</div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Quotation #</th><th>Customer</th><th>Date</th>
-          <th>Total</th><th>Status</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% set badge_map = {
-          'QUOTE-SENT': 'sent',
-          'QUOTE-NEGOTIATION': 'sent',
-          'QUOTE-ACCEPTED': 'won',
-          'QUOTE-LOST': 'lost'
-        } %}
-        {% for q in recent_quotes %}
-        <tr>
-          <td class="mono" style="font-size:12px;">{{ q.quotation_number }}</td>
-          <td>{{ q.project.display_name if q.project else '—' }}</td>
-          <td class="muted mono" style="font-size:11px;">{{ q.created_at.strftime('%d %b %Y') }}</td>
-          <td class="mono" style="font-weight:600;color:var(--copper);">
-            £{{ '%.2f'|format(q.grand_total) if q.grand_total else '—' }}
-          </td>
-          <td>
-            <span class="badge badge-{{ badge_map.get(q.status, 'draft') }}">
-              {{ q.status_label }}
-            </span>
-          </td>
-          <td style="text-align:right;">
-            <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}"
-               class="btn btn-secondary btn-sm">View →</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="ui-card">
+      <div class="ui-card-title">Recent quotations</div>
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Quotation #</th><th>Customer</th><th>Date</th>
+            <th>Total</th><th>Status</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for q in recent_quotes %}
+          {% set _b = badge_map.get(q.status, ('neutral', q.status_label)) %}
+          <tr>
+            <td class="mono" style="font-size:12px; font-weight:600;">{{ q.quotation_number }}</td>
+            <td>{{ q.project.display_name if q.project else '—' }}</td>
+            <td class="muted mono" style="font-size:11px;">{{ q.created_at.strftime('%d %b %Y') }}</td>
+            <td class="mono" style="font-weight:600; color:var(--copper);">
+              {{ '₹{:,.2f}'.format(q.grand_total|float) if q.grand_total else '—' }}
+            </td>
+            <td>{{ pill(q.status_label, _b[0]) }}</td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
     {% endif %}
+
   </div>
 </div>
 {% endblock %}

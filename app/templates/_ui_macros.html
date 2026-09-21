@@ -11,7 +11,8 @@
 {% set UI_STAGES = [
   'Lead Generation', 'Follow-Up', 'Preliminary Selection', 'Survey',
   'Design & Specs', 'Customer Approval', 'Quotation', 'Order Acceptance',
-  'Advance Payment', 'Manufacturing', 'Delivery', 'Installation', 'AMC'
+  'Advance Payment', 'Manufacturing', 'Delivery', 'Installation', 'AMC',
+  'Service Ticket', 'Project'
 ] %}
 
 {% macro stage_tracker(current_step, danger=false, stages=UI_STAGES) -%}

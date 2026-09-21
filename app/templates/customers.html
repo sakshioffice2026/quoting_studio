@@ -1,10 +1,13 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, avatar %}
 {% block title %}Customers — FenestraOne{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
+
+    {# =================== 1. HEADER =================== #}
     <div class="page-header">
       <div>
         <h1>Customers</h1>
@@ -12,39 +15,62 @@
       </div>
     </div>
 
-    {% if customers %}
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Phone</th>
-          <th>Email</th>
-          <th>City</th>
-          <th>Leads</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in customers %}
-        <tr>
-          <td style="font-weight:600;">{{ c.name }}</td>
-          <td class="mono" style="font-size:12px;">{{ c.phone or '—' }}</td>
-          <td class="muted" style="font-size:12px;">{{ c.email or '—' }}</td>
-          <td class="muted" style="font-size:12px;">{{ c.city or '—' }}</td>
-          <td class="mono" style="font-size:12px;">{{ c.leads.count() }}</td>
-          <td style="text-align:right;">
-            <a href="{{ url_for('customers.detail', customer_id=c.id) }}" class="btn btn-secondary btn-sm">View →</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-      <div class="icon">◱</div>
-      <p>No customers yet. Customers are created automatically when a Lead is qualified.</p>
+    <style>
+      .cust-cell { display:flex; align-items:center; gap:10px; }
+      .cust-name { font-weight:600; color:var(--navy); }
+      .cust-name:hover { color:var(--copper); }
+    </style>
+
+    {# =================== 2. TABLE =================== #}
+    <div class="ui-card">
+      {% if customers %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>City</th>
+            <th>Leads</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in customers %}
+          {% set _parts = c.name.split() %}
+          {% set _initials = ((_parts[0][0] if _parts|length > 0 else '?') ~ (_parts[1][0] if _parts|length > 1 else '')) | upper %}
+          <tr>
+            <td>
+              <div class="cust-cell">
+                {{ avatar(_initials, 'sm') }}
+                <a href="{{ url_for('customers.detail', customer_id=c.id) }}" class="cust-name">{{ c.name }}</a>
+              </div>
+            </td>
+            <td class="mono" style="font-size:12px;">
+              {% if c.phone %}<a href="tel:{{ c.phone }}">{{ c.phone }}</a>{% else %}—{% endif %}
+            </td>
+            <td class="muted" style="font-size:12px;">
+              {% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% else %}—{% endif %}
+            </td>
+            <td class="muted" style="font-size:12px;">{{ c.city or '—' }}</td>
+            <td>{{ pill(c.leads.count(), 'info') }}</td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('customers.detail', customer_id=c.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">◱</div>
+        <p>No customers yet. Customers are created automatically when a Lead is qualified.</p>
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
+
   </div>
 </div>
 {% endblock %}

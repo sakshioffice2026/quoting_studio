@@ -1,8 +1,9 @@
 from flask import Blueprint, render_template, current_app, request
 from flask_login import login_required, current_user
 
-from ..models import Project, ProjectStatus
+from ..models import Project, ProjectStatus, Quotation
 from ..services.domain import project_stage_service
+from .reports import derive_project_status
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -24,16 +25,23 @@ def index():
             if q else all_projects
         )
 
+        quotes_by_project = {}
+        for _quote in Quotation.query.filter_by(tenant_id=current_user.tenant_id).all():
+            quotes_by_project.setdefault(_quote.project_id, []).append(_quote)
+
+        derived = {p.id: derive_project_status(p, quotes_by_project.get(p.id, []))
+                   for p in all_projects}
+
         total    = len(all_projects)
-        sent     = sum(1 for p in all_projects if p.status == ProjectStatus.SENT)
-        won      = sum(1 for p in all_projects if p.status == ProjectStatus.WON)
+        sent     = sum(1 for s in derived.values() if s == ProjectStatus.SENT)
+        won      = sum(1 for s in derived.values() if s == ProjectStatus.WON)
         win_rate = round((won / total * 100) if total else 0)
 
         pipeline = sum(
             float(p.latest_quote.grand_total)
             for p in all_projects
             if p.latest_quote and p.latest_quote.grand_total
-            and p.status != ProjectStatus.LOST
+            and derived.get(p.id) != ProjectStatus.LOST
         )
 
         stats = dict(total=total, sent=sent, won=won,

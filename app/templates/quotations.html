@@ -1,10 +1,18 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill %}
 {% block title %}Quotations — FenestraOne{% endblock %}
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
+
+    {% set tone_map = {
+      'QUOTE-DRAFT': 'neutral', 'QUOTE-PENDING_DISCOUNT_APPROVAL': 'warn', 'QUOTE-SENT': 'info',
+      'QUOTE-NEGOTIATION': 'warn', 'QUOTE-ACCEPTED': 'success', 'QUOTE-LOST': 'danger', 'QUOTE-EXPIRED': 'danger'
+    } %}
+
+    {# =================== 1. HEADER =================== #}
     <div class="page-header">
       <div>
         <h1>Quotations</h1>
@@ -12,78 +20,88 @@
       </div>
     </div>
 
-    {# Status filter pills #}
-    <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:6px;">
-      <a href="{{ url_for('quotation.index') }}"
-         class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
-      {% for code in QuotationStatus.ALL %}
-      <a href="{{ url_for('quotation.index', status=code) }}"
-         class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">
-        {{ QuotationStatus.LABELS[code] }}
-      </a>
-      {% endfor %}
-    </div>
+    <style>
+      .q-filters { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+      .q-name { font-weight:600; color:var(--navy); }
+      .q-name:hover { color:var(--copper); }
+    </style>
 
-    {% if quotations %}
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Quotation #</th>
-          <th>Project</th>
-          <th>Ver.</th>
-          <th>Status</th>
-          <th style="text-align:right;">Grand Total</th>
-          <th>Valid Until</th>
-          <th>Sent</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for q in quotations %}
-        <tr>
-          <td class="mono" style="font-size:12px; font-weight:600;">{{ q.quotation_number }}</td>
-          <td class="link-cell">
-            {% if q.project %}
-              <a href="{{ url_for('projects.detail', project_id=q.project_id) }}">{{ q.project.display_name }}</a>
-            {% else %}—{% endif %}
-          </td>
-          <td class="mono" style="font-size:12px; text-align:center;">v{{ q.quotation_version }}</td>
-          <td>
-            <span class="badge badge-{{ q.status|lower|replace('quote-', '')|replace('_', '-') }}">{{ q.status_label }}</span>
-            {% if q.is_expired and q.status != QuotationStatus.EXPIRED %}
-              <span class="expiry-tag text-error">Expired</span>
-            {% elif q.days_until_expiry is not none and q.days_until_expiry <= 3 and q.status == QuotationStatus.SENT %}
-              <span class="expiry-tag text-warning">⚠ {{ q.days_until_expiry }}d left</span>
-            {% endif %}
-          </td>
-          <td class="num-cell" style="font-weight:600; color:var(--copper);">
-            {% if q.grand_total %}
-              ₹{{ '{:,.2f}'.format(q.grand_total|float) }}
-            {% else %}—{% endif %}
-          </td>
-          <td class="muted mono" style="font-size:12px;">
-            {% if q.validity_date %}
-              <span class="{{ 'text-error' if q.is_expired else '' }}">{{ q.validity_date.strftime('%Y-%m-%d') }}</span>
-            {% else %}—{% endif %}
-          </td>
-          <td class="muted mono" style="font-size:12px;">
-            {{ q.sent_at.strftime('%Y-%m-%d') if q.sent_at else '—' }}
-          </td>
-          <td style="text-align:right;">
-            <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}" class="btn btn-secondary btn-sm">View →</a>
-          </td>
-        </tr>
+    {# =================== 2. FILTERS + TABLE =================== #}
+    <div class="ui-card">
+      <div class="q-filters">
+        <a href="{{ url_for('quotation.index') }}"
+           class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
+        {% for code in QuotationStatus.ALL %}
+        <a href="{{ url_for('quotation.index', status=code) }}"
+           class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">
+          {{ QuotationStatus.LABELS[code] }}
+        </a>
         {% endfor %}
-      </tbody>
-    </table>
+      </div>
 
-    {% else %}
-    <div class="empty-state">
-      <div class="icon">📄</div>
-      <p>No quotations yet. Generate one from an approved project's design page.</p>
-      <a href="{{ url_for('design_approval.index') }}" class="btn btn-primary">Go to Design Approvals</a>
+      {% if quotations %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Quotation #</th>
+            <th>Project</th>
+            <th>Ver.</th>
+            <th>Status</th>
+            <th style="text-align:right;">Grand Total</th>
+            <th>Valid Until</th>
+            <th>Sent</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for q in quotations %}
+          <tr>
+            <td class="mono" style="font-size:12px; font-weight:600;">{{ q.quotation_number }}</td>
+            <td>
+              {% if q.project %}
+                <a href="{{ url_for('projects.detail', project_id=q.project_id) }}" class="q-name">{{ q.project.display_name }}</a>
+              {% else %}—{% endif %}
+            </td>
+            <td class="mono" style="font-size:12px; text-align:center;">v{{ q.quotation_version }}</td>
+            <td>
+              {{ pill(q.status_label, tone_map.get(q.status, 'neutral')) }}
+              {% if q.is_expired and q.status != QuotationStatus.EXPIRED %}
+                <span class="expiry-tag text-error">Expired</span>
+              {% elif q.days_until_expiry is not none and q.days_until_expiry <= 3 and q.status == QuotationStatus.SENT %}
+                <span class="expiry-tag text-warning">⚠ {{ q.days_until_expiry }}d left</span>
+              {% endif %}
+            </td>
+            <td class="num-cell" style="font-weight:600; color:var(--copper);">
+              {% if q.grand_total %}
+                ₹{{ '{:,.2f}'.format(q.grand_total|float) }}
+              {% else %}—{% endif %}
+            </td>
+            <td class="muted mono" style="font-size:12px;">
+              {% if q.validity_date %}
+                <span class="{{ 'text-error' if q.is_expired else '' }}">{{ q.validity_date.strftime('%d %b %Y') }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="muted mono" style="font-size:12px;">
+              {{ q.sent_at.strftime('%d %b %Y') if q.sent_at else '—' }}
+            </td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">📄</div>
+        <p>No quotations yet. Generate one from an approved project's design page.</p>
+        <a href="{{ url_for('design_approval.index') }}" class="btn btn-primary">Go to Design Approvals</a>
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
 
   </div>
 </div>

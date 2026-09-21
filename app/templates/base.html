@@ -45,13 +45,13 @@
   <header class="topbar">
     <button type="button" class="topbar-menu-btn" id="navDrawerToggle"
             aria-label="Open menu" aria-controls="navDrawer" aria-expanded="false">&#9776;</button>
-    <a href="{{ url_for('dashboard.index') }}" class="topbar-logo" title="Go to dashboard">FenestraOne</a>
+    <a href="{{ url_for('home.index') }}" class="topbar-logo" title="Go to dashboard">FenestraOne</a>
     <div class="topbar-sep"></div>
     <span class="topbar-tenant">{{ current_user.tenant.name }}</span>
     <div class="topbar-spacer"></div>
     <nav class="topbar-nav">
-      <a href="{{ url_for('dashboard.index') }}"
-         class="{{ 'active' if request.endpoint == 'dashboard.index' }}">Dashboard</a>
+      <a href="{{ url_for('home.index') }}"
+         class="{{ 'active' if request.endpoint == 'home.index' }}">Dashboard</a>
       {% if current_user.is_authenticated and current_user.is_admin %}
       <a href="{{ url_for('settings.company') }}"
          class="{{ 'active' if request.endpoint and request.endpoint.startswith('settings.') }}">Settings</a>
@@ -68,7 +68,7 @@
   <div class="nav-drawer-overlay" id="navDrawerOverlay"></div>
   <nav class="nav-drawer" id="navDrawer" aria-label="Main navigation" aria-hidden="true">
     <div class="nav-drawer-head">
-      <a href="{{ url_for('dashboard.index') }}" class="nav-drawer-home">&larr; Dashboard</a>
+      <a href="{{ url_for('home.index') }}" class="nav-drawer-home">&larr; Dashboard</a>
       <button type="button" class="nav-drawer-close" id="navDrawerClose" aria-label="Close menu">&#10005;</button>
     </div>
     {% include '_nav_links.html' %}

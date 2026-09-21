@@ -1,39 +1,50 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, stage_tracker %}
 {% block title %}{{ installation.install_number }} — FenestraOne{% endblock %}
 {% block body %}
 {% include '_installation_styles.html' %}
-{% set _badge = installation.status|lower|replace('install-', '')|replace('_', '-') %}
 {% set _active = installation.status in (InstallationStatus.IN_PROGRESS, InstallationStatus.SNAG) %}
 {% set _sum = installation_summary(installation.order_id) %}
+{% set tone_map = {
+  'INSTALL-SCHEDULED': 'neutral', 'INSTALL-IN_PROGRESS': 'info',
+  'INSTALL-SNAG': 'warn', 'INSTALL-COMPLETED': 'success'
+} %}
+{% set project = installation.order.project if installation.order and installation.order.project else None %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
 
-    {# ── Page header ── #}
-    <div class="page-header">
-      <div>
-        <h1>Installation {{ installation.install_number }}</h1>
-        {% if installation.order and installation.order.project %}
-        <div class="sub mono">Project: <strong>{{ installation.order.project.display_name }}</strong> · Customer: {{ installation.order.project.customer_name }}</div>
-        {% endif %}
-        <div class="sub mono">
-          {{ installation.order.order_number if installation.order else '' }}
-          · <span class="badge badge-inst-{{ _badge }}">{{ installation.status_label }}</span>
+    {# =================== 1. HEADER CARD =================== #}
+    <div class="ui-card lead-header-card">
+      <div class="lead-header-top">
+        <div class="lead-header-title">
+          <h1>{{ project.display_name if project else 'Installation' }}</h1>
+          <span class="customer-chip">{{ installation.install_number }}</span>
+        </div>
+        <div class="lead-header-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+          {% if installation.is_completed %}
+          <a href="{{ url_for('installation.certificate', installation_id=installation.id) }}" target="_blank" class="btn btn-secondary btn-sm">Handover Certificate</a>
+          {% endif %}
+          {% if installation.order %}
+          <a href="{{ url_for('order.detail', order_id=installation.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+          {% endif %}
+          <a href="{{ url_for('installation.index') }}" class="btn btn-secondary btn-sm">← All Installations</a>
         </div>
       </div>
-      <div class="flex gap-8">
-        {% if installation.is_completed %}
-        <a href="{{ url_for('installation.certificate', installation_id=installation.id) }}" target="_blank" class="btn btn-secondary btn-sm">Handover Certificate</a>
+
+      <div class="lead-header-pills">
+        {{ pill(installation.status_label, tone_map.get(installation.status, 'neutral')) }}
+        {% if installation.order %}{{ pill(installation.order.order_number, 'neutral') }}{% endif %}
+        {% if installation.open_snag_count %}
+          {{ pill(installation.open_snag_count ~ ' open snag' ~ ('s' if installation.open_snag_count != 1 else ''), 'warn') }}
         {% endif %}
-        {% if installation.order %}
-        <a href="{{ url_for('order.detail', order_id=installation.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
-        {% endif %}
-        <a href="{{ url_for('installation.index') }}" class="btn btn-secondary btn-sm">← All Installations</a>
       </div>
+
+      {{ stage_tracker(12, installation.status == InstallationStatus.SNAG) }}
     </div>
 
-    {# ── Summary cards ── #}
+    {# =================== 2. KEY NUMBERS =================== #}
     <div class="info-card-row">
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Status</div>
@@ -49,84 +60,110 @@
       </div>
       <div class="info-card">
         <div class="info-card-label">Scheduled</div>
-        <div class="info-card-value">
-          {{ installation.scheduled_date.strftime('%Y-%m-%d') if installation.scheduled_date else '—' }}
-        </div>
+        <div class="info-card-value">{{ installation.scheduled_date.strftime('%d %b %Y') if installation.scheduled_date else '—' }}</div>
       </div>
     </div>
 
-    {# ── Site details ── #}
-    <div class="quote-meta">
-      <p><strong>Site address:</strong> {{ installation.installation_address or '—' }}</p>
-      <p><strong>Site contact:</strong>
-        {{ installation.site_contact_name or '—' }}{% if installation.site_contact_phone %} · {{ installation.site_contact_phone }}{% endif %}
-      </p>
-      <p><strong>Team lead:</strong> {{ installation.team_lead_name or '—' }}</p>
-      {% if installation.started_at %}
-        <p><strong>Started:</strong> {{ installation.started_at.strftime('%Y-%m-%d %H:%M') }}</p>
-      {% endif %}
-      {% if installation.customer_signoff_at %}
-        <p><strong>Customer sign-off:</strong> {{ installation.customer_signoff_at.strftime('%Y-%m-%d %H:%M') }}
-          · by {{ installation.signed_by or '—' }}</p>
-      {% endif %}
-      {% if installation.handover_notes %}
-        <p><strong>Handover notes:</strong> {{ installation.handover_notes }}</p>
-      {% endif %}
-      {% if installation.handover_file_path %}
-        <p><strong>Signed handover certificate:</strong>
-          <a href="{{ url_for('uploaded_file', filename=installation.handover_file_path) }}" target="_blank">View file</a></p>
+    {# =================== 3. SITE DETAILS =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Site Details</div>
+      <div class="info-grid">
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Customer</div>
+          <div class="info-grid-value">{{ project.customer_name if project else '—' }}</div>
+        </div></div>
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Site Address</div>
+          <div class="info-grid-value">{{ installation.installation_address or '—' }}</div>
+        </div></div>
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Site Contact</div>
+          <div class="info-grid-value">{{ installation.site_contact_name or '—' }}{% if installation.site_contact_phone %} · {{ installation.site_contact_phone }}{% endif %}</div>
+        </div></div>
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Team Lead</div>
+          <div class="info-grid-value">{{ installation.team_lead_name or '—' }}</div>
+        </div></div>
+        {% if installation.started_at %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Started</div>
+          <div class="info-grid-value">{{ installation.started_at.strftime('%d %b %Y, %H:%M') }}</div>
+        </div></div>
+        {% endif %}
+        {% if installation.customer_signoff_at %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Customer Sign-off</div>
+          <div class="info-grid-value">{{ installation.customer_signoff_at.strftime('%d %b %Y, %H:%M') }} · by {{ installation.signed_by or '—' }}</div>
+        </div></div>
+        {% endif %}
+        {% if installation.handover_notes %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Handover Notes</div>
+          <div class="info-grid-value">{{ installation.handover_notes }}</div>
+        </div></div>
+        {% endif %}
+        {% if installation.handover_file_path %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Signed Handover Certificate</div>
+          <div class="info-grid-value"><a href="{{ url_for('uploaded_file', filename=installation.handover_file_path) }}" target="_blank">View file</a></div>
+        </div></div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# =================== 4. ORDER PROGRESS =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Order Installation Progress</div>
+      <div class="inst-chips">
+        <span class="inst-chip main"><strong>{{ _sum.installed }} of {{ _sum.total }}</strong> installed &amp; signed off</span>
+        {% if _sum.pending %}<span class="inst-chip"><strong>{{ _sum.pending }}</strong> pending</span>{% endif %}
+        {% if _sum.unscheduled %}<span class="inst-chip ready"><strong>{{ _sum.unscheduled }}</strong> delivered, not scheduled</span>{% endif %}
+        {% if _sum.open_snags %}<span class="inst-chip warn"><strong>{{ _sum.open_snags }}</strong> open snag{{ 's' if _sum.open_snags != 1 else '' }}</span>{% endif %}
+      </div>
+      {% if _sum.total %}
+      <div class="inst-bar" title="Installation progress">
+        <span class="b-installed" style="width:{{ _sum.installed * 100 / _sum.total }}%"></span>
+        <span class="b-scheduled" style="width:{{ (_sum.scheduled - _sum.installed) * 100 / _sum.total if _sum.scheduled > _sum.installed else 0 }}%"></span>
+      </div>
       {% endif %}
     </div>
 
-    {# ── Order-level installation progress ── #}
-    <div class="section-title">Order Installation Progress</div>
-    <div class="inst-chips">
-      <span class="inst-chip main"><strong>{{ _sum.installed }} of {{ _sum.total }}</strong> installed &amp; signed off</span>
-      {% if _sum.pending %}<span class="inst-chip"><strong>{{ _sum.pending }}</strong> pending</span>{% endif %}
-      {% if _sum.unscheduled %}<span class="inst-chip ready"><strong>{{ _sum.unscheduled }}</strong> delivered, not scheduled</span>{% endif %}
-      {% if _sum.open_snags %}<span class="inst-chip warn"><strong>{{ _sum.open_snags }}</strong> open snag{{ 's' if _sum.open_snags != 1 else '' }}</span>{% endif %}
-    </div>
-    {% if _sum.total %}
-    <div class="inst-bar" title="Installation progress">
-      <span class="b-installed" style="width:{{ _sum.installed * 100 / _sum.total }}%"></span>
-      <span class="b-scheduled" style="width:{{ (_sum.scheduled - _sum.installed) * 100 / _sum.total if _sum.scheduled > _sum.installed else 0 }}%"></span>
-    </div>
-    {% endif %}
-
-    {# ── On-Installation payment milestone ── #}
+    {# =================== 5. ON-INSTALLATION PAYMENT =================== #}
     {% if payments %}
-    <div class="section-title">On-Installation Payment</div>
-    <div style="overflow-x:auto; margin-bottom:24px;">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Payment #</th>
-          <th>Status</th>
-          <th>Invoice</th>
-          <th>Received</th>
-          <th>Due</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in payments %}
-        <tr>
-          <td class="mono" style="font-size:12px;">{{ p.payment_number }}</td>
-          <td style="font-size:12px;">{{ p.status_label }}</td>
-          <td class="mono" style="font-size:12px;">{{ p.invoice_amount }}</td>
-          <td class="mono" style="font-size:12px;">{{ p.amount_received }}</td>
-          <td class="muted mono" style="font-size:12px;">{{ p.due_date.strftime('%Y-%m-%d') if p.due_date else '—' }}</td>
-          <td style="text-align:right;">
-            <a href="{{ url_for('payment.detail', payment_id=p.id) }}" class="btn btn-secondary btn-sm">View →</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="ui-card">
+      <div class="ui-card-title">On-Installation Payment</div>
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Payment #</th>
+            <th>Status</th>
+            <th>Invoice</th>
+            <th>Received</th>
+            <th>Due</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in payments %}
+          <tr>
+            <td class="mono" style="font-size:12px;">{{ p.payment_number }}</td>
+            <td style="font-size:12px;">{{ p.status_label }}</td>
+            <td class="mono" style="font-size:12px;">{{ p.invoice_amount }}</td>
+            <td class="mono" style="font-size:12px;">{{ p.amount_received }}</td>
+            <td class="muted mono" style="font-size:12px;">{{ p.due_date.strftime('%d %b %Y') if p.due_date else '—' }}</td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('payment.detail', payment_id=p.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
     </div>
     {% endif %}
 
-    {# ── Per-opening checklist ── #}
+    {# =================== 6. OPENINGS CHECKLIST =================== #}
     <div class="section-title">Openings</div>
     {% for item in installation.items %}
     {% set _res = item.functional_test_result|lower %}
@@ -144,7 +181,7 @@
       {% if item.installed_by or item.install_date %}
       <div class="muted mono" style="font-size:12px; margin-bottom:8px;">
         {{ item.installed_by or '—' }}
-        {% if item.install_date %}· {{ item.install_date.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+        {% if item.install_date %}· {{ item.install_date.strftime('%d %b %Y, %H:%M') }}{% endif %}
       </div>
       {% endif %}
 
@@ -153,7 +190,6 @@
 {{ item.snag_list }}</div>
       {% endif %}
 
-      {# Read-only summary once passed, or when the installation is not active #}
       {% if item.is_passed or not _active %}
       <div class="inst-checks" style="margin-bottom:0;">
         <span>{{ '✓' if item.fitted else '✗' }} Fitted</span>
@@ -162,7 +198,6 @@
         <span>{{ '✓' if item.site_cleaned else '✗' }} Site cleaned</span>
       </div>
 
-      {# Open snag → resolve #}
       {% elif item.has_open_snag %}
       <form method="POST" style="display:flex; gap:6px; flex-wrap:wrap;"
             action="{{ url_for('installation.resolve_item', installation_id=installation.id, item_id=item.id) }}">
@@ -171,7 +206,6 @@
         <button type="submit" class="btn btn-secondary btn-sm">Resolve Snag</button>
       </form>
 
-      {# Pending → record checklist + functional test #}
       {% else %}
       <form method="POST"
             action="{{ url_for('installation.record_item', installation_id=installation.id, item_id=item.id) }}">
@@ -209,48 +243,46 @@
     </div>
     {% endfor %}
 
-    {# ══════════════════════════════════════════════
-       ACTION PANELS
-       ══════════════════════════════════════════════ #}
+    {# =================== 7. ACTION CARDS =================== #}
 
-    {# ── SCHEDULED → Start / Reschedule ── #}
     {% if installation.status == InstallationStatus.SCHEDULED %}
-    <form method="POST" class="action-panel action-panel-wide"
-          action="{{ url_for('installation.start', installation_id=installation.id) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <h4 class="action-title">Start Installation</h4>
-      <div class="form-group">
-        <label class="form-label" for="team_lead_name_start">Team lead</label>
-        <input type="text" class="form-control" id="team_lead_name_start" name="team_lead_name"
-               value="{{ installation.team_lead_name or '' }}">
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm">Start →</button>
-    </form>
+    <div class="action-grid">
+      <form method="POST" class="ui-card action-panel"
+            action="{{ url_for('installation.start', installation_id=installation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ui-card-title" style="margin-bottom:6px;">Start Installation</div>
+        <div class="form-group">
+          <label class="form-label" for="team_lead_name_start">Team lead</label>
+          <input type="text" class="form-control" id="team_lead_name_start" name="team_lead_name"
+                 value="{{ installation.team_lead_name or '' }}">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Start →</button>
+      </form>
 
-    <form method="POST" class="action-panel action-panel-wide"
-          action="{{ url_for('installation.reschedule', installation_id=installation.id) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <h4 class="action-title">Reschedule</h4>
-      <div class="form-group">
-        <label class="form-label" for="scheduled_date_resched">New date *</label>
-        <input type="date" class="form-control" id="scheduled_date_resched" name="scheduled_date"
-               value="{{ installation.scheduled_date.strftime('%Y-%m-%d') if installation.scheduled_date else '' }}" required>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="team_lead_name_resched">Team lead</label>
-        <input type="text" class="form-control" id="team_lead_name_resched" name="team_lead_name"
-               value="{{ installation.team_lead_name or '' }}">
-      </div>
-      <button type="submit" class="btn btn-secondary btn-sm">Reschedule</button>
-    </form>
+      <form method="POST" class="ui-card action-panel"
+            action="{{ url_for('installation.reschedule', installation_id=installation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ui-card-title" style="margin-bottom:6px;">Reschedule</div>
+        <div class="form-group">
+          <label class="form-label" for="scheduled_date_resched">New date *</label>
+          <input type="date" class="form-control" id="scheduled_date_resched" name="scheduled_date"
+                 value="{{ installation.scheduled_date.strftime('%Y-%m-%d') if installation.scheduled_date else '' }}" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="team_lead_name_resched">Team lead</label>
+          <input type="text" class="form-control" id="team_lead_name_resched" name="team_lead_name"
+                 value="{{ installation.team_lead_name or '' }}">
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Reschedule</button>
+      </form>
+    </div>
     {% endif %}
 
-    {# ── SNAG → Resolve all ── #}
     {% if installation.status == InstallationStatus.SNAG %}
-    <form method="POST" class="action-panel action-panel-wide action-panel-warning"
+    <form method="POST" class="ui-card action-panel action-panel-warning" style="max-width:600px;"
           action="{{ url_for('installation.resolve_all', installation_id=installation.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <h4 class="action-title">Snags Found</h4>
+      <div class="ui-card-title" style="margin-bottom:6px;">Snags Found</div>
       <p class="action-note">Resolve each snag above, or resolve all at once. Each opening must then be re-tested before handover.</p>
       <div class="form-group">
         <label class="form-label" for="resolution_notes_all">Resolution notes</label>
@@ -260,13 +292,12 @@
     </form>
     {% endif %}
 
-    {# ── IN_PROGRESS + all passed → Customer sign-off ── #}
     {% if installation.status == InstallationStatus.IN_PROGRESS %}
     {% if installation.all_passed %}
-    <form method="POST" class="action-panel action-panel-wide" enctype="multipart/form-data"
+    <form method="POST" class="ui-card action-panel" style="max-width:600px;" enctype="multipart/form-data"
           action="{{ url_for('installation.signoff', installation_id=installation.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <h4 class="action-title">Customer Sign-off &amp; Handover</h4>
+      <div class="ui-card-title" style="margin-bottom:6px;">Customer Sign-off &amp; Handover</div>
       <div class="form-group">
         <label class="form-label" for="signed_by">Signed by (customer) *</label>
         <input type="text" class="form-control" id="signed_by" name="signed_by"
@@ -284,8 +315,8 @@
       <button type="submit" class="btn btn-primary btn-sm">Complete Handover →</button>
     </form>
     {% else %}
-    <div class="action-panel action-panel-wide">
-      <h4 class="action-title">Awaiting Openings</h4>
+    <div class="ui-card" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px;">Awaiting Openings</div>
       <p class="action-note" style="margin-bottom:0;">
         Record a passing functional test for every opening ({{ installation.passed_count }} of {{ installation.items|length }} done) to unlock customer sign-off.
       </p>
@@ -293,10 +324,9 @@
     {% endif %}
     {% endif %}
 
-    {# ── COMPLETED — terminal ── #}
     {% if installation.status == InstallationStatus.COMPLETED %}
-    <div class="action-panel action-panel-wide action-panel-success">
-      <h4 class="action-title text-success">✓ Installation Completed</h4>
+    <div class="ui-card action-panel-success" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Installation Completed</div>
       <p class="action-note" style="margin-bottom:0;">
         {% if _sum.pending %}
           {{ _sum.installed }} of {{ _sum.total }} openings installed · {{ _sum.pending }} still pending.

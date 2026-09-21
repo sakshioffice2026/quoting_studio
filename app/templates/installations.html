@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill %}
 {% block title %}Installations — FenestraOne{% endblock %}
 {% block body %}
 {% include '_installation_styles.html' %}
@@ -6,6 +7,13 @@
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
+
+    {% set tone_map = {
+      'INSTALL-SCHEDULED': 'neutral', 'INSTALL-IN_PROGRESS': 'info',
+      'INSTALL-SNAG': 'warn', 'INSTALL-COMPLETED': 'success'
+    } %}
+
+    {# =================== 1. HEADER =================== #}
     <div class="page-header">
       <div>
         <h1>Installations</h1>
@@ -13,129 +21,137 @@
       </div>
     </div>
 
-    {# ── Orders with delivered openings waiting to be scheduled ── #}
+    <style>
+      .i-filters { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+      .i-name { font-weight:600; color:var(--navy); }
+      .i-name:hover { color:var(--copper); }
+    </style>
+
+    {# =================== 2. READY TO SCHEDULE =================== #}
     {% if ready_orders %}
-    <div class="section-title">Ready to Schedule</div>
-    {% for row in ready_orders %}
-    <form method="POST" class="inst-card"
-          action="{{ url_for('installation.create', order_id=row.order.id) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="inst-card-head">
-        <div class="inst-card-title">
-          <strong>{{ row.order.project.display_name if row.order.project else '—' }}</strong> ·
-          <a href="{{ url_for('order.detail', order_id=row.order.id) }}">{{ row.order.order_number }}</a>
-          · {{ row.pending|length }} delivered opening{{ 's' if row.pending|length != 1 else '' }} awaiting installation
+    <div class="ui-card">
+      <div class="ui-card-title">Ready to Schedule ({{ ready_orders|length }})</div>
+      {% for row in ready_orders %}
+      <form method="POST" class="inst-card"
+            action="{{ url_for('installation.create', order_id=row.order.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="inst-card-head">
+          <div class="inst-card-title">
+            <strong>{{ row.order.project.display_name if row.order.project else '—' }}</strong> ·
+            <a href="{{ url_for('order.detail', order_id=row.order.id) }}">{{ row.order.order_number }}</a>
+            · {{ pill(row.pending|length ~ ' delivered opening' ~ ('s' if row.pending|length != 1 else '') ~ ' awaiting installation', 'info') }}
+          </div>
         </div>
-      </div>
 
-      <div class="inst-checks">
-        {% for item in row.pending %}
-        <label>
-          <input type="checkbox" name="opening_ids" value="{{ item.opening_id }}" checked>
-          {{ item.opening.label if item.opening else item.package_label or item.opening_id }}
-        </label>
-        {% endfor %}
-      </div>
+        <div class="inst-checks">
+          {% for item in row.pending %}
+          <label>
+            <input type="checkbox" name="opening_ids" value="{{ item.opening_id }}" checked>
+            {{ item.opening.label if item.opening else item.package_label or item.opening_id }}
+          </label>
+          {% endfor %}
+        </div>
 
-      <div class="inst-grid">
-        <div class="form-group">
-          <label class="form-label" for="scheduled_date_{{ row.order.id }}">Scheduled date</label>
-          <input type="date" class="form-control" id="scheduled_date_{{ row.order.id }}" name="scheduled_date">
+        <div class="inst-grid">
+          <div class="form-group">
+            <label class="form-label" for="scheduled_date_{{ row.order.id }}">Scheduled date</label>
+            <input type="date" class="form-control" id="scheduled_date_{{ row.order.id }}" name="scheduled_date">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="team_lead_name_{{ row.order.id }}">Team lead</label>
+            <input type="text" class="form-control" id="team_lead_name_{{ row.order.id }}" name="team_lead_name">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="site_contact_name_{{ row.order.id }}">Site contact</label>
+            <input type="text" class="form-control" id="site_contact_name_{{ row.order.id }}" name="site_contact_name">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="site_contact_phone_{{ row.order.id }}">Contact phone</label>
+            <input type="text" class="form-control" id="site_contact_phone_{{ row.order.id }}" name="site_contact_phone">
+          </div>
         </div>
         <div class="form-group">
-          <label class="form-label" for="team_lead_name_{{ row.order.id }}">Team lead</label>
-          <input type="text" class="form-control" id="team_lead_name_{{ row.order.id }}" name="team_lead_name">
+          <label class="form-label" for="installation_address_{{ row.order.id }}">Site address (defaults to delivery address)</label>
+          <textarea class="form-control" id="installation_address_{{ row.order.id }}" name="installation_address" rows="2"></textarea>
         </div>
-        <div class="form-group">
-          <label class="form-label" for="site_contact_name_{{ row.order.id }}">Site contact</label>
-          <input type="text" class="form-control" id="site_contact_name_{{ row.order.id }}" name="site_contact_name">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="site_contact_phone_{{ row.order.id }}">Contact phone</label>
-          <input type="text" class="form-control" id="site_contact_phone_{{ row.order.id }}" name="site_contact_phone">
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="installation_address_{{ row.order.id }}">Site address (defaults to delivery address)</label>
-        <textarea class="form-control" id="installation_address_{{ row.order.id }}" name="installation_address" rows="2"></textarea>
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm">Schedule Installation →</button>
-    </form>
-    {% endfor %}
-    {% endif %}
-
-    {# ── Status filter pills ── #}
-    <div class="section-title">All Installations</div>
-    <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:6px;">
-      <a href="{{ url_for('installation.index') }}"
-         class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
-      {% for code in InstallationStatus.ALL %}
-      <a href="{{ url_for('installation.index', status=code) }}"
-         class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">
-        {{ InstallationStatus.LABELS[code] }}
-      </a>
+        <button type="submit" class="btn btn-primary btn-sm">Schedule Installation →</button>
+      </form>
       {% endfor %}
     </div>
-
-    {% if installations %}
-    <div style="overflow-x:auto;">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Installation #</th>
-          <th>Project</th>
-          <th>Order</th>
-          <th>Openings</th>
-          <th>Status</th>
-          <th>Team Lead</th>
-          <th>Scheduled</th>
-          <th>Completed</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for i in installations %}
-        <tr>
-          <td class="mono" style="font-size:12px; font-weight:600;">{{ i.install_number }}</td>
-          <td class="link-cell">
-            {% if i.order and i.order.project %}
-              <a href="{{ url_for('projects.detail', project_id=i.order.project_id) }}">{{ i.order.project.display_name }}</a>
-            {% else %}—{% endif %}
-          </td>
-          <td class="link-cell">
-            {% if i.order %}
-              <a href="{{ url_for('order.detail', order_id=i.order_id) }}">{{ i.order.order_number }}</a>
-            {% else %}—{% endif %}
-          </td>
-          <td class="mono" style="font-size:12px;">{{ i.passed_count }} / {{ i.items|length }} passed
-            {% if i.open_snag_count %}<span class="text-warning"> · {{ i.open_snag_count }} snag{{ 's' if i.open_snag_count != 1 else '' }}</span>{% endif %}
-          </td>
-          <td>
-            <span class="badge badge-inst-{{ i.status|lower|replace('install-', '')|replace('_', '-') }}">{{ i.status_label }}</span>
-          </td>
-          <td style="font-size:12px;">{{ i.team_lead_name or '—' }}</td>
-          <td class="muted mono" style="font-size:12px;">
-            {{ i.scheduled_date.strftime('%Y-%m-%d') if i.scheduled_date else '—' }}
-          </td>
-          <td class="muted mono" style="font-size:12px;">
-            {{ i.completed_at.strftime('%Y-%m-%d') if i.completed_at else '—' }}
-          </td>
-          <td style="text-align:right;">
-            <a href="{{ url_for('installation.detail', installation_id=i.id) }}" class="btn btn-secondary btn-sm">View →</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-
-    {% else %}
-    <div class="empty-state">
-      <div class="icon">🛠️</div>
-      <p>No installations yet. Once openings are delivered without open issues, they appear above ready to schedule.</p>
-      <a href="{{ url_for('delivery.index') }}" class="btn btn-primary">Go to Deliveries</a>
-    </div>
     {% endif %}
+
+    {# =================== 3. FILTERS + TABLE =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">All Installations</div>
+      <div class="i-filters">
+        <a href="{{ url_for('installation.index') }}"
+           class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
+        {% for code in InstallationStatus.ALL %}
+        <a href="{{ url_for('installation.index', status=code) }}"
+           class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">
+          {{ InstallationStatus.LABELS[code] }}
+        </a>
+        {% endfor %}
+      </div>
+
+      {% if installations %}
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Installation #</th>
+            <th>Project</th>
+            <th>Order</th>
+            <th>Openings</th>
+            <th>Status</th>
+            <th>Team Lead</th>
+            <th>Scheduled</th>
+            <th>Completed</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for i in installations %}
+          <tr>
+            <td class="mono" style="font-size:12px; font-weight:600;">{{ i.install_number }}</td>
+            <td>
+              {% if i.order and i.order.project %}
+                <a href="{{ url_for('projects.detail', project_id=i.order.project_id) }}" class="i-name">{{ i.order.project.display_name }}</a>
+              {% else %}—{% endif %}
+            </td>
+            <td class="mono" style="font-size:12px;">
+              {% if i.order %}
+                <a href="{{ url_for('order.detail', order_id=i.order_id) }}">{{ i.order.order_number }}</a>
+              {% else %}—{% endif %}
+            </td>
+            <td class="mono" style="font-size:12px;">{{ i.passed_count }} / {{ i.items|length }} passed
+              {% if i.open_snag_count %}<span class="text-warning"> · {{ i.open_snag_count }} snag{{ 's' if i.open_snag_count != 1 else '' }}</span>{% endif %}
+            </td>
+            <td>{{ pill(i.status_label, tone_map.get(i.status, 'neutral')) }}</td>
+            <td style="font-size:12px;">{{ i.team_lead_name or '—' }}</td>
+            <td class="muted mono" style="font-size:12px;">
+              {{ i.scheduled_date.strftime('%d %b %Y') if i.scheduled_date else '—' }}
+            </td>
+            <td class="muted mono" style="font-size:12px;">
+              {{ i.completed_at.strftime('%d %b %Y') if i.completed_at else '—' }}
+            </td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('installation.detail', installation_id=i.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">🛠️</div>
+        <p>No installations yet. Once openings are delivered without open issues, they appear above ready to schedule.</p>
+        <a href="{{ url_for('delivery.index') }}" class="btn btn-primary">Go to Deliveries</a>
+      </div>
+      {% endif %}
+    </div>
 
   </div>
 </div>

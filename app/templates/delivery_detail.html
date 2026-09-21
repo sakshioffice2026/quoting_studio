@@ -1,144 +1,175 @@
 {% extends 'base.html' %}
+{% from '_ui_macros.html' import pill, stage_tracker %}
 {% block title %}{{ delivery.delivery_number }} — FenestraOne{% endblock %}
+
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
   <div class="dash-content">
 
-    {# ── Page header ── #}
-    <div class="page-header">
-      <div>
-        <h1>Delivery {{ delivery.delivery_number }}</h1>
-        {% if delivery.order and delivery.order.project %}
-        <div class="sub mono">Project: <strong>{{ delivery.order.project.display_name }}</strong> · Customer: {{ delivery.order.project.customer_name }}</div>
-        {% endif %}
-        <div class="sub mono">
-          {{ delivery.challan_number or 'No challan' }}
-          · <span class="badge badge-{{ delivery.status|lower|replace('del-', '')|replace('_', '-') }}">{{ delivery.status_label }}</span>
+    {% set tone_map = {
+      'DEL-PACKED': 'neutral', 'DEL-DISPATCHED': 'info',
+      'DEL-DELIVERED': 'success', 'DEL-DELIVERED_WITH_ISSUES': 'warn'
+    } %}
+    {% set project = delivery.order.project if delivery.order and delivery.order.project else None %}
+
+    {# =================== 1. HEADER CARD =================== #}
+    <div class="ui-card lead-header-card">
+      <div class="lead-header-top">
+        <div class="lead-header-title">
+          <h1>{{ project.display_name if project else 'Delivery' }}</h1>
+          <span class="customer-chip">{{ delivery.delivery_number }}</span>
+        </div>
+        <div class="lead-header-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a href="{{ url_for('delivery.challan', delivery_id=delivery.id) }}" target="_blank" class="btn btn-secondary btn-sm">Print Challan</a>
+          {% if delivery.order %}
+          <a href="{{ url_for('order.detail', order_id=delivery.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+          {% endif %}
+          <a href="{{ url_for('delivery.index') }}" class="btn btn-secondary btn-sm">← All Deliveries</a>
         </div>
       </div>
-      <div class="flex gap-8">
-        <a href="{{ url_for('delivery.challan', delivery_id=delivery.id) }}" target="_blank" class="btn btn-secondary btn-sm">Print Challan</a>
-        {% if delivery.order %}
-        <a href="{{ url_for('order.detail', order_id=delivery.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+
+      <div class="lead-header-pills">
+        {{ pill(delivery.status_label, tone_map.get(delivery.status, 'neutral')) }}
+        {% if delivery.challan_number %}
+          {{ pill(delivery.challan_number, 'neutral') }}
         {% endif %}
-        <a href="{{ url_for('delivery.index') }}" class="btn btn-secondary btn-sm">← All Deliveries</a>
       </div>
+
+      {{ stage_tracker(11, delivery.status == DeliveryStatus.DELIVERED_WITH_ISSUES) }}
     </div>
 
-    {# ── Summary cards ── #}
+    {# =================== 2. KEY NUMBERS =================== #}
     <div class="info-card-row">
-
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Status</div>
         <div class="info-card-value">{{ delivery.status_label }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Items</div>
         <div class="info-card-value">{{ delivery.items|length }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Scheduled Dispatch</div>
-        <div class="info-card-value">
-          {{ delivery.scheduled_dispatch_date.strftime('%Y-%m-%d') if delivery.scheduled_dispatch_date else '—' }}
-        </div>
+        <div class="info-card-value">{{ delivery.scheduled_dispatch_date.strftime('%d %b %Y') if delivery.scheduled_dispatch_date else '—' }}</div>
       </div>
-
       <div class="info-card">
         <div class="info-card-label">Vehicle</div>
         <div class="info-card-value">{{ delivery.vehicle_ref or '—' }}</div>
       </div>
-
     </div>
 
-    {# ── Site details ── #}
-    <div class="quote-meta">
-      <p><strong>Delivery address:</strong> {{ delivery.delivery_address or '—' }}</p>
-      <p><strong>Site contact:</strong>
-        {{ delivery.site_contact_name or '—' }}{% if delivery.site_contact_phone %} · {{ delivery.site_contact_phone }}{% endif %}
-      </p>
-      {% if delivery.packed_at %}
-        <p><strong>Packed:</strong> {{ delivery.packed_at.strftime('%Y-%m-%d %H:%M') }}</p>
-      {% endif %}
-      {% if delivery.dispatch_date %}
-        <p><strong>Dispatched:</strong> {{ delivery.dispatch_date.strftime('%Y-%m-%d %H:%M') }}
-          {% if delivery.transporter_name %}· {{ delivery.transporter_name }}{% endif %}
-          {% if delivery.driver_name %}· Driver: {{ delivery.driver_name }}{% if delivery.driver_phone %} ({{ delivery.driver_phone }}){% endif %}{% endif %}
-        </p>
-      {% endif %}
-      {% if delivery.delivered_at %}
-        <p><strong>Received:</strong> {{ delivery.delivered_at.strftime('%Y-%m-%d %H:%M') }}
-          · by {{ delivery.received_by or '—' }}</p>
-      {% endif %}
-      {% if delivery.damage_shortage_notes %}
-        <p><strong>Damage / shortage notes:</strong> {{ delivery.damage_shortage_notes }}</p>
-      {% endif %}
-      {% if delivery.pod_file_path %}
-        <p><strong>Proof of delivery:</strong>
-          <a href="{{ url_for('uploaded_file', filename=delivery.pod_file_path) }}" target="_blank">View file</a></p>
-      {% endif %}
+    {# =================== 3. SITE & TRANSIT DETAILS =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Delivery Details</div>
+      <div class="info-grid">
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Customer</div>
+          <div class="info-grid-value">{{ project.customer_name if project else '—' }}</div>
+        </div></div>
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Delivery Address</div>
+          <div class="info-grid-value">{{ delivery.delivery_address or '—' }}</div>
+        </div></div>
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Site Contact</div>
+          <div class="info-grid-value">{{ delivery.site_contact_name or '—' }}{% if delivery.site_contact_phone %} · {{ delivery.site_contact_phone }}{% endif %}</div>
+        </div></div>
+        {% if delivery.packed_at %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Packed</div>
+          <div class="info-grid-value">{{ delivery.packed_at.strftime('%d %b %Y, %H:%M') }}</div>
+        </div></div>
+        {% endif %}
+        {% if delivery.dispatch_date %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Dispatched</div>
+          <div class="info-grid-value">
+            {{ delivery.dispatch_date.strftime('%d %b %Y, %H:%M') }}
+            {% if delivery.transporter_name %}· {{ delivery.transporter_name }}{% endif %}
+            {% if delivery.driver_name %}· Driver: {{ delivery.driver_name }}{% if delivery.driver_phone %} ({{ delivery.driver_phone }}){% endif %}{% endif %}
+          </div>
+        </div></div>
+        {% endif %}
+        {% if delivery.delivered_at %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Received</div>
+          <div class="info-grid-value">{{ delivery.delivered_at.strftime('%d %b %Y, %H:%M') }} · by {{ delivery.received_by or '—' }}</div>
+        </div></div>
+        {% endif %}
+        {% if delivery.damage_shortage_notes %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Damage / Shortage Notes</div>
+          <div class="info-grid-value">{{ delivery.damage_shortage_notes }}</div>
+        </div></div>
+        {% endif %}
+        {% if delivery.pod_file_path %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Proof of Delivery</div>
+          <div class="info-grid-value"><a href="{{ url_for('uploaded_file', filename=delivery.pod_file_path) }}" target="_blank">View file</a></div>
+        </div></div>
+        {% endif %}
+      </div>
     </div>
 
-    {# ── Packing list ── #}
-    <div class="section-title">Packing List</div>
-    <div style="overflow-x:auto; margin-bottom:32px;">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Opening</th>
-          <th>Package Label</th>
-          <th>Packages</th>
-          <th>Job</th>
-          <th>Issue</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in delivery.items %}
-        <tr>
-          <td>{{ item.opening.label if item.opening else '—' }}</td>
-          <td class="mono" style="font-size:12px;">{{ item.package_label or '—' }}</td>
-          <td class="mono" style="font-size:12px;">{{ item.package_count }}</td>
-          <td class="mono" style="font-size:12px;">{{ item.job.job_number if item.job else '—' }}</td>
-          <td style="font-size:12px;">
-            {% if item.has_issue %}
-              {% if item.is_damaged %}Damaged{% endif %}{% if item.is_damaged and item.is_short %} · {% endif %}{% if item.is_short %}Short{% endif %}
-              {% if item.issue_resolved %}<span class="text-success"> (resolved)</span>{% endif %}
-              {% if item.issue_notes %}<div class="muted">{{ item.issue_notes }}</div>{% endif %}
-            {% else %}—{% endif %}
-          </td>
-          <td style="text-align:right;">
-            {% if delivery.status == DeliveryStatus.DELIVERED_WITH_ISSUES and item.has_issue and not item.issue_resolved %}
-            <form method="POST" style="display:inline-flex; gap:6px;"
-                  action="{{ url_for('delivery.resolve_item', delivery_id=delivery.id, item_id=item.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="text" class="form-control" name="resolution_notes" placeholder="Resolution notes" style="width:180px;">
-              <button type="submit" class="btn btn-secondary btn-sm">Resolve</button>
-            </form>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    {# =================== 4. PACKING LIST =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Packing List</div>
+      <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Opening</th>
+            <th>Package Label</th>
+            <th>Packages</th>
+            <th>Job</th>
+            <th>Issue</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in delivery.items %}
+          <tr>
+            <td>{{ item.opening.label if item.opening else '—' }}</td>
+            <td class="mono" style="font-size:12px;">{{ item.package_label or '—' }}</td>
+            <td class="mono" style="font-size:12px;">{{ item.package_count }}</td>
+            <td class="mono" style="font-size:12px;">{{ item.job.job_number if item.job else '—' }}</td>
+            <td style="font-size:12px;">
+              {% if item.has_issue %}
+                {% if item.is_damaged %}{{ pill('Damaged', 'danger') }}{% endif %}
+                {% if item.is_short %}{{ pill('Short', 'warn') }}{% endif %}
+                {% if item.issue_resolved %}<span class="text-success"> (resolved)</span>{% endif %}
+                {% if item.issue_notes %}<div class="muted">{{ item.issue_notes }}</div>{% endif %}
+              {% else %}—{% endif %}
+            </td>
+            <td style="text-align:right;">
+              {% if delivery.status == DeliveryStatus.DELIVERED_WITH_ISSUES and item.has_issue and not item.issue_resolved %}
+              <form method="POST" style="display:inline-flex; gap:6px;"
+                    action="{{ url_for('delivery.resolve_item', delivery_id=delivery.id, item_id=item.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="text" class="form-control" name="resolution_notes" placeholder="Resolution notes" style="width:180px;">
+                <button type="submit" class="btn btn-secondary btn-sm">Resolve</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
     </div>
 
-    {# ── Order-level progress: what is still pending ── #}
+    {# =================== 5. ORDER PROGRESS =================== #}
     {% with order_id=delivery.order_id, current_delivery_id=delivery.id %}{% include '_delivery_progress.html' %}{% endwith %}
 
-    {# ══════════════════════════════════════════════
-       ACTION PANELS
-       ══════════════════════════════════════════════ #}
+    {# =================== 6. ACTION CARDS =================== #}
 
-    {# ── PACKED → Dispatch ── #}
     {% if delivery.status == DeliveryStatus.PACKED %}
-    <form method="POST" class="action-panel action-panel-wide"
+    <form method="POST" class="ui-card action-panel" style="max-width:600px;"
           action="{{ url_for('delivery.dispatch', delivery_id=delivery.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <h4 class="action-title">Dispatch Delivery</h4>
+      <div class="ui-card-title" style="margin-bottom:6px;">Dispatch Delivery</div>
       <div class="form-group">
         <label class="form-label" for="vehicle_ref">Vehicle reference *</label>
         <input type="text" class="form-control" id="vehicle_ref" name="vehicle_ref" required>
@@ -159,14 +190,13 @@
     </form>
     {% endif %}
 
-    {# ── DISPATCHED → Confirm receipt ── #}
     {% if delivery.status == DeliveryStatus.DISPATCHED %}
-    <form method="POST" class="action-panel action-panel-wide" enctype="multipart/form-data"
+    <form method="POST" class="ui-card action-panel" enctype="multipart/form-data"
           action="{{ url_for('delivery.confirm', delivery_id=delivery.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <h4 class="action-title">Confirm Receipt at Site</h4>
+      <div class="ui-card-title" style="margin-bottom:6px;">Confirm Receipt at Site</div>
 
-      <div class="form-group">
+      <div class="form-group" style="max-width:600px;">
         <label class="form-label" for="received_by">Received by *</label>
         <input type="text" class="form-control" id="received_by" name="received_by"
                value="{{ delivery.order.project.customer_name }}" readonly
@@ -196,11 +226,11 @@
       </table>
       </div>
 
-      <div class="form-group">
+      <div class="form-group" style="max-width:600px;">
         <label class="form-label" for="damage_shortage_notes">General damage / shortage notes</label>
         <textarea class="form-control" id="damage_shortage_notes" name="damage_shortage_notes" rows="2"></textarea>
       </div>
-      <div class="form-group">
+      <div class="form-group" style="max-width:600px;">
         <label class="form-label" for="pod_file">Proof of delivery (JPG / PNG / PDF)</label>
         <input type="file" class="form-control" id="pod_file" name="pod_file" accept=".jpg,.jpeg,.png,.pdf">
       </div>
@@ -208,12 +238,11 @@
     </form>
     {% endif %}
 
-    {# ── DELIVERED_WITH_ISSUES → Resolve ── #}
     {% if delivery.status == DeliveryStatus.DELIVERED_WITH_ISSUES %}
-    <form method="POST" class="action-panel action-panel-wide action-panel-warning"
+    <form method="POST" class="ui-card action-panel action-panel-warning" style="max-width:600px;"
           action="{{ url_for('delivery.resolve_all', delivery_id=delivery.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <h4 class="action-title">Delivered With Issues</h4>
+      <div class="ui-card-title" style="margin-bottom:6px;">Delivered With Issues</div>
       <p class="action-note">Resolve each item above, or resolve all issues at once.</p>
       <div class="form-group">
         <label class="form-label" for="resolution_notes_all">Resolution notes</label>
@@ -223,10 +252,9 @@
     </form>
     {% endif %}
 
-    {# ── DELIVERED — terminal ── #}
     {% if delivery.status == DeliveryStatus.DELIVERED %}
-    <div class="action-panel action-panel-wide action-panel-success">
-      <h4 class="action-title text-success">✓ Delivered</h4>
+    <div class="ui-card action-panel-success" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Delivered</div>
       {% set _p = opening_progress(delivery.order_id).summary %}
       <p class="action-note" style="margin-bottom:0;">
         {% if _p.pending %}
