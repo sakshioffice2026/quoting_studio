@@ -30,6 +30,7 @@ from .amc import (
 from .project_type import ProjectType
 from .template_question import TemplateQuestion, InputType
 from .template_response import TemplateResponse
+from .template_upload import TemplateUpload
 
 __all__ = [
     'Tenant',
@@ -62,4 +63,5 @@ __all__ = [
     'ProjectType',
     'TemplateQuestion', 'InputType',
     'TemplateResponse',
+    'TemplateUpload',
 ]

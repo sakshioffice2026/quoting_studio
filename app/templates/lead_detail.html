@@ -437,11 +437,37 @@
   if (copyBtn) {
     copyBtn.addEventListener('click', function () {
       var link = copyBtn.getAttribute('data-link');
-      navigator.clipboard.writeText(link).then(function () {
+
+      function showCopied() {
         var original = copyBtn.textContent;
         copyBtn.textContent = 'Link copied!';
         setTimeout(function () { copyBtn.textContent = original; }, 1500);
-      });
+      }
+
+      function fallbackCopy(text) {
+        var textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          showCopied();
+        } catch (err) {
+          window.prompt('Copy this link:', text);
+        }
+        document.body.removeChild(textarea);
+      }
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(showCopied, function () {
+          fallbackCopy(link);
+        });
+      } else {
+        fallbackCopy(link);
+      }
     });
   }
 </script>

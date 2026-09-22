@@ -3,13 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>Tell us about your project — FenestraOne</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
   <style>
     .rt-shell { max-width: 480px; margin: 0 auto; padding: 32px 20px; }
     .rt-logo { font-weight: 700; font-size: 20px; color: var(--copper); text-align: center; margin-bottom: 4px; }
+    .rt-greeting { text-align: center; font-size: 17px; font-weight: 600; color: #222; margin-top: 18px; }
+    .rt-greeting-sub { font-size: 13px; font-weight: 400; color: #667; margin-top: 4px; }
     .rt-question { font-size: 22px; font-weight: 700; text-align: center; margin: 28px 0 6px; }
     .rt-sub { text-align: center; color: #667; font-size: 13px; margin-bottom: 28px; }
+    .rt-resume {
+      display: block; text-align: center; border: 1px dashed var(--copper); border-radius: 12px;
+      padding: 14px; margin-bottom: 20px; text-decoration: none; color: var(--copper); font-weight: 700;
+    }
+    .rt-resume-sub { display: block; font-size: 12px; font-weight: 400; color: #778; margin-top: 3px; }
+
+    .rt-step { display: none; }
+    .rt-step.active { display: block; }
+
+    .rt-site-types { display: flex; gap: 12px; justify-content: center; }
+    .rt-site-card {
+      flex: 1; border: 1px solid #e2e2e2; border-radius: 14px; padding: 18px 10px;
+      background: #fff; cursor: pointer; text-align: center; font-size: 14px; font-weight: 600; color: #222;
+    }
+    .rt-site-card .icon { font-size: 26px; display: block; margin-bottom: 6px; }
+    .rt-site-card.selected { border-color: var(--copper); background: #fff8f2; }
+
     .rt-cards { display: flex; flex-direction: column; gap: 14px; }
     .rt-card {
       display: flex; align-items: center; gap: 14px;
@@ -17,46 +37,133 @@
       background: #fff; cursor: pointer; transition: all .15s ease;
       text-align: left; font-size: 16px; font-weight: 600; color: #222;
     }
-    .rt-card:active, .rt-card:hover { border-color: var(--copper); background: #fff8f2; }
+    .rt-card.selected { border-color: var(--copper); background: #fff8f2; }
     .rt-card .icon { font-size: 28px; }
     .rt-card .desc { font-size: 12px; font-weight: 400; color: #778; margin-top: 2px; }
+    .rt-card .check { margin-left: auto; font-size: 18px; color: var(--copper); visibility: hidden; }
+    .rt-card.selected .check { visibility: visible; }
+
+    .rt-hint { text-align: center; font-size: 12px; color: #999; margin: 14px 0 18px; }
+    .rt-continue { width: 100%; padding: 14px; font-size: 15px; }
+    .rt-continue:disabled { opacity: .4; cursor: not-allowed; }
+    .rt-back-step { text-align: center; margin-top: 14px; }
+    .rt-back-step a { color: #778; font-size: 13px; text-decoration: none; }
   </style>
 </head>
 <body>
   <div class="rt-shell">
     <div class="rt-logo">FenestraOne</div>
 
-    <div class="rt-question">What are we designing for?</div>
-    <div class="rt-sub">This helps us show you only what's relevant — takes about 2 minutes.</div>
+    <div class="rt-greeting">
+      Hi {{ lead.customer_name.split(' ')[0] if lead.customer_name else 'there' }} 👋
+      {% if lead.project_name or lead.project_city %}
+        <div class="rt-greeting-sub">
+          For your project{% if lead.project_name %} "{{ lead.project_name }}"{% endif %}{% if lead.project_city %} in {{ lead.project_city }}{% endif %}
+        </div>
+      {% endif %}
+    </div>
 
-    <div class="rt-cards">
-      {% for pt in project_types %}
-      <button type="button" class="rt-card" data-project-type-id="{{ pt.id }}">
-        <span class="icon">{{ pt.icon or '🏗️' }}</span>
-        <span>
-          {{ pt.name }}
-          {% if pt.description %}<div class="desc">{{ pt.description }}</div>{% endif %}
-        </span>
-      </button>
-      {% endfor %}
+    {% if in_progress %}
+    <a href="{{ url_for('template.wizard', response_id=in_progress.id) }}" class="rt-resume">
+      <span>▶ Continue where you left off</span>
+      <span class="rt-resume-sub">your answers are saved</span>
+    </a>
+    {% endif %}
+
+    <!-- STEP 1: site type -->
+    <div class="rt-step active" id="rt-step-site">
+      <div class="rt-question">What kind of space is this for?</div>
+      <div class="rt-sub">This helps us show you only what's relevant.</div>
+      <div class="rt-site-types">
+        {% for st in site_types %}
+        <div class="rt-site-card" data-value="{{ st.value }}">
+          <span class="icon">{{ st.icon }}</span>
+          {{ st.label }}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- STEP 2: category (multi-select) -->
+    <div class="rt-step" id="rt-step-category">
+      <div class="rt-question">What are we designing for?</div>
+      <div class="rt-sub">Pick one or both — you can configure everything together.</div>
+      <div class="rt-cards">
+        {% for pt in project_types %}
+        <div class="rt-card" data-project-type-id="{{ pt.id }}">
+          <span class="icon">{{ pt.icon or '🏗️' }}</span>
+          <span>
+            {{ pt.name }}
+            {% if pt.description %}<div class="desc">{{ pt.description }}</div>{% endif %}
+          </span>
+          <span class="check">✓</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="rt-hint">Takes about 2 minutes</div>
+      <button type="button" class="btn btn-primary rt-continue" id="rt-continue-btn" disabled>Continue →</button>
+      <div class="rt-back-step"><a href="#" id="rt-back-to-site">← Back</a></div>
     </div>
   </div>
 
   <script>
+    var siteStep = document.getElementById('rt-step-site');
+    var categoryStep = document.getElementById('rt-step-category');
+    var continueBtn = document.getElementById('rt-continue-btn');
+    var selectedSiteType = null;
+    var selectedTypeIds = [];
+
+    document.querySelectorAll('.rt-site-card').forEach(function (card) {
+      card.addEventListener('click', function () {
+        document.querySelectorAll('.rt-site-card').forEach(function (c) { c.classList.remove('selected'); });
+        card.classList.add('selected');
+        selectedSiteType = card.getAttribute('data-value');
+        setTimeout(function () {
+          siteStep.classList.remove('active');
+          categoryStep.classList.add('active');
+        }, 250);
+      });
+    });
+
+    document.getElementById('rt-back-to-site').addEventListener('click', function (e) {
+      e.preventDefault();
+      categoryStep.classList.remove('active');
+      siteStep.classList.add('active');
+    });
+
     document.querySelectorAll('.rt-card').forEach(function (card) {
       card.addEventListener('click', function () {
-        var projectTypeId = card.getAttribute('data-project-type-id');
-        fetch('{{ url_for("template.start", lead_id=lead.id, project_type_id=0) }}'.replace('/0', '/' + projectTypeId), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        })
-          .then(function (res) { return res.json(); })
-          .then(function (data) {
-            if (data.response_id) {
-              window.location.href = '/rt/response/' + data.response_id;
-            }
-          });
+        var id = parseInt(card.getAttribute('data-project-type-id'), 10);
+        card.classList.toggle('selected');
+        if (card.classList.contains('selected')) {
+          selectedTypeIds.push(id);
+        } else {
+          selectedTypeIds = selectedTypeIds.filter(function (v) { return v !== id; });
+        }
+        continueBtn.disabled = selectedTypeIds.length === 0;
       });
+    });
+
+    continueBtn.addEventListener('click', function () {
+      continueBtn.disabled = true;
+      continueBtn.textContent = 'Starting...';
+      fetch('{{ url_for("template.start", lead_id=lead.id) }}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+        },
+        body: JSON.stringify({ project_type_ids: selectedTypeIds, site_type: selectedSiteType })
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.response_id) {
+            window.location.href = '/rt/response/' + data.response_id;
+          } else {
+            continueBtn.disabled = false;
+            continueBtn.textContent = 'Continue →';
+          }
+        });
     });
   </script>
 </body>

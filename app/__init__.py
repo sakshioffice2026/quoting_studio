@@ -44,6 +44,7 @@ def create_app(config_name=None):
             Delivery, DeliveryItem,
             Installation, InstallationItem,
             Warranty, AmcContract, ServiceTicket,
+            ProjectType, TemplateQuestion, TemplateResponse, TemplateUpload,
         )
 
     # register blueprints

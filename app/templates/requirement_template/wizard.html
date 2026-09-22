@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ project_type.name }} — FenestraOne</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{{ project_types|map(attribute='name')|join(' + ') }} — FenestraOne</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
   <style>
     .rt-shell { max-width: 480px; margin: 0 auto; padding: 24px 20px 40px; min-height: 100vh; display: flex; flex-direction: column; }
@@ -18,6 +19,19 @@
     @keyframes fade { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
     .rt-label { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 24px; }
     .rt-optional-tag { display:block; font-size:12px; font-weight:400; color:#999; margin-top:4px; }
+    .rt-category-tag {
+      text-align: center; font-size: 12px; font-weight: 700; color: var(--copper);
+      text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px;
+    }
+
+    .rt-upload-zone {
+      border: 1.5px dashed #d8d8d8; border-radius: 14px; padding: 28px 16px;
+      text-align: center; cursor: pointer; color: #556; background: #fafafa;
+    }
+    .rt-upload-icon { font-size: 30px; margin-bottom: 8px; }
+    .rt-upload-hint { font-size: 12px; color: #999; margin-top: 6px; }
+    .rt-upload-list { list-style: none; padding: 0; margin: 14px 0 0; font-size: 13px; color: #333; }
+    .rt-upload-list li { padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
 
     .rt-chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
     .rt-chip {
@@ -45,6 +59,11 @@
     .rt-actions { margin-top: 28px; display: flex; gap: 10px; justify-content: center; }
     .rt-skip { background: none; border: none; color: #999; font-size: 13px; cursor: pointer; text-decoration: underline; }
     .rt-next { padding: 12px 28px; }
+    .rt-save-status {
+      text-align: center; font-size: 12px; color: #999; height: 16px; margin-bottom: 4px;
+      transition: opacity .2s ease;
+    }
+    .rt-save-status.saved { color: #4a9d5f; }
   </style>
 </head>
 <body>
@@ -53,9 +72,13 @@
       <a href="{{ url_for('template.landing', lead_id=response.lead_id) }}" class="rt-back">← Change project type</a>
       <div class="rt-dots" id="rt-dots"></div>
     </div>
+    <div class="rt-save-status" id="rt-save-status"></div>
 
     {% for q in questions %}
     <div class="rt-screen" data-key="{{ q.question_key }}" data-optional="{{ 'true' if q.is_optional else 'false' }}" data-input-type="{{ q.input_type }}">
+      {% if project_types|length > 1 %}
+      <div class="rt-category-tag">{{ q.project_type.icon or '' }} {{ q.project_type.name }}</div>
+      {% endif %}
       <div class="rt-label">
         {{ q.label }}
         {% if q.is_optional %}<span class="rt-optional-tag">Optional</span>{% endif %}
@@ -93,6 +116,24 @@
       </div>
     </div>
     {% endfor %}
+
+    <div class="rt-screen" id="rt-upload-screen" data-key="__upload__" data-optional="true" data-input-type="upload">
+      <div class="rt-label">
+        Got a site photo or floor plan?
+        <span class="rt-optional-tag">Optional — helps our design team a lot</span>
+      </div>
+      <div class="rt-upload-zone" id="rt-upload-zone">
+        <input type="file" id="rt-file-input" accept=".jpg,.jpeg,.png,.pdf,.dwg,.dxf" hidden>
+        <div class="rt-upload-icon">📎</div>
+        <div>Tap to upload photo, PDF or CAD file</div>
+        <div class="rt-upload-hint">JPG, PNG, PDF, DWG, DXF — up to 15 MB</div>
+      </div>
+      <ul class="rt-upload-list" id="rt-upload-list"></ul>
+      <div class="rt-actions">
+        <button type="button" class="rt-skip" id="rt-upload-skip">Skip this step</button>
+        <button type="button" class="btn btn-primary rt-next" id="rt-upload-continue">Continue →</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -119,12 +160,28 @@
       renderDots();
     }
 
+    var saveStatusEl = document.getElementById('rt-save-status');
+
     function saveAnswer(key, value) {
+      saveStatusEl.textContent = 'Saving...';
+      saveStatusEl.classList.remove('saved');
       fetch('/rt/response/' + responseId + '/answer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+        },
         body: JSON.stringify({ question_key: key, value: value })
-      });
+      })
+        .then(function (res) { return res.json(); })
+        .then(function () {
+          saveStatusEl.textContent = 'Saved ✓ — safe even if you close this tab';
+          saveStatusEl.classList.add('saved');
+        })
+        .catch(function () {
+          saveStatusEl.textContent = 'Could not save — check your connection';
+          saveStatusEl.classList.remove('saved');
+        });
     }
 
     function goNext() {
@@ -202,6 +259,49 @@
         skipBtn.addEventListener('click', goNext);
       }
     });
+
+    // --- optional upload step ---
+    var uploadZone = document.getElementById('rt-upload-zone');
+    var fileInput = document.getElementById('rt-file-input');
+    var uploadList = document.getElementById('rt-upload-list');
+    var uploadContinueBtn = document.getElementById('rt-upload-continue');
+
+    if (uploadZone && fileInput) {
+      uploadZone.addEventListener('click', function () { fileInput.click(); });
+
+      fileInput.addEventListener('change', function () {
+        var file = fileInput.files[0];
+        if (!file) return;
+
+        var formData = new FormData();
+        formData.append('file', file);
+
+        var li = document.createElement('li');
+        li.textContent = 'Uploading ' + file.name + '...';
+        uploadList.appendChild(li);
+
+        fetch('/rt/response/' + responseId + '/upload', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content },
+          body: formData
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              li.textContent = '✓ ' + file.name;
+            } else {
+              li.textContent = '✗ ' + file.name + ' — ' + (data.error || 'upload failed');
+            }
+          })
+          .catch(function () {
+            li.textContent = '✗ ' + file.name + ' — upload failed';
+          });
+
+        fileInput.value = '';
+      });
+
+      uploadContinueBtn.addEventListener('click', goNext);
+    }
 
     showScreen(0);
   </script>

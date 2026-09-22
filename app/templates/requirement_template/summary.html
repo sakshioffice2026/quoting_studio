@@ -25,7 +25,10 @@
 <body>
   <div class="rt-shell">
     <div class="rt-heading">Here's what we've got — look right?</div>
-    <div class="rt-sub">{{ summary.project_type.icon or '' }} {{ summary.project_type.name }} project</div>
+    <div class="rt-sub">
+      {% for pt in summary.project_types %}{{ pt.icon or '' }} {{ pt.name }}{% if not loop.last %} + {% endif %}{% endfor %}
+      {% if summary.site_type %} · {{ summary.site_type|capitalize }}{% endif %}
+    </div>
 
     <div class="rt-summary-card">
       <div class="rt-summary-title">Your requirements</div>
@@ -43,7 +46,19 @@
       {% endfor %}
     </div>
 
+    {% if summary.uploads %}
+    <div class="rt-summary-card">
+      <div class="rt-summary-title">Attached files</div>
+      {% for u in summary.uploads %}
+      <div class="rt-summary-item">
+        <span class="label">📎 {{ u.original_filename }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <form method="POST" action="{{ url_for('template.submit', response_id=response.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary rt-submit-btn">Looks good, send to my design team →</button>
     </form>
 
