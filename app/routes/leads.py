@@ -72,10 +72,15 @@ def detail(lead_id):
         requirement_template_service.get_summary(template_response)
         if template_response and template_response.is_submitted else None
     )
+    template_uploads = (
+        requirement_template_repo.list_uploads(template_response.id)
+        if template_response else []
+    )
 
     return render_template(
         'lead_detail.html', lead=lead, interactions=interactions, team=team, presel=presel,
         template_response=template_response, template_summary=template_summary,
+        template_uploads=template_uploads,
     )
 
 

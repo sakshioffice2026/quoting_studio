@@ -32,7 +32,8 @@ def _coerce_for_field(field_name: str, value):
 def build_mapped_fields(response) -> dict:
     """Pure translation: template answers -> PreliminarySelection field values.
     Does not touch the DB. Safe to call before a Project/PreliminarySelection exists."""
-    questions = requirement_template_repo.list_questions(response.project_type_id)
+    ids = response.project_type_ids or ([response.project_type_id] if response.project_type_id else [])
+    questions = requirement_template_repo.list_questions_for_types(ids)
 
     fields = {}
     for q in questions:
@@ -43,12 +44,11 @@ def build_mapped_fields(response) -> dict:
             continue
         fields[q.maps_to_field] = _coerce_for_field(q.maps_to_field, raw_value)
 
-    project_type = response.project_type
-    if project_type and project_type.tag:
+    tags = [pt.tag for pt in response.project_types if pt.tag]
+    if tags:
         existing = fields.get('shortlisted_ranges', '')
-        fields['shortlisted_ranges'] = (
-            f'[{project_type.tag}] {existing}'.strip() if existing else f'[{project_type.tag}]'
-        )
+        tag_str = ' '.join(f'[{t}]' for t in tags)
+        fields['shortlisted_ranges'] = f'{tag_str} {existing}'.strip() if existing else tag_str
 
     return fields
 

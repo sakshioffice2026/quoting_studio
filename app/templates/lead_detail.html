@@ -225,20 +225,60 @@
       </div>
 
       {% if template_summary %}
-        <div class="presel-stats" style="flex-direction:column;align-items:flex-start;gap:6px;">
-          <div style="font-weight:600;font-size:13px;color:#556;">
-            {{ template_summary.project_type.icon or '' }} {{ template_summary.project_type.name }}
+        <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;">
+
+          {% if template_uploads %}
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            {% for upload in template_uploads %}
+              {% if upload.content_type and upload.content_type.startswith('image/') %}
+              <a href="/uploads/template_uploads/{{ upload.stored_filename }}" target="_blank" title="{{ upload.original_filename }}">
+                <img src="/uploads/template_uploads/{{ upload.stored_filename }}"
+                     style="width:90px;height:70px;object-fit:cover;border-radius:6px;border:1px solid #dde;cursor:zoom-in;"
+                     alt="{{ upload.original_filename }}">
+              </a>
+              {% else %}
+              <a href="/uploads/template_uploads/{{ upload.stored_filename }}" target="_blank"
+                 style="display:flex;align-items:center;gap:4px;font-size:12px;color:#556;border:1px solid #dde;border-radius:6px;padding:6px 10px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                {{ upload.original_filename }}
+              </a>
+              {% endif %}
+            {% endfor %}
           </div>
-          {% for item in template_summary.answer_list %}
-          <div style="font-size:13px;color:#667;">
-            <strong>{{ item.label }}:</strong>
-            {% if item.value is sequence and item.value is not string %}
-              {{ item.value | join(', ') }}
-            {% else %}
-              {{ item.value }}
+          {% endif %}
+
+          <div style="flex:1;min-width:200px;">
+            <div style="font-weight:600;font-size:13px;color:#556;margin-bottom:6px;">
+              {{ template_summary.project_type.icon or '' }} {{ template_summary.project_type.name }}
+              {% if template_summary.site_type %}
+                <span style="font-weight:400;color:#889;margin-left:6px;">· {{ template_summary.site_type | title }}</span>
+              {% endif %}
+            </div>
+
+            {% if template_summary.material %}
+            <div style="font-size:13px;color:#667;margin-bottom:4px;">
+              <strong>Material:</strong> {{ template_summary.material }}
+            </div>
             {% endif %}
+
+            {% if template_summary.color %}
+            <div style="font-size:13px;color:#667;margin-bottom:4px;">
+              <strong>Color / Finish:</strong> {{ template_summary.color }}
+            </div>
+            {% endif %}
+
+            {% for item in template_summary.answer_list %}
+            <div style="font-size:13px;color:#667;margin-bottom:2px;">
+              <strong>{{ item.label }}:</strong>
+              {% if item.value is sequence and item.value is not string %}
+                {{ item.value | join(', ') }}
+              {% else %}
+                {{ item.value }}
+              {% endif %}
+            </div>
+            {% endfor %}
           </div>
-          {% endfor %}
+
         </div>
       {% elif template_response %}
         <p style="color:#889;font-size:13px;">Customer opened the form but hasn't submitted yet.</p>

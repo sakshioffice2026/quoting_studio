@@ -102,9 +102,43 @@
     {# =================== 4. LINE ITEMS =================== #}
     {% set items = quotation.line_items %}
     {% if items %}
+    {% set is_indicative = items[0].indicative is defined and items[0].indicative %}
     <div class="ui-card">
-      <div class="ui-card-title">Line Items</div>
+      <div class="ui-card-title">
+        Line Items
+        {% if is_indicative %}
+          <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px;">— Indicative budget estimate (no design yet)</span>
+        {% endif %}
+      </div>
       <div style="overflow-x:auto;">
+        {% if is_indicative %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Description</th>
+              <th>Product Range / Notes</th>
+              <th style="text-align:right;">Qty</th>
+              <th>Unit</th>
+              <th style="text-align:right;">Unit Rate</th>
+              <th style="text-align:right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td class="mono muted" style="font-size:11px;">{{ loop.index }}</td>
+              <td style="font-weight:600;">{{ item.label or '—' }}</td>
+              <td style="color:var(--muted);font-size:13px;">{{ item.note or '—' }}</td>
+              <td class="num-cell">{{ item.qty or 1 }}</td>
+              <td>{{ item.unit or '—' }}</td>
+              <td class="num-cell">{{ '₹{:,.2f}'.format(item.unit_total|float) if item.unit_total else '—' }}</td>
+              <td class="num-cell" style="font-weight:700;color:var(--copper);">{{ '₹{:,.2f}'.format(item.amount|float) if item.amount else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
         <table class="data-table">
           <thead>
             <tr>
@@ -130,6 +164,7 @@
             {% endfor %}
           </tbody>
         </table>
+        {% endif %}
       </div>
     </div>
     {% endif %}

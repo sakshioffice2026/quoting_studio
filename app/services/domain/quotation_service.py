@@ -116,6 +116,116 @@ def _build_line_items(windows, tenant_id: int) -> tuple[list[dict], Decimal]:
 
 
 # ------------------------------------------------------------------ #
+#  Create indicative quotation from Preliminary Selection (no design required)
+# ------------------------------------------------------------------ #
+
+def create_indicative_quotation(
+    tenant_id:    int,
+    project_id:   int,
+    presel,
+    prepared_by:  int,
+    validity_days: int = DEFAULT_VALIDITY_DAYS,
+) -> 'Quotation':
+    """Creates a QUOTE-DRAFT directly from a PreliminarySelection record,
+    bypassing the design-approval gate. Line items are budget-band stubs
+    derived from rough opening counts and the indicative price range."""
+    project = Project.query.filter_by(id=project_id, tenant_id=tenant_id).first()
+    if not project:
+        raise LookupError('Project not found')
+
+    prior       = get_latest_for_project(tenant_id, project_id)
+    new_version = (prior.quotation_version + 1) if prior else 1
+    parent_id   = prior.id if prior else None
+
+    if prior and prior.status not in QuotationStatus.TERMINAL:
+        prior.status = QuotationStatus.EXPIRED
+        db.session.add(prior)
+
+    # Build stub line items from rough opening counts
+    line_items = []
+    subtotal   = Decimal('0')
+
+    price_min = Decimal(str(presel.indicative_price_min or 0))
+    price_max = Decimal(str(presel.indicative_price_max or 0))
+    mid_price = ((price_min + price_max) / 2) if (price_min or price_max) else Decimal('0')
+
+    doors   = presel.rough_opening_doors   or 0
+    windows = presel.rough_opening_windows or 0
+    total_openings = doors + windows
+
+    def _unit_rate(count):
+        if not count or not mid_price:
+            return Decimal('0')
+        return (mid_price / total_openings).quantize(Decimal('0.01'))
+
+    unit_rate = _unit_rate(total_openings)
+
+    if windows:
+        amt = (unit_rate * windows).quantize(Decimal('0.01'))
+        line_items.append({
+            'label':      'Windows (indicative)',
+            'note':       presel.shortlisted_ranges or '',
+            'qty':        windows,
+            'unit':       'opening',
+            'unit_total': float(unit_rate),
+            'amount':     float(amt),
+            'indicative': True,
+        })
+        subtotal += amt
+
+    if doors:
+        amt = (unit_rate * doors).quantize(Decimal('0.01'))
+        line_items.append({
+            'label':      'Doors (indicative)',
+            'note':       presel.shortlisted_ranges or '',
+            'qty':        doors,
+            'unit':       'opening',
+            'unit_total': float(unit_rate),
+            'amount':     float(amt),
+            'indicative': True,
+        })
+        subtotal += amt
+
+    if not line_items:
+        line_items.append({
+            'label':      'Indicative scope (TBD)',
+            'note':       presel.shortlisted_ranges or '',
+            'qty':        1,
+            'unit':       'lot',
+            'unit_total': float(mid_price),
+            'amount':     float(mid_price),
+            'indicative': True,
+        })
+        subtotal = mid_price
+
+    import json
+    quotation = Quotation(
+        tenant_id              = tenant_id,
+        project_id             = project_id,
+        design_approval_id     = None,
+        quotation_number       = Quotation.generate_number(tenant_id),
+        quotation_version      = new_version,
+        parent_quotation_id    = parent_id,
+        status                 = QuotationStatus.DRAFT,
+        line_items_json        = json.dumps(line_items),
+        subtotal               = subtotal,
+        discount_pct           = Decimal('0'),
+        discount_amount        = Decimal('0'),
+        tax_rate               = Decimal('0.00'),
+        tax_amount             = Decimal('0'),
+        grand_total            = subtotal,
+        validity_days          = validity_days,
+        validity_date          = date.today() + timedelta(days=validity_days),
+        prepared_by            = prepared_by,
+        created_at             = datetime.utcnow(),
+        updated_at             = datetime.utcnow(),
+    )
+    db.session.add(quotation)
+    db.session.commit()
+    return quotation
+
+
+# ------------------------------------------------------------------ #
 #  Create quotation
 # ------------------------------------------------------------------ #
 

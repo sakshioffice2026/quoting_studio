@@ -69,6 +69,7 @@ def create_app(config_name=None):
     from .routes.delivery import delivery_bp
     from .routes.installation import installation_bp
     from .routes.amc import amc_bp
+    from .routes.requirement_template import template_bp
     from .api.v1 import api_v1_bp
 
     app.register_blueprint(auth_bp)
@@ -92,6 +93,7 @@ def create_app(config_name=None):
     app.register_blueprint(delivery_bp)
     app.register_blueprint(installation_bp)
     app.register_blueprint(amc_bp)
+    app.register_blueprint(template_bp)
     app.register_blueprint(api_v1_bp, url_prefix='/api/v1')
 
     # ---- serve uploaded files -------------------------------------

@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, current_app, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 
-from ..services.domain import preliminary_selection_service, lead_service, survey_service
+from ..services.domain import preliminary_selection_service, lead_service, survey_service, quotation_service
 
 presel_bp = Blueprint('presel', __name__)
 
@@ -86,6 +86,30 @@ def drop(presel_id):
     except LookupError as exc:
         flash(str(exc), 'error')
     return redirect(url_for('presel.detail', presel_id=presel_id))
+
+
+@presel_bp.route('/preliminary-selections/<int:presel_id>/generate-quote', methods=['POST'])
+@login_required
+def generate_quote(presel_id):
+    presel = preliminary_selection_service.get_preselection(current_user.tenant_id, presel_id)
+    if not presel:
+        flash('Preliminary selection not found.', 'error')
+        return redirect(url_for('leads.index'))
+    try:
+        q = quotation_service.create_indicative_quotation(
+            tenant_id   = current_user.tenant_id,
+            project_id  = presel.project_id,
+            presel      = presel,
+            prepared_by = current_user.id,
+        )
+        flash(
+            f'Indicative quote {q.quotation_number} created from preliminary selection.',
+            'success',
+        )
+        return redirect(url_for('quotation.detail', quotation_id=q.id))
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('presel.detail', presel_id=presel_id))
 
 
 @presel_bp.route('/preliminary-selections/<int:presel_id>/confirm-survey', methods=['POST'])
