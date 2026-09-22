@@ -57,6 +57,7 @@ def create_app(config_name=None):
     from .routes.model3d_route import model3d_bp
     from .routes.settings import settings_bp
     from .routes.dashboard import dashboard_bp
+    from .routes.home import home_bp
     from .routes.projects import projects_bp
     from .routes.editor import editor_bp
     from .routes.visualiser import visualiser_bp
@@ -79,6 +80,7 @@ def create_app(config_name=None):
     app.register_blueprint(model3d_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(dashboard_bp)
+    app.register_blueprint(home_bp)
     app.register_blueprint(projects_bp)
     app.register_blueprint(editor_bp)
     app.register_blueprint(visualiser_bp)

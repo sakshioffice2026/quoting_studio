@@ -1,5 +1,10 @@
 {% extends 'base.html' %}
 {% block title %}New Lead — FenestraOne {% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/form-validation.css') }}">
+{% endblock %}
+
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
@@ -7,62 +12,88 @@
   <div class="dash-content">
     <div class="page-header"><h1>New Lead</h1></div>
 
-    <form method="POST" style="max-width:520px;">
+    {% set _src = request.form.get('source_channel', 'website') %}
+    {% set _int = request.form.get('product_interest', '') %}
+
+    <form method="POST" style="max-width:520px;" data-validate novalidate
+          data-require-one="phone,email"
+          data-require-one-msg="Enter a phone number or an email address.">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="form-alert" data-form-alert role="alert"></div>
+
       <div class="form-group">
         <label class="form-label" for="project_name">Project name</label>
         <input class="form-control" type="text" id="project_name" name="project_name"
-               placeholder="e.g. Harwood Villa – Whitefield" required>
+               value="{{ request.form.get('project_name', '') }}"
+               data-rules="required|minlen:2|maxlen:200|letters" data-label="Project name"
+               placeholder="e.g. Harwood Villa – Whitefield" maxlength="200" required>
       </div>
 
       <div class="form-group">
         <label class="form-label" for="customer_name">Customer name</label>
-        <input class="form-control" type="text" id="customer_name" name="customer_name" required>
+        <input class="form-control" type="text" id="customer_name" name="customer_name"
+               value="{{ request.form.get('customer_name', '') }}"
+               data-rules="required|minlen:2|maxlen:120|letters" data-label="Customer name"
+               maxlength="120" autocomplete="off" required>
       </div>
 
       <div class="form-group">
         <label class="form-label" for="phone">Phone</label>
-        <input class="form-control" type="text" id="phone" name="phone">
+        <input class="form-control" type="tel" id="phone" name="phone"
+               value="{{ request.form.get('phone', '') }}"
+               data-rules="phone|maxlen:20" data-label="Phone"
+               placeholder="+91 98765 43210" maxlength="20" inputmode="tel" autocomplete="off">
       </div>
 
       <div class="form-group">
         <label class="form-label" for="email">Email</label>
-        <input class="form-control" type="email" id="email" name="email">
+        <input class="form-control" type="email" id="email" name="email"
+               value="{{ request.form.get('email', '') }}"
+               data-rules="email|maxlen:254" data-label="Email"
+               maxlength="254" autocomplete="off">
       </div>
 
       <div class="form-group">
         <label class="form-label" for="source_channel">Source channel</label>
-        <select class="form-control" id="source_channel" name="source_channel">
-          <option value="website">Website</option>
-          <option value="call">Call</option>
-          <option value="walk_in">Walk-in</option>
-          <option value="referral">Referral</option>
-          <option value="architect">Architect / Dealer</option>
-          <option value="exhibition">Exhibition</option>
-          <option value="social">Social</option>
+        <select class="form-control" id="source_channel" name="source_channel"
+                data-rules="required" data-label="Source channel" required>
+          <option value="website"    {{ 'selected' if _src == 'website' }}>Website</option>
+          <option value="call"       {{ 'selected' if _src == 'call' }}>Call</option>
+          <option value="walk_in"    {{ 'selected' if _src == 'walk_in' }}>Walk-in</option>
+          <option value="referral"   {{ 'selected' if _src == 'referral' }}>Referral</option>
+          <option value="architect"  {{ 'selected' if _src == 'architect' }}>Architect / Dealer</option>
+          <option value="exhibition" {{ 'selected' if _src == 'exhibition' }}>Exhibition</option>
+          <option value="social"     {{ 'selected' if _src == 'social' }}>Social</option>
         </select>
       </div>
 
       <div class="form-group">
         <label class="form-label" for="project_city">Project city</label>
-        <input class="form-control" type="text" id="project_city" name="project_city">
+        <input class="form-control" type="text" id="project_city" name="project_city"
+               value="{{ request.form.get('project_city', '') }}"
+               data-rules="maxlen:100" data-label="Project city" maxlength="100">
       </div>
 
       <div class="form-group">
         <label class="form-label" for="product_interest">Product interest</label>
         <select class="form-control" id="product_interest" name="product_interest">
           <option value="">—</option>
-          <option value="doors">Doors</option>
-          <option value="windows">Windows</option>
-          <option value="both">Both</option>
+          <option value="doors"   {{ 'selected' if _int == 'doors' }}>Doors</option>
+          <option value="windows" {{ 'selected' if _int == 'windows' }}>Windows</option>
+          <option value="both"    {{ 'selected' if _int == 'both' }}>Both</option>
         </select>
       </div>
 
       <div style="margin-top:16px;">
-        <button type="submit" class="btn btn-primary">Capture Lead</button>
+        <button type="submit" class="btn btn-primary" data-loading="Saving…">Capture Lead</button>
         <a href="{{ url_for('leads.index') }}" class="btn btn-secondary">Cancel</a>
       </div>
     </form>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/form-validation.js') }}"></script>
 {% endblock %}

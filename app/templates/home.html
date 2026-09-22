@@ -175,7 +175,7 @@
     </div>
 
     {# =================== 2. THE JOURNEY =================== #}
-    <div class="hm-card">
+    <div class="hm-card" id="journeyCard">
       <div class="hm-card-head">
         <div class="hm-card-title">The Journey · where every project is right now</div>
         <div class="hm-card-hint">Amber pulse = something in that stage needs attention · click a project to open it</div>
@@ -190,7 +190,7 @@
           <div class="hm-stage-count {{ 'zero' if not s.count }}">{{ s.count if s.count else '—' }}</div>
           <div class="hm-tokens">
             {% for t in s.tokens %}
-            <a class="hm-token tone-{{ t.tone }}" href="{{ url_for('projects.detail', project_id=t.id) }}"
+            <a class="hm-token tone-{{ t.tone }}" href="{{ t.href or url_for('projects.detail', project_id=t.id) }}"
                title="{{ t.name }} · {{ t.customer }} · {{ t.label }}">
               <span class="hm-token-dot">{{ t.initials }}</span>
               <span class="hm-token-name">{{ t.name }}</span>
@@ -287,4 +287,36 @@
 
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var card = document.getElementById('journeyCard');
+    if (!card) { return; }
+
+    function refreshJourney() {
+      if (document.hidden) { return; }
+      fetch(window.location.href, { credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.text() : null; })
+        .then(function (html) {
+          if (!html) { return; }
+          var doc   = new DOMParser().parseFromString(html, 'text/html');
+          var fresh = doc.getElementById('journeyCard');
+          if (!fresh) { return; }
+          var oldTrack = card.querySelector('.hm-track');
+          var left = oldTrack ? oldTrack.scrollLeft : 0;
+          card.innerHTML = fresh.innerHTML;
+          var newTrack = card.querySelector('.hm-track');
+          if (newTrack) { newTrack.scrollLeft = left; }
+        })
+        .catch(function () {});
+    }
+
+    setInterval(refreshJourney, 30000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) { refreshJourney(); }
+    });
+  })();
+</script>
 {% endblock %}

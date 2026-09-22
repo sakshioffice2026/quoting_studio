@@ -27,6 +27,9 @@ from .amc import (
     AmcContract, AmcStatus, AmcTier,
     ServiceTicket, TicketStatus, ServiceType, Coverage,
 )
+from .project_type import ProjectType
+from .template_question import TemplateQuestion, InputType
+from .template_response import TemplateResponse
 
 __all__ = [
     'Tenant',
@@ -56,4 +59,7 @@ __all__ = [
     'Warranty', 'WarrantyStatus',
     'AmcContract', 'AmcStatus', 'AmcTier',
     'ServiceTicket', 'TicketStatus', 'ServiceType', 'Coverage',
+    'ProjectType',
+    'TemplateQuestion', 'InputType',
+    'TemplateResponse',
 ]

@@ -64,7 +64,19 @@ def detail(lead_id):
     interactions = interaction_service.list_interactions(current_user.tenant_id, lead_id)
     team = User.query.filter_by(tenant_id=current_user.tenant_id, is_active=True).all()
     presel = preliminary_selection_service.get_by_lead(current_user.tenant_id, lead_id)
-    return render_template('lead_detail.html', lead=lead, interactions=interactions, team=team, presel=presel)
+
+    from ..repositories import requirement_template_repo
+    from ..services.domain import requirement_template_service
+    template_response = requirement_template_repo.get_response_by_lead(current_user.tenant_id, lead_id)
+    template_summary = (
+        requirement_template_service.get_summary(template_response)
+        if template_response and template_response.is_submitted else None
+    )
+
+    return render_template(
+        'lead_detail.html', lead=lead, interactions=interactions, team=team, presel=presel,
+        template_response=template_response, template_summary=template_summary,
+    )
 
 
 @leads_bp.route('/leads/<int:lead_id>/assign', methods=['POST'])

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirm your requirements — FenestraOne</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
+  <style>
+    .rt-shell { max-width: 480px; margin: 0 auto; padding: 32px 20px; }
+    .rt-heading { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 4px; }
+    .rt-sub { text-align: center; color: #667; font-size: 13px; margin-bottom: 22px; }
+    .rt-summary-card {
+      border: 1px solid #e2e2e2; border-radius: 14px; padding: 18px;
+      background: #fff8f2; margin-bottom: 22px;
+    }
+    .rt-summary-title { font-weight: 700; font-size: 15px; margin-bottom: 10px; }
+    .rt-summary-item { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 14px; border-top: 1px solid #eee0d0; }
+    .rt-summary-item:first-of-type { border-top: none; }
+    .rt-summary-item .label { color: #667; }
+    .rt-summary-item .value { font-weight: 600; text-align: right; }
+    .rt-submit-btn { width: 100%; justify-content: center; padding: 14px; font-size: 15px; }
+    .rt-edit-link { display: block; text-align: center; margin-top: 14px; font-size: 13px; color: #778; }
+  </style>
+</head>
+<body>
+  <div class="rt-shell">
+    <div class="rt-heading">Here's what we've got — look right?</div>
+    <div class="rt-sub">{{ summary.project_type.icon or '' }} {{ summary.project_type.name }} project</div>
+
+    <div class="rt-summary-card">
+      <div class="rt-summary-title">Your requirements</div>
+      {% for item in summary.answer_list %}
+      <div class="rt-summary-item">
+        <span class="label">{{ item.label }}</span>
+        <span class="value">
+          {% if item.value is sequence and item.value is not string %}
+            {{ item.value | join(', ') }}
+          {% else %}
+            {{ item.value }}
+          {% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <form method="POST" action="{{ url_for('template.submit', response_id=response.id) }}">
+      <button type="submit" class="btn btn-primary rt-submit-btn">Looks good, send to my design team →</button>
+    </form>
+
+    <a href="{{ url_for('template.wizard', response_id=response.id) }}" class="rt-edit-link">← Go back and edit</a>
+  </div>
+</body>
+</html>

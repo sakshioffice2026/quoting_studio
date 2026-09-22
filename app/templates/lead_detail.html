@@ -211,7 +211,50 @@
       </a>
     </div>
 
-    {# =================== 4. PRELIMINARY SELECTION CARD =================== #}
+    {# =================== 4. REQUIREMENT TEMPLATE CARD =================== #}
+    <div class="ui-card">
+      <div class="presel-card-head">
+        <div class="ui-card-title" style="margin-bottom:0;">Requirement Template</div>
+        {% if template_response and template_response.is_submitted %}
+          {{ pill('Submitted', 'success') }}
+        {% elif template_response %}
+          {{ pill('In Progress', 'info') }}
+        {% else %}
+          {{ pill('Not Sent', 'neutral') }}
+        {% endif %}
+      </div>
+
+      {% if template_summary %}
+        <div class="presel-stats" style="flex-direction:column;align-items:flex-start;gap:6px;">
+          <div style="font-weight:600;font-size:13px;color:#556;">
+            {{ template_summary.project_type.icon or '' }} {{ template_summary.project_type.name }}
+          </div>
+          {% for item in template_summary.answer_list %}
+          <div style="font-size:13px;color:#667;">
+            <strong>{{ item.label }}:</strong>
+            {% if item.value is sequence and item.value is not string %}
+              {{ item.value | join(', ') }}
+            {% else %}
+              {{ item.value }}
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      {% elif template_response %}
+        <p style="color:#889;font-size:13px;">Customer opened the form but hasn't submitted yet.</p>
+      {% else %}
+        <p style="color:#889;font-size:13px;">Send the customer a quick 2-minute form to capture their project requirements.</p>
+      {% endif %}
+
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-secondary btn-sm" id="copyTemplateLink"
+                data-link="{{ url_for('template.landing', lead_id=lead.id, _external=True) }}">
+          Copy link to send to customer
+        </button>
+      </div>
+    </div>
+
+    {# =================== 5. PRELIMINARY SELECTION CARD =================== #}
     <div class="ui-card">
       <div class="presel-card-head">
         <div class="ui-card-title" style="margin-bottom:0;">Preliminary Selection</div>
@@ -389,5 +432,17 @@
       if (e.key === 'Escape') setOpen(false);
     });
   })();
+
+  var copyBtn = document.getElementById('copyTemplateLink');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', function () {
+      var link = copyBtn.getAttribute('data-link');
+      navigator.clipboard.writeText(link).then(function () {
+        var original = copyBtn.textContent;
+        copyBtn.textContent = 'Link copied!';
+        setTimeout(function () { copyBtn.textContent = original; }, 1500);
+      });
+    });
+  }
 </script>
 {% endblock %}

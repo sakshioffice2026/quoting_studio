@@ -126,6 +126,20 @@ def index():
                 label=info['label'],
                 tone=info['tone'],
             ))
+        for lead in sorted(leads, key=lambda l: l.created_at or datetime.min, reverse=True):
+            info = project_stage_service.resolve_lead_stage(lead)
+            if not info or info['step'] not in by_step:
+                continue
+            by_step[info['step']]['tokens'].append(dict(
+                id=lead.id,
+                name=lead.display_name,
+                customer=lead.customer_name,
+                initials=_initials(lead.customer_name),
+                code=info['code'],
+                label=info['label'],
+                tone=info['tone'],
+                href=url_for('leads.detail', lead_id=lead.id),
+            ))
         for s in stages:
             s['count'] = len(s['tokens'])
             s['more'] = max(0, s['count'] - MAX_TOKENS_PER_STAGE)

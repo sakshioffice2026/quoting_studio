@@ -59,6 +59,7 @@ class Lead(db.Model):
     tenant_id          = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, index=True)
     customer_id        = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=True, index=True)
     project_id         = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=True, index=True)
+    project_type_id    = db.Column(db.Integer, db.ForeignKey('project_types.id'), nullable=True, index=True)
 
     # raw enquiry capture (kept even after dedup/merge into a Customer)
     source_channel     = db.Column(db.String(30), nullable=False, default=SourceChannel.WEBSITE)
@@ -87,6 +88,7 @@ class Lead(db.Model):
 
     assignee = db.relationship('User', foreign_keys=[assigned_to])
     duplicate_of = db.relationship('Lead', remote_side=[id])
+    project_type = db.relationship('ProjectType')
     interactions = db.relationship(
         'Interaction', backref='lead', lazy='dynamic',
         cascade='all, delete-orphan',
@@ -112,6 +114,7 @@ class Lead(db.Model):
             'tenant_id':         self.tenant_id,
             'customer_id':       self.customer_id,
             'project_id':        self.project_id,
+            'project_type_id':   self.project_type_id,
             'source_channel':    self.source_channel,
             'customer_name':     self.customer_name,
             'project_name':      self.project_name,

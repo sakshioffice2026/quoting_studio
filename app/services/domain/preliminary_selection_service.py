@@ -47,7 +47,8 @@ def start_preliminary_selection(tenant_id: int, lead_id: int, created_by: int,
                                  indicative_price_max=None, survey_required=True, notes=None):
     """Triggers on: qualified lead with a scheduled meeting.
     Creates (or reuses) the Project tied to the Lead, then opens a Preliminary
-    Selection record against it."""
+    Selection record against it. If the customer already filled a Requirement
+    Template, its mapped answers are used to pre-fill any field not explicitly passed."""
     lead = lead_repo.get_by_id(tenant_id, lead_id)
     if not lead:
         raise LookupError('Lead not found')
@@ -56,16 +57,23 @@ def start_preliminary_selection(tenant_id: int, lead_id: int, created_by: int,
 
     project = _get_or_create_project_for_lead(tenant_id, lead, created_by)
 
+    template_defaults = {}
+    from ...repositories import requirement_template_repo
+    template_response = requirement_template_repo.get_response_by_lead(tenant_id, lead_id)
+    if template_response and template_response.is_submitted:
+        from . import template_mapping_service
+        template_defaults = template_mapping_service.build_mapped_fields(template_response)
+
     presel = preliminary_selection_repo.create(
         tenant_id=tenant_id,
         lead_id=lead.id,
         project_id=project.id,
         created_by=created_by,
-        shortlisted_ranges=shortlisted_ranges,
-        rough_opening_doors=rough_opening_doors,
-        rough_opening_windows=rough_opening_windows,
-        indicative_price_min=indicative_price_min,
-        indicative_price_max=indicative_price_max,
+        shortlisted_ranges=shortlisted_ranges or template_defaults.get('shortlisted_ranges'),
+        rough_opening_doors=rough_opening_doors if rough_opening_doors is not None else template_defaults.get('rough_opening_doors'),
+        rough_opening_windows=rough_opening_windows if rough_opening_windows is not None else template_defaults.get('rough_opening_windows'),
+        indicative_price_min=indicative_price_min if indicative_price_min is not None else template_defaults.get('indicative_price_min'),
+        indicative_price_max=indicative_price_max if indicative_price_max is not None else template_defaults.get('indicative_price_max'),
         survey_required=survey_required,
         notes=notes,
         status=PreselStatus.IN_PROGRESS,

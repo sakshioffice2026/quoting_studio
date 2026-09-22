@@ -4,6 +4,7 @@ from flask_login import login_required, current_user
 
 from ..extensions import db
 from ..models import Project, ProjectStatus, Window, Pane, Customer
+from ..validators import check_text
 
 projects_bp = Blueprint('projects', __name__, url_prefix='/projects')
 
@@ -28,12 +29,17 @@ def new():
         notes        = request.form.get('notes', '').strip()
 
         customer = next((c for c in customers if c.id == customer_id), None)
-        if customer is None:
-            flash('Select a customer. New customer? Register a Lead first.', 'error')
-            return render_template('projects/new.html', customers=customers)
-        if not project_name:
-            flash('Project name is required.', 'error')
-            return render_template('projects/new.html', customers=customers)
+        errors = [e for e in (
+            check_text(project_name, 'Project name', required=True, min_len=2, max_len=200, letters=True),
+            None if customer is not None else
+            'Select a customer. New customer? Register a Lead first.',
+            check_text(address, 'Property address', max_len=500),
+            check_text(notes, 'Notes', max_len=2000),
+        ) if e]
+        if errors:
+            for msg in errors:
+                flash(msg, 'error')
+            return render_template('projects/new.html', customers=customers), 400
 
         try:
             project = Project(

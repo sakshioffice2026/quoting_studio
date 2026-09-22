@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thank you — FenestraOne</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
+  <style>
+    .rt-shell { max-width: 480px; margin: 0 auto; padding: 60px 20px; text-align: center; }
+    .rt-check { font-size: 52px; margin-bottom: 18px; }
+    .rt-heading { font-size: 21px; font-weight: 700; margin-bottom: 10px; }
+    .rt-sub { color: #667; font-size: 14px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="rt-shell">
+    <div class="rt-check">✅</div>
+    <div class="rt-heading">Thanks{{ ', ' + response.lead.customer_name if response.lead and response.lead.customer_name else '' }}!</div>
+    <div class="rt-sub">Our design team will review this and get back to you within 24 hrs with options.</div>
+  </div>
+</body>
+</html>

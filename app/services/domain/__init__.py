@@ -9,3 +9,5 @@ from . import quotation_service         # noqa: F401
 from . import order_service             # noqa: F401
 from . import payment_service           # noqa: F401
 from . import manufacturing_service     # noqa: F401
+from . import requirement_template_service   # noqa: F401
+from . import template_mapping_service       # noqa: F401

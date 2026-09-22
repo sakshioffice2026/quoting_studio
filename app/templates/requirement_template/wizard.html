@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ project_type.name }} — FenestraOne</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
+  <style>
+    .rt-shell { max-width: 480px; margin: 0 auto; padding: 24px 20px 40px; min-height: 100vh; display: flex; flex-direction: column; }
+    .rt-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .rt-back { color: #778; font-size: 13px; text-decoration: none; }
+    .rt-dots { display: flex; gap: 6px; }
+    .rt-dot { width: 8px; height: 8px; border-radius: 50%; background: #e2e2e2; }
+    .rt-dot.active { background: var(--copper); }
+    .rt-dot.done { background: #c9a67a; }
+    .rt-screen { display: none; flex: 1; flex-direction: column; justify-content: center; animation: fade .2s ease; }
+    .rt-screen.active { display: flex; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
+    .rt-label { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 24px; }
+    .rt-optional-tag { display:block; font-size:12px; font-weight:400; color:#999; margin-top:4px; }
+
+    .rt-chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .rt-chip {
+      border: 1px solid #e2e2e2; border-radius: 999px; padding: 10px 18px;
+      background: #fff; cursor: pointer; font-size: 14px; font-weight: 600; color: #333;
+    }
+    .rt-chip.selected { background: var(--copper); border-color: var(--copper); color: #fff; }
+
+    .rt-stepper { display: flex; align-items: center; justify-content: center; gap: 22px; }
+    .rt-stepper button {
+      width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e2e2e2;
+      background: #fff; font-size: 22px; cursor: pointer;
+    }
+    .rt-stepper .value { font-size: 32px; font-weight: 700; min-width: 60px; text-align: center; }
+
+    .rt-slider-choices { display: flex; gap: 10px; justify-content: center; }
+    .rt-slider-choices .rt-chip { min-width: 70px; text-align: center; }
+
+    .rt-text { width: 100%; }
+    .rt-text textarea {
+      width: 100%; min-height: 110px; border: 1px solid #e2e2e2; border-radius: 10px;
+      padding: 12px; font-size: 15px; font-family: inherit;
+    }
+
+    .rt-actions { margin-top: 28px; display: flex; gap: 10px; justify-content: center; }
+    .rt-skip { background: none; border: none; color: #999; font-size: 13px; cursor: pointer; text-decoration: underline; }
+    .rt-next { padding: 12px 28px; }
+  </style>
+</head>
+<body>
+  <div class="rt-shell">
+    <div class="rt-top">
+      <a href="{{ url_for('template.landing', lead_id=response.lead_id) }}" class="rt-back">← Change project type</a>
+      <div class="rt-dots" id="rt-dots"></div>
+    </div>
+
+    {% for q in questions %}
+    <div class="rt-screen" data-key="{{ q.question_key }}" data-optional="{{ 'true' if q.is_optional else 'false' }}" data-input-type="{{ q.input_type }}">
+      <div class="rt-label">
+        {{ q.label }}
+        {% if q.is_optional %}<span class="rt-optional-tag">Optional</span>{% endif %}
+      </div>
+
+      {% if q.input_type == 'chips' or q.input_type == 'cards' %}
+        <div class="rt-chips" data-multi="true">
+          {% for choice in (q.options.choices if q.options else []) %}
+          <div class="rt-chip" data-value="{{ choice }}">{{ choice }}</div>
+          {% endfor %}
+        </div>
+      {% elif q.input_type == 'stepper' %}
+        <div class="rt-stepper"
+             data-min="{{ q.options.min if q.options else 0 }}"
+             data-max="{{ q.options.max if q.options else 100 }}">
+          <button type="button" class="rt-minus">−</button>
+          <div class="value">{{ q.options.default if q.options else 0 }}</div>
+          <button type="button" class="rt-plus">+</button>
+        </div>
+      {% elif q.input_type == 'slider' %}
+        <div class="rt-slider-choices" data-multi="false">
+          {% for choice in (q.options.choices if q.options else []) %}
+          <div class="rt-chip" data-value="{{ choice }}">{{ choice }}</div>
+          {% endfor %}
+        </div>
+      {% elif q.input_type == 'text' %}
+        <div class="rt-text">
+          <textarea placeholder="Type here..."></textarea>
+        </div>
+      {% endif %}
+
+      <div class="rt-actions">
+        {% if q.is_optional %}<button type="button" class="rt-skip">Skip this question</button>{% endif %}
+        {% if q.input_type in ('stepper', 'text') %}<button type="button" class="btn btn-primary rt-next">Next →</button>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <script>
+    var responseId = {{ response.id }};
+    var screens = Array.prototype.slice.call(document.querySelectorAll('.rt-screen'));
+    var dotsEl = document.getElementById('rt-dots');
+    var current = 0;
+
+    screens.forEach(function () {
+      var dot = document.createElement('div');
+      dot.className = 'rt-dot';
+      dotsEl.appendChild(dot);
+    });
+
+    function renderDots() {
+      Array.prototype.slice.call(dotsEl.children).forEach(function (dot, i) {
+        dot.className = 'rt-dot' + (i === current ? ' active' : (i < current ? ' done' : ''));
+      });
+    }
+
+    function showScreen(index) {
+      screens.forEach(function (s, i) { s.classList.toggle('active', i === index); });
+      current = index;
+      renderDots();
+    }
+
+    function saveAnswer(key, value) {
+      fetch('/rt/response/' + responseId + '/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question_key: key, value: value })
+      });
+    }
+
+    function goNext() {
+      if (current < screens.length - 1) {
+        showScreen(current + 1);
+      } else {
+        window.location.href = '/rt/response/' + responseId + '/summary';
+      }
+    }
+
+    screens.forEach(function (screen) {
+      var key = screen.getAttribute('data-key');
+      var inputType = screen.getAttribute('data-input-type');
+
+      if (inputType === 'chips' || inputType === 'cards') {
+        var chipsWrap = screen.querySelector('.rt-chips');
+        var selected = [];
+        chipsWrap.querySelectorAll('.rt-chip').forEach(function (chip) {
+          chip.addEventListener('click', function () {
+            chip.classList.toggle('selected');
+            var val = chip.getAttribute('data-value');
+            if (chip.classList.contains('selected')) {
+              selected.push(val);
+            } else {
+              selected = selected.filter(function (v) { return v !== val; });
+            }
+            saveAnswer(key, selected);
+          });
+        });
+        // auto-advance 700ms after first tap
+        chipsWrap.addEventListener('click', function () {
+          setTimeout(function () { if (current === screens.indexOf(screen)) goNext(); }, 500);
+        });
+      }
+
+      if (inputType === 'slider') {
+        var choiceWrap = screen.querySelector('.rt-slider-choices');
+        choiceWrap.querySelectorAll('.rt-chip').forEach(function (chip) {
+          chip.addEventListener('click', function () {
+            choiceWrap.querySelectorAll('.rt-chip').forEach(function (c) { c.classList.remove('selected'); });
+            chip.classList.add('selected');
+            saveAnswer(key, chip.getAttribute('data-value'));
+            setTimeout(goNext, 400);
+          });
+        });
+      }
+
+      if (inputType === 'stepper') {
+        var stepperEl = screen.querySelector('.rt-stepper');
+        var valueEl = stepperEl.querySelector('.value');
+        var min = parseInt(stepperEl.getAttribute('data-min'), 10);
+        var max = parseInt(stepperEl.getAttribute('data-max'), 10);
+        var val = parseInt(valueEl.textContent, 10);
+
+        stepperEl.querySelector('.rt-minus').addEventListener('click', function () {
+          if (val > min) { val--; valueEl.textContent = val; saveAnswer(key, val); }
+        });
+        stepperEl.querySelector('.rt-plus').addEventListener('click', function () {
+          if (val < max) { val++; valueEl.textContent = val; saveAnswer(key, val); }
+        });
+        saveAnswer(key, val);
+        screen.querySelector('.rt-next').addEventListener('click', goNext);
+      }
+
+      if (inputType === 'text') {
+        var textarea = screen.querySelector('textarea');
+        screen.querySelector('.rt-next').addEventListener('click', function () {
+          saveAnswer(key, textarea.value);
+          goNext();
+        });
+      }
+
+      var skipBtn = screen.querySelector('.rt-skip');
+      if (skipBtn) {
+        skipBtn.addEventListener('click', goNext);
+      }
+    });
+
+    showScreen(0);
+  </script>
+</body>
+</html>

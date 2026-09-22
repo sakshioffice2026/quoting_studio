@@ -276,6 +276,28 @@ def resolve_stages(tenant_id: int, projects) -> dict:
     return result
 
 
+def resolve_lead_stage(lead):
+    """Journey position for a lead that has no project yet.
+
+    A Project is only created when Preliminary Selection starts, so earlier
+    leads (new / assigned / follow-up / qualified) would never show on the
+    journey map. Returns None for leads that must not appear (already linked
+    to a project, duplicate, invalid or lost).
+    """
+    if lead.project_id is not None:
+        return None
+    if lead.status in (LeadStatus.DUPLICATE, LeadStatus.INVALID):
+        return None
+    if lead.follow_up_status == FollowUpStatus.LOST:
+        return None
+    if lead.follow_up_status:
+        info = _info(lead.id, 'followup', lead.follow_up_status)
+    else:
+        info = _info(lead.id, 'lead', lead.status)
+    info['project_no'] = None
+    return info
+
+
 # ------------------------------------------------------------------ #
 #  Search
 # ------------------------------------------------------------------ #

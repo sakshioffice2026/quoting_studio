@@ -1,6 +1,10 @@
 {% extends 'base.html' %}
 {% block title %}New Project — FenestraOne{% endblock %}
 
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/form-validation.css') }}">
+{% endblock %}
+
 {% block body %}
 <div class="page-wrap" style="max-width:600px;">
   <div class="page-header">
@@ -12,20 +16,24 @@
   </div>
 
   <div style="background:white;border:1px solid var(--line);border-radius:6px;padding:28px;">
-    <form method="POST" action="{{ url_for('projects.new') }}">
+    <form method="POST" action="{{ url_for('projects.new') }}" data-validate novalidate>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="form-alert" data-form-alert role="alert"></div>
 
       <div class="form-group">
         <label class="form-label" for="project_name">Project name <span class="copper">*</span></label>
         <input class="form-control" type="text" id="project_name" name="project_name"
                value="{{ request.form.get('project_name', '') }}"
-               placeholder="e.g. Harwood Villa – Whitefield" autofocus required>
+               data-rules="required|minlen:2|maxlen:200|letters" data-label="Project name"
+               placeholder="e.g. Harwood Villa – Whitefield" maxlength="200" autofocus required>
       </div>
 
       <div class="form-group">
         <label class="form-label" for="customer_id">Customer <span class="copper">*</span></label>
         {% if customers %}
-        <select class="form-control" id="customer_id" name="customer_id" required>
+        <select class="form-control" id="customer_id" name="customer_id"
+                data-rules="required" data-label="Customer" required>
           <option value="">Select a customer…</option>
           {% for c in customers %}
           <option value="{{ c.id }}" data-address="{{ c.address or '' }}"
@@ -48,12 +56,14 @@
         <label class="form-label" for="address">Property address</label>
         <input class="form-control" type="text" id="address" name="address"
                value="{{ request.form.get('address', '') }}"
-               placeholder="14 Mill Lane, Bristol BS1 4QT">
+               data-rules="maxlen:500" data-label="Property address"
+               placeholder="14 Mill Lane, Bristol BS1 4QT" maxlength="500">
       </div>
 
       <div class="form-group">
         <label class="form-label" for="notes">Notes</label>
         <textarea class="form-control" id="notes" name="notes"
+                  data-rules="maxlen:2000" data-label="Notes" maxlength="2000"
                   placeholder="e.g. Replace 6 windows and rear bifold door.">{{ request.form.get('notes', '') }}</textarea>
       </div>
 
@@ -61,11 +71,16 @@
 
       <div class="flex gap-8" style="justify-content:flex-end;">
         <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">Cancel</a>
-        <button type="submit" class="btn btn-primary">Create project →</button>
+        <button type="submit" class="btn btn-primary" data-loading="Creating…"
+                {{ 'disabled' if not customers }}>Create project →</button>
       </div>
     </form>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/form-validation.js') }}"></script>
 <script>
   (function () {
     var sel  = document.getElementById('customer_id');

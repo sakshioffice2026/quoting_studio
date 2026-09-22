@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tell us about your project — FenestraOne</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
+  <style>
+    .rt-shell { max-width: 480px; margin: 0 auto; padding: 32px 20px; }
+    .rt-logo { font-weight: 700; font-size: 20px; color: var(--copper); text-align: center; margin-bottom: 4px; }
+    .rt-question { font-size: 22px; font-weight: 700; text-align: center; margin: 28px 0 6px; }
+    .rt-sub { text-align: center; color: #667; font-size: 13px; margin-bottom: 28px; }
+    .rt-cards { display: flex; flex-direction: column; gap: 14px; }
+    .rt-card {
+      display: flex; align-items: center; gap: 14px;
+      border: 1px solid #e2e2e2; border-radius: 14px; padding: 18px 16px;
+      background: #fff; cursor: pointer; transition: all .15s ease;
+      text-align: left; font-size: 16px; font-weight: 600; color: #222;
+    }
+    .rt-card:active, .rt-card:hover { border-color: var(--copper); background: #fff8f2; }
+    .rt-card .icon { font-size: 28px; }
+    .rt-card .desc { font-size: 12px; font-weight: 400; color: #778; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div class="rt-shell">
+    <div class="rt-logo">FenestraOne</div>
+
+    <div class="rt-question">What are we designing for?</div>
+    <div class="rt-sub">This helps us show you only what's relevant — takes about 2 minutes.</div>
+
+    <div class="rt-cards">
+      {% for pt in project_types %}
+      <button type="button" class="rt-card" data-project-type-id="{{ pt.id }}">
+        <span class="icon">{{ pt.icon or '🏗️' }}</span>
+        <span>
+          {{ pt.name }}
+          {% if pt.description %}<div class="desc">{{ pt.description }}</div>{% endif %}
+        </span>
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll('.rt-card').forEach(function (card) {
+      card.addEventListener('click', function () {
+        var projectTypeId = card.getAttribute('data-project-type-id');
+        fetch('{{ url_for("template.start", lead_id=lead.id, project_type_id=0) }}'.replace('/0', '/' + projectTypeId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.response_id) {
+              window.location.href = '/rt/response/' + data.response_id;
+            }
+          });
+      });
+    });
+  </script>
+</body>
+</html>

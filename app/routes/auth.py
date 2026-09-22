@@ -4,6 +4,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 
 from ..extensions import db
 from ..models import User, Tenant, UserRole, PricingRule, OpenerPricingRule, GlazingPricingRule
+from ..validators import check_text, check_email, check_password
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 log = lambda: current_app.logger
@@ -22,6 +23,16 @@ def login():
         password = request.form.get('password', '')
         remember = request.form.get('remember') == 'on'
 
+        errors = [e for e in (
+            check_email(email, 'Email address', required=True),
+            'Password is required.' if not password else
+            ('Password is too long.' if len(password) > 128 else None),
+        ) if e]
+        if errors:
+            for msg in errors:
+                flash(msg, 'error')
+            return render_template('auth/login.html'), 400
+
         try:
             user = User.query.filter_by(email=email, is_active=True).first()
 
@@ -31,6 +42,8 @@ def login():
                 login_user(user, remember=remember)
                 current_app.logger.info('Login success: %s (tenant=%s)', email, user.tenant_id)
                 nxt = request.args.get('next')
+                if not nxt or not nxt.startswith('/') or nxt.startswith('//'):
+                    nxt = None
                 return redirect(nxt or url_for('dashboard.index'))
 
             current_app.logger.warning('Login failed for email: %s', email)
@@ -62,17 +75,13 @@ def register():
 
         form_data = dict(company_name=company_name, full_name=full_name, email=email)
 
-        errors = []
-        if not company_name:
-            errors.append('Company name is required.')
-        if not full_name:
-            errors.append('Your name is required.')
-        if not email or '@' not in email:
-            errors.append('A valid email address is required.')
-        if len(password) < 8:
-            errors.append('Password must be at least 8 characters.')
-        if password != confirm:
-            errors.append('Passwords do not match.')
+        errors = [e for e in (
+            check_text(company_name, 'Company name', required=True, min_len=2, max_len=120, letters=True),
+            check_text(full_name, 'Your name', required=True, min_len=2, max_len=100, letters=True),
+            check_email(email, 'Email address', required=True),
+            check_password(password),
+            None if password == confirm else 'Passwords do not match.',
+        ) if e]
 
         try:
             if not errors and User.query.filter_by(email=email).first():

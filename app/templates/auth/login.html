@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign in — FenestraOne </title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/form-validation.css') }}">
 </head>
 <body>
 
@@ -25,20 +26,24 @@
 
     <h2>Sign in</h2>
 
-    <form method="POST" action="{{ url_for('auth.login') }}">
+    <form method="POST" action="{{ url_for('auth.login') }}" data-validate novalidate>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="form-alert" data-form-alert role="alert"></div>
 
       <div class="form-group">
         <label class="form-label" for="email">Email address</label>
         <input class="form-control" type="email" id="email" name="email"
                value="{{ request.form.get('email', '') }}"
-               autocomplete="email" autofocus required>
+               data-rules="required|email|maxlen:254" data-label="Email address"
+               maxlength="254" autocomplete="email" autofocus required>
       </div>
 
       <div class="form-group">
         <label class="form-label" for="password">Password</label>
         <input class="form-control" type="password" id="password" name="password"
-               autocomplete="current-password" required>
+               data-rules="required|maxlen:128" data-label="Password" data-toggle-password
+               maxlength="128" autocomplete="current-password" required>
       </div>
 
       <div class="form-group" style="display:flex;align-items:center;gap:8px;">
@@ -46,7 +51,8 @@
         <label for="remember" style="font-size:13px;color:#566;cursor:pointer;">Keep me signed in</label>
       </div>
 
-      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+      <button type="submit" class="btn btn-primary" data-loading="Signing in…"
+              style="width:100%;justify-content:center;">
         Sign in
       </button>
     </form>
@@ -58,5 +64,6 @@
   </div>
 </div>
 
+<script src="{{ url_for('static', filename='js/form-validation.js') }}"></script>
 </body>
 </html>
