@@ -75,6 +75,61 @@
       </div>
     </div>
 
+    {# =================== 2b. INSTALLATION / TRANSPORT / AMC / WARRANTY =================== #}
+    {% if quotation.installation_charge or quotation.transport_charge or quotation.amc_offered or quotation.other_charges or quotation.warranty_months %}
+    <div class="ui-card">
+      <div class="ui-card-title">Installation, Transport, AMC &amp; Warranty</div>
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Details</th>
+              <th style="text-align:right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if quotation.installation_charge %}
+            <tr>
+              <td style="font-weight:600;">Installation Charges</td>
+              <td class="muted">Fitting &amp; on-site installation</td>
+              <td class="num-cell">₹{{ '{:,.2f}'.format(quotation.installation_charge|float) }}</td>
+            </tr>
+            {% endif %}
+            {% if quotation.transport_charge %}
+            <tr>
+              <td style="font-weight:600;">Transport Charges</td>
+              <td class="muted">Delivery to site</td>
+              <td class="num-cell">₹{{ '{:,.2f}'.format(quotation.transport_charge|float) }}</td>
+            </tr>
+            {% endif %}
+            {% for charge in quotation.other_charges %}
+            <tr>
+              <td style="font-weight:600;">{{ charge.label }}</td>
+              <td class="muted">—</td>
+              <td class="num-cell">₹{{ '{:,.2f}'.format(charge.amount|float) }}</td>
+            </tr>
+            {% endfor %}
+            {% if quotation.amc_offered %}
+            <tr>
+              <td style="font-weight:600;">AMC — {{ quotation.amc_offer_tier or '—' }}</td>
+              <td class="muted">Annual maintenance contract</td>
+              <td class="num-cell">₹{{ '{:,.2f}'.format(quotation.amc_price|float) if quotation.amc_price else '—' }}</td>
+            </tr>
+            {% endif %}
+            {% if quotation.warranty_months %}
+            <tr>
+              <td style="font-weight:600;">Warranty</td>
+              <td class="muted">{{ quotation.warranty_terms_text or (quotation.warranty_months ~ ' months standard warranty') }}</td>
+              <td class="num-cell">Included</td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
     {# =================== 3. TIMELINE / TERMS CARD =================== #}
     {% if quotation.payment_terms_template or quotation.sent_at or quotation.accepted_at or quotation.lost_at or quotation.negotiation_notes %}
     <div class="ui-card">

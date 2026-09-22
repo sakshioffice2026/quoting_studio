@@ -96,6 +96,9 @@ def create_app(config_name=None):
     app.register_blueprint(template_bp)
     app.register_blueprint(api_v1_bp, url_prefix='/api/v1')
 
+    # public customer wizard posts JSON/multipart without a session CSRF token
+    csrf.exempt(template_bp)
+
     # ---- serve uploaded files -------------------------------------
     import os as _os
     from flask import send_from_directory

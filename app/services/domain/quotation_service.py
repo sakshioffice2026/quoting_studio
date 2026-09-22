@@ -237,6 +237,14 @@ def create_quotation(
     tax_rate:               float   = 0.20,
     validity_days:          int     = DEFAULT_VALIDITY_DAYS,
     payment_terms_template: str     | None = None,
+    installation_charge:    float   = 0.0,
+    transport_charge:       float   = 0.0,
+    other_charges:          list    | None = None,
+    amc_offered:            bool    = False,
+    amc_offer_tier:         str     | None = None,
+    amc_price:              float   = 0.0,
+    warranty_months:        int     = 12,
+    warranty_terms_text:    str     | None = None,
 ) -> Quotation:
     project  = Project.query.filter_by(id=project_id, tenant_id=tenant_id).first()
     if not project:
@@ -260,9 +268,15 @@ def create_quotation(
 
     line_items, subtotal = _build_line_items(windows, tenant_id)
 
+    other_charges = other_charges or []
+    install_amt   = Decimal(str(installation_charge or 0))
+    transport_amt = Decimal(str(transport_charge or 0))
+    amc_amt       = Decimal(str(amc_price or 0)) if amc_offered else Decimal('0')
+    other_amt     = sum((Decimal(str(c.get('amount') or 0)) for c in other_charges), Decimal('0'))
+
     disc_pct    = Decimal(str(discount_pct))
     disc_amount = (subtotal * disc_pct / 100).quantize(Decimal('0.01'))
-    taxable     = subtotal - disc_amount
+    taxable     = subtotal - disc_amount + install_amt + transport_amt + amc_amt + other_amt
     tax_amt     = (taxable * Decimal(str(tax_rate))).quantize(Decimal('0.01'))
     grand_total = (taxable + tax_amt).quantize(Decimal('0.01'))
 
@@ -292,6 +306,14 @@ def create_quotation(
         payment_terms_template  = payment_terms_template,
         validity_days           = validity_days,
         validity_date           = date.today() + timedelta(days=validity_days),
+        installation_charge     = install_amt,
+        transport_charge        = transport_amt,
+        other_charges_json      = json.dumps(other_charges) if other_charges else None,
+        amc_offered              = amc_offered,
+        amc_offer_tier          = amc_offer_tier if amc_offered else None,
+        amc_price               = amc_amt if amc_offered else None,
+        warranty_months         = warranty_months,
+        warranty_terms_text     = warranty_terms_text,
         prepared_by             = prepared_by,
         created_at              = datetime.utcnow(),
         updated_at              = datetime.utcnow(),

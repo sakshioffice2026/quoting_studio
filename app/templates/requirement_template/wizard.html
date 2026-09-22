@@ -7,77 +7,127 @@
   <title>{{ project_types|map(attribute='name')|join(' + ') }} — FenestraOne</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
   <style>
-    .rt-shell { max-width: 480px; margin: 0 auto; padding: 24px 20px 40px; min-height: 100vh; display: flex; flex-direction: column; }
-    .rt-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-    .rt-back { color: #778; font-size: 13px; text-decoration: none; }
-    .rt-dots { display: flex; gap: 6px; }
-    .rt-dot { width: 8px; height: 8px; border-radius: 50%; background: #e2e2e2; }
-    .rt-dot.active { background: var(--copper); }
-    .rt-dot.done { background: #c9a67a; }
-    .rt-screen { display: none; flex: 1; flex-direction: column; justify-content: center; animation: fade .2s ease; }
-    .rt-screen.active { display: flex; }
-    @keyframes fade { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
-    .rt-label { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 24px; }
-    .rt-optional-tag { display:block; font-size:12px; font-weight:400; color:#999; margin-top:4px; }
+    body { background: var(--paper); }
+
+    .rt-shell { max-width: 600px; margin: 0 auto; padding: 0 20px 110px; }
+
+    .rt-header {
+      padding: 28px 0 20px; position: sticky; top: 0; background: var(--paper);
+      z-index: 5; border-bottom: 1px solid var(--line);
+    }
+    .rt-back {
+      color: var(--steel); font-size: 13px; text-decoration: none; font-family: var(--font-body);
+    }
+    .rt-back:hover { color: var(--navy); }
+    .rt-title-row { display: flex; align-items: baseline; justify-content: space-between; margin-top: 10px; gap: 12px; }
+    .rt-title { font-family: var(--font-display); font-size: 26px; font-weight: 500; color: var(--navy); }
+    .rt-progress-text { font-family: var(--font-mono); font-size: 12px; color: var(--steel); white-space: nowrap; }
+
+    .rt-progress-track { height: 3px; background: var(--line); border-radius: 2px; margin-top: 16px; overflow: hidden; }
+    .rt-progress-fill { height: 100%; background: var(--copper); width: 0%; transition: width .35s ease; }
+
+    .rt-save-status {
+      font-family: var(--font-mono); font-size: 11px; color: var(--steel); height: 16px; margin: 10px 0 4px;
+      transition: color .2s ease;
+    }
+    .rt-save-status.saved { color: var(--success); }
+
+    .rt-list { margin-top: 8px; }
+
+    .rt-card {
+      border: 1px solid var(--line); border-radius: 4px; padding: 22px 22px 20px;
+      margin-bottom: 12px; background: var(--white); position: relative;
+      border-left: 3px solid var(--line); transition: border-left-color .2s ease, opacity .2s ease;
+    }
+    .rt-card[data-answered="true"] { border-left-color: var(--sage); }
+    .rt-card.skipped { opacity: 0.5; border-left-color: var(--line); }
+
     .rt-category-tag {
-      text-align: center; font-size: 12px; font-weight: 700; color: var(--copper);
-      text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px;
+      font-family: var(--font-mono); font-size: 10.5px; color: var(--copper);
+      letter-spacing: .03em; margin-bottom: 10px;
+    }
+    .rt-label {
+      font-family: var(--font-display); font-size: 18px; font-weight: 500; color: var(--navy);
+      margin-bottom: 16px; line-height: 1.35;
+    }
+    .rt-optional-tag {
+      font-family: var(--font-body); font-size: 11.5px; font-weight: 400; color: var(--steel);
+      margin-left: 8px;
     }
 
     .rt-upload-zone {
-      border: 1.5px dashed #d8d8d8; border-radius: 14px; padding: 28px 16px;
-      text-align: center; cursor: pointer; color: #556; background: #fafafa;
+      border: 1.5px dashed var(--line); border-radius: 4px; padding: 26px 16px;
+      text-align: center; cursor: pointer; color: var(--steel); background: var(--paper);
+      transition: border-color .15s ease, background .15s ease;
     }
-    .rt-upload-icon { font-size: 30px; margin-bottom: 8px; }
-    .rt-upload-hint { font-size: 12px; color: #999; margin-top: 6px; }
-    .rt-upload-list { list-style: none; padding: 0; margin: 14px 0 0; font-size: 13px; color: #333; }
-    .rt-upload-list li { padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+    .rt-upload-zone:hover { border-color: var(--copper); background: var(--white); }
+    .rt-upload-icon { font-size: 24px; margin-bottom: 8px; }
+    .rt-upload-zone div:nth-child(3) { font-family: var(--font-body); font-size: 14px; color: var(--navy); }
+    .rt-upload-hint { font-family: var(--font-mono); font-size: 11px; color: var(--steel); margin-top: 8px; }
+    .rt-upload-list { list-style: none; padding: 0; margin: 14px 0 0; font-family: var(--font-body); font-size: 13px; color: var(--navy); }
+    .rt-upload-list li { padding: 7px 0; border-bottom: 1px solid var(--line); }
 
-    .rt-chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .rt-chips { display: flex; flex-wrap: wrap; gap: 9px; }
     .rt-chip {
-      border: 1px solid #e2e2e2; border-radius: 999px; padding: 10px 18px;
-      background: #fff; cursor: pointer; font-size: 14px; font-weight: 600; color: #333;
+      border: 1px solid var(--line); border-radius: 3px; padding: 10px 16px;
+      background: var(--white); cursor: pointer; font-family: var(--font-body);
+      font-size: 14px; font-weight: 500; color: var(--navy); transition: all .12s ease;
     }
-    .rt-chip.selected { background: var(--copper); border-color: var(--copper); color: #fff; }
+    .rt-chip:hover { border-color: var(--copper); }
+    .rt-chip.selected { background: var(--navy); border-color: var(--navy); color: var(--white); }
 
-    .rt-stepper { display: flex; align-items: center; justify-content: center; gap: 22px; }
+    .rt-stepper { display: flex; align-items: center; gap: 20px; }
     .rt-stepper button {
-      width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e2e2e2;
-      background: #fff; font-size: 22px; cursor: pointer;
+      width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line);
+      background: var(--white); font-size: 18px; cursor: pointer; color: var(--navy);
+      transition: border-color .12s ease;
     }
-    .rt-stepper .value { font-size: 32px; font-weight: 700; min-width: 60px; text-align: center; }
+    .rt-stepper button:hover { border-color: var(--copper); }
+    .rt-stepper .value {
+      font-family: var(--font-display); font-size: 26px; font-weight: 500; min-width: 46px;
+      text-align: center; color: var(--navy);
+    }
 
-    .rt-slider-choices { display: flex; gap: 10px; justify-content: center; }
-    .rt-slider-choices .rt-chip { min-width: 70px; text-align: center; }
-
-    .rt-text { width: 100%; }
     .rt-text textarea {
-      width: 100%; min-height: 110px; border: 1px solid #e2e2e2; border-radius: 10px;
-      padding: 12px; font-size: 15px; font-family: inherit;
+      width: 100%; min-height: 88px; border: 1px solid var(--line); border-radius: 4px;
+      padding: 12px; font-size: 14.5px; font-family: var(--font-body); color: var(--navy); resize: vertical;
     }
+    .rt-text textarea:focus { outline: none; border-color: var(--copper); }
 
-    .rt-actions { margin-top: 28px; display: flex; gap: 10px; justify-content: center; }
-    .rt-skip { background: none; border: none; color: #999; font-size: 13px; cursor: pointer; text-decoration: underline; }
-    .rt-next { padding: 12px 28px; }
-    .rt-save-status {
-      text-align: center; font-size: 12px; color: #999; height: 16px; margin-bottom: 4px;
-      transition: opacity .2s ease;
+    .rt-skip-row { margin-top: 14px; }
+    .rt-skip {
+      background: none; border: none; color: var(--steel); font-family: var(--font-body);
+      font-size: 12.5px; cursor: pointer; padding: 0;
     }
-    .rt-save-status.saved { color: #4a9d5f; }
+    .rt-skip:hover { color: var(--navy); }
+    .rt-skip.is-skipped { color: var(--error); }
+
+    .rt-bottom-bar {
+      position: fixed; left: 0; right: 0; bottom: 0; background: var(--white);
+      border-top: 1px solid var(--line); padding: 14px 20px; display: flex; justify-content: center;
+    }
+    .rt-bottom-bar .btn {
+      width: 100%; max-width: 560px; padding: 14px; font-size: 15px; font-family: var(--font-body); font-weight: 600;
+    }
   </style>
 </head>
 <body>
   <div class="rt-shell">
-    <div class="rt-top">
+    <div class="rt-header">
       <a href="{{ url_for('template.landing', lead_id=response.lead_id) }}" class="rt-back">← Change project type</a>
-      <div class="rt-dots" id="rt-dots"></div>
+      <div class="rt-title-row">
+        <div class="rt-title">Your requirements</div>
+        <div class="rt-progress-text" id="rt-progress-text">0 of 0 done</div>
+      </div>
+      <div class="rt-progress-track"><div class="rt-progress-fill" id="rt-progress-fill"></div></div>
+      <div class="rt-save-status" id="rt-save-status">Answers save automatically as you go</div>
     </div>
-    <div class="rt-save-status" id="rt-save-status"></div>
 
+    <div class="rt-list">
     {% for q in questions %}
-    <div class="rt-screen" data-key="{{ q.question_key }}" data-optional="{{ 'true' if q.is_optional else 'false' }}" data-input-type="{{ q.input_type }}">
+    <div class="rt-card" data-key="{{ q.question_key }}" data-optional="{{ 'true' if q.is_optional else 'false' }}" data-input-type="{{ q.input_type }}">
       {% if project_types|length > 1 %}
-      <div class="rt-category-tag">{{ q.project_type.icon or '' }} {{ q.project_type.name }}</div>
+      <div class="rt-category-tag">{{ q.project_type.icon or '' }} {{ q.project_type.name|upper }}</div>
       {% endif %}
       <div class="rt-label">
         {{ q.label }}
@@ -99,25 +149,24 @@
           <button type="button" class="rt-plus">+</button>
         </div>
       {% elif q.input_type == 'slider' %}
-        <div class="rt-slider-choices" data-multi="false">
+        <div class="rt-chips" data-multi="false">
           {% for choice in (q.options.choices if q.options else []) %}
           <div class="rt-chip" data-value="{{ choice }}">{{ choice }}</div>
           {% endfor %}
         </div>
       {% elif q.input_type == 'text' %}
         <div class="rt-text">
-          <textarea placeholder="Type here..."></textarea>
+          <textarea placeholder="Type here...">{{ response.answers.get(q.question_key, '') if response.answers else '' }}</textarea>
         </div>
       {% endif %}
 
-      <div class="rt-actions">
-        {% if q.is_optional %}<button type="button" class="rt-skip">Skip this question</button>{% endif %}
-        {% if q.input_type in ('stepper', 'text') %}<button type="button" class="btn btn-primary rt-next">Next →</button>{% endif %}
+      <div class="rt-skip-row">
+        <button type="button" class="rt-skip">Skip this question</button>
       </div>
     </div>
     {% endfor %}
 
-    <div class="rt-screen" id="rt-upload-screen" data-key="__upload__" data-optional="true" data-input-type="upload">
+    <div class="rt-card" id="rt-upload-screen" data-key="__upload__" data-optional="true" data-input-type="upload">
       <div class="rt-label">
         Got a site photo or floor plan?
         <span class="rt-optional-tag">Optional — helps our design team a lot</span>
@@ -126,41 +175,34 @@
         <input type="file" id="rt-file-input" accept=".jpg,.jpeg,.png,.pdf,.dwg,.dxf" hidden>
         <div class="rt-upload-icon">📎</div>
         <div>Tap to upload photo, PDF or CAD file</div>
-        <div class="rt-upload-hint">JPG, PNG, PDF, DWG, DXF — up to 15 MB</div>
+        <div class="rt-upload-hint">JPG · PNG · PDF · DWG · DXF — up to 15 MB</div>
       </div>
       <ul class="rt-upload-list" id="rt-upload-list"></ul>
-      <div class="rt-actions">
-        <button type="button" class="rt-skip" id="rt-upload-skip">Skip this step</button>
-        <button type="button" class="btn btn-primary rt-next" id="rt-upload-continue">Continue →</button>
-      </div>
     </div>
+    </div>
+  </div>
+
+  <div class="rt-bottom-bar">
+    <button type="button" class="btn btn-primary" id="rt-continue-btn">Review my answers →</button>
   </div>
 
   <script>
     var responseId = {{ response.id }};
-    var screens = Array.prototype.slice.call(document.querySelectorAll('.rt-screen'));
-    var dotsEl = document.getElementById('rt-dots');
-    var current = 0;
-
-    screens.forEach(function () {
-      var dot = document.createElement('div');
-      dot.className = 'rt-dot';
-      dotsEl.appendChild(dot);
-    });
-
-    function renderDots() {
-      Array.prototype.slice.call(dotsEl.children).forEach(function (dot, i) {
-        dot.className = 'rt-dot' + (i === current ? ' active' : (i < current ? ' done' : ''));
-      });
-    }
-
-    function showScreen(index) {
-      screens.forEach(function (s, i) { s.classList.toggle('active', i === index); });
-      current = index;
-      renderDots();
-    }
-
+    var cards = Array.prototype.slice.call(document.querySelectorAll('.rt-card[data-key]'));
+    var skipped = {};
     var saveStatusEl = document.getElementById('rt-save-status');
+    var progressEl = document.getElementById('rt-progress-text');
+    var progressFillEl = document.getElementById('rt-progress-fill');
+
+    function updateProgress() {
+      var total = cards.length;
+      var answered = cards.filter(function (c) {
+        var key = c.getAttribute('data-key');
+        return skipped[key] || c.getAttribute('data-answered') === 'true';
+      }).length;
+      progressEl.textContent = answered + ' of ' + total + ' done';
+      progressFillEl.style.width = (total ? (answered / total * 100) : 0) + '%';
+    }
 
     function saveAnswer(key, value) {
       saveStatusEl.textContent = 'Saving...';
@@ -184,20 +226,24 @@
         });
     }
 
-    function goNext() {
-      if (current < screens.length - 1) {
-        showScreen(current + 1);
-      } else {
-        window.location.href = '/rt/response/' + responseId + '/summary';
-      }
-    }
+    cards.forEach(function (card) {
+      var key = card.getAttribute('data-key');
+      var inputType = card.getAttribute('data-input-type');
+      var skipBtn = card.querySelector('.rt-skip');
 
-    screens.forEach(function (screen) {
-      var key = screen.getAttribute('data-key');
-      var inputType = screen.getAttribute('data-input-type');
+      function markAnswered() {
+        card.setAttribute('data-answered', 'true');
+        if (skipped[key]) {
+          delete skipped[key];
+          card.classList.remove('skipped');
+          skipBtn.classList.remove('is-skipped');
+          skipBtn.textContent = 'Skip this question';
+        }
+        updateProgress();
+      }
 
       if (inputType === 'chips' || inputType === 'cards') {
-        var chipsWrap = screen.querySelector('.rt-chips');
+        var chipsWrap = card.querySelector('.rt-chips');
         var selected = [];
         chipsWrap.querySelectorAll('.rt-chip').forEach(function (chip) {
           chip.addEventListener('click', function () {
@@ -209,54 +255,66 @@
               selected = selected.filter(function (v) { return v !== val; });
             }
             saveAnswer(key, selected);
+            markAnswered();
           });
-        });
-        // auto-advance 700ms after first tap
-        chipsWrap.addEventListener('click', function () {
-          setTimeout(function () { if (current === screens.indexOf(screen)) goNext(); }, 500);
         });
       }
 
       if (inputType === 'slider') {
-        var choiceWrap = screen.querySelector('.rt-slider-choices');
+        var choiceWrap = card.querySelector('.rt-chips');
         choiceWrap.querySelectorAll('.rt-chip').forEach(function (chip) {
           chip.addEventListener('click', function () {
             choiceWrap.querySelectorAll('.rt-chip').forEach(function (c) { c.classList.remove('selected'); });
             chip.classList.add('selected');
             saveAnswer(key, chip.getAttribute('data-value'));
-            setTimeout(goNext, 400);
+            markAnswered();
           });
         });
       }
 
       if (inputType === 'stepper') {
-        var stepperEl = screen.querySelector('.rt-stepper');
+        var stepperEl = card.querySelector('.rt-stepper');
         var valueEl = stepperEl.querySelector('.value');
         var min = parseInt(stepperEl.getAttribute('data-min'), 10);
         var max = parseInt(stepperEl.getAttribute('data-max'), 10);
         var val = parseInt(valueEl.textContent, 10);
 
         stepperEl.querySelector('.rt-minus').addEventListener('click', function () {
-          if (val > min) { val--; valueEl.textContent = val; saveAnswer(key, val); }
+          if (val > min) { val--; valueEl.textContent = val; saveAnswer(key, val); markAnswered(); }
         });
         stepperEl.querySelector('.rt-plus').addEventListener('click', function () {
-          if (val < max) { val++; valueEl.textContent = val; saveAnswer(key, val); }
+          if (val < max) { val++; valueEl.textContent = val; saveAnswer(key, val); markAnswered(); }
         });
-        saveAnswer(key, val);
-        screen.querySelector('.rt-next').addEventListener('click', goNext);
       }
 
       if (inputType === 'text') {
-        var textarea = screen.querySelector('textarea');
-        screen.querySelector('.rt-next').addEventListener('click', function () {
-          saveAnswer(key, textarea.value);
-          goNext();
+        var textarea = card.querySelector('textarea');
+        var debounceTimer = null;
+        textarea.addEventListener('input', function () {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(function () {
+            saveAnswer(key, textarea.value);
+            markAnswered();
+          }, 500);
         });
       }
 
-      var skipBtn = screen.querySelector('.rt-skip');
       if (skipBtn) {
-        skipBtn.addEventListener('click', goNext);
+        skipBtn.addEventListener('click', function () {
+          if (skipped[key]) {
+            delete skipped[key];
+            card.classList.remove('skipped');
+            skipBtn.classList.remove('is-skipped');
+            skipBtn.textContent = 'Skip this question';
+          } else {
+            skipped[key] = true;
+            card.classList.add('skipped');
+            skipBtn.classList.add('is-skipped');
+            skipBtn.textContent = 'Skipped — tap to undo';
+            saveAnswer(key, null);
+          }
+          updateProgress();
+        });
       }
     });
 
@@ -264,7 +322,6 @@
     var uploadZone = document.getElementById('rt-upload-zone');
     var fileInput = document.getElementById('rt-file-input');
     var uploadList = document.getElementById('rt-upload-list');
-    var uploadContinueBtn = document.getElementById('rt-upload-continue');
 
     if (uploadZone && fileInput) {
       uploadZone.addEventListener('click', function () { fileInput.click(); });
@@ -299,11 +356,13 @@
 
         fileInput.value = '';
       });
-
-      uploadContinueBtn.addEventListener('click', goNext);
     }
 
-    showScreen(0);
+    document.getElementById('rt-continue-btn').addEventListener('click', function () {
+      window.location.href = '/rt/response/' + responseId + '/summary';
+    });
+
+    updateProgress();
   </script>
 </body>
 </html>
