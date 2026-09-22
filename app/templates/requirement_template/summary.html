@@ -30,6 +30,24 @@
       {% if summary.site_type %} · {{ summary.site_type|capitalize }}{% endif %}
     </div>
 
+    {% if summary.material or summary.color %}
+    <div class="rt-summary-card" style="background:#fff;">
+      <div class="rt-summary-title">Material & Color</div>
+      {% if summary.material %}
+      <div class="rt-summary-item">
+        <span class="label">Material</span>
+        <span class="value">{{ summary.material }}</span>
+      </div>
+      {% endif %}
+      {% if summary.color %}
+      <div class="rt-summary-item">
+        <span class="label">Color / Finish</span>
+        <span class="value">{{ summary.color }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
     <div class="rt-summary-card">
       <div class="rt-summary-title">Your requirements</div>
       {% for item in summary.answer_list %}
