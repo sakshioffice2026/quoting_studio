@@ -11,6 +11,7 @@ from ...models.payment import Payment, PaymentStatus, PaymentStage
 # ------------------------------------------------------------------ #
 
 def get_payment(tenant_id: int, payment_id: int) -> Payment | None:
+    db.session.expire_all()
     return Payment.query.filter_by(id=payment_id, tenant_id=tenant_id).first()
 
 

@@ -96,6 +96,8 @@ def record_receipt(payment_id):
             flash(f'Partial payment recorded for {p.payment_number}. Balance: {p.balance}', 'warning')
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
+    except Exception as exc:
+        flash(f'Could not record receipt: {exc}', 'error')
     return redirect(url_for('payment.detail', payment_id=payment_id))
 
 

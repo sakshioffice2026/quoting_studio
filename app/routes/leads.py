@@ -410,6 +410,7 @@ def flow(lead_id):
         'quotation': 'design', 'order': 'design',
         'advance_payment': 'payment', 'payment_journey': 'payment',
         'manufacturing': 'manufacturing', 'delivery': 'manufacturing',
+        'installation': 'amc', 'amc': 'amc',
     }
     for s in stages:
         d = downstream.get(s['key'])
