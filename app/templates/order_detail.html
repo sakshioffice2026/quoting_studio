@@ -117,16 +117,28 @@
     {% if order.status == OrderStatus.CONFIRMED %}
     <div class="ui-card action-panel-success" style="max-width:600px;">
       <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Order Confirmed</div>
+      {% set _raised_stage_names = order.payments.all() | map(attribute='payment_stage') | list %}
       {% if order.payments.first() %}
       <p class="action-note" style="margin-bottom:12px;">{{ order.payments.count() }} payment milestone(s) raised for this order.</p>
-      <a href="{{ url_for('payment.index') }}" class="btn btn-secondary btn-sm">View Payments →</a>
+      <a href="{{ url_for('payment.index') }}" class="btn btn-secondary btn-sm" style="margin-bottom:16px; display:inline-block;">View Payments →</a>
       {% else %}
       <p class="action-note">Proceed to <strong>Advance Payment</strong> to invoice and collect the advance before releasing to manufacturing.</p>
+      {% endif %}
+
+      {% set _remaining_stages = ['Advance', 'Pre-Dispatch', 'On-Installation', 'Retention'] | reject('in', _raised_stage_names) | list %}
+      {% if _remaining_stages %}
       <form method="POST" action="{{ url_for('payment.raise_invoice', order_id=order.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="payment_stage" value="Advance">
         <div class="form-group">
-          <label class="form-label" for="invoice_amount">Advance invoice amount</label>
+          <label class="form-label" for="payment_stage">Milestone</label>
+          <select class="form-control" id="payment_stage" name="payment_stage" required>
+            {% for stage in _remaining_stages %}
+            <option value="{{ stage }}">{{ stage }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="invoice_amount">Invoice amount</label>
           <input type="number" step="0.01" class="form-control" id="invoice_amount" name="invoice_amount"
                  value="{{ (order.total_amount|float * 0.5)|round(2) if order.total_amount else '' }}" required>
         </div>
@@ -134,8 +146,10 @@
           <label class="form-label" for="due_date">Due date (optional)</label>
           <input type="date" class="form-control" id="due_date" name="due_date">
         </div>
-        <button type="submit" class="btn btn-primary btn-sm">Raise Advance Invoice →</button>
+        <button type="submit" class="btn btn-primary btn-sm">Raise Invoice →</button>
       </form>
+      {% else %}
+      <p class="action-note" style="margin-top:12px;">All four payment milestones have been raised for this order.</p>
       {% endif %}
     </div>
     {% endif %}

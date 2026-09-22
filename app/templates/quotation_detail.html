@@ -25,6 +25,7 @@
           {% if quotation.project %}
           <a href="{{ url_for('projects.detail', project_id=quotation.project_id) }}" class="btn btn-secondary btn-sm">Project</a>
           {% endif %}
+          <a href="{{ url_for('quotation.download_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Download PDF</a>
           <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>
       </div>

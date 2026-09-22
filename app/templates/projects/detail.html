@@ -39,9 +39,16 @@
       </form>
     </div>
     {% elif latest_design_approval.status == 'DESIGN-SUBMITTED' %}
-    <div style="background:#eef3fb; border:1px solid var(--navy); border-radius:8px; padding:14px 18px; margin-bottom:20px;">
-      <strong>Next step:</strong> Design submitted (revision {{ latest_design_approval.revision_number }}) — waiting on approval decision.
-      <a href="{{ url_for('design_approval.detail', approval_id=latest_design_approval.id) }}" style="margin-left:8px;">Review & approve →</a>
+    <div style="background:#eef3fb; border:1px solid var(--navy); border-radius:8px; padding:14px 18px; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+      <div>
+        <strong>Next step:</strong> Design submitted (revision {{ latest_design_approval.revision_number }}) — ready to send to the customer.
+        <a href="{{ url_for('design_approval.detail', approval_id=latest_design_approval.id) }}" style="margin-left:8px;">Review full details →</a>
+      </div>
+      <form method="POST" action="{{ url_for('design_approval.send_to_customer', approval_id=latest_design_approval.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="sla_days" value="{{ latest_design_approval.approval_sla_days or 10 }}">
+        <button type="submit" class="btn btn-primary btn-sm">Send to Customer →</button>
+      </form>
     </div>
     {% elif latest_design_approval.status == 'DESIGN-APPROVED' %}
     <div style="background:#eef7ee; border:1px solid var(--sage); border-radius:8px; padding:14px 18px; margin-bottom:20px;">
@@ -49,8 +56,11 @@
     </div>
     {% endif %}
   {% else %}
-  <div style="background:#f5f5f0; border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin-bottom:20px;">
-    <strong>Next step:</strong> Add at least one window or door before this design can be submitted for approval.
+  <div style="background:#f5f5f0; border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between;">
+    <div>
+      <strong>Next step:</strong> Create the design — add at least one window or door before it can be submitted for approval.
+    </div>
+    <a href="{{ url_for('projects.choose_unit', project_id=project.id) }}" class="btn btn-primary btn-sm">Create Design →</a>
   </div>
   {% endif %}
 
@@ -126,11 +136,91 @@
       <div style="font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);font-weight:600;">
         Quotations ({{ quotes|length }})
       </div>
-      <form method="POST" action="{{ url_for('quotation.generate', project_id=project.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-primary btn-sm">+ Generate Quotation</button>
-      </form>
+      <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('genQuoteForm').style.display='block'; this.style.display='none';">+ Generate Quotation</button>
     </div>
+
+    <form id="genQuoteForm" method="POST" action="{{ url_for('quotation.generate', project_id=project.id) }}"
+          style="display:none; background:#FAFAF8; border:1px solid var(--line); border-radius:8px; padding:16px 18px; margin-bottom:16px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+        <div>
+          <label class="form-label" for="discount_pct">Discount %</label>
+          <input type="number" step="0.01" min="0" max="100" class="form-control" id="discount_pct" name="discount_pct" value="0">
+        </div>
+        <div>
+          <label class="form-label" for="validity_days">Validity (days)</label>
+          <input type="number" min="1" class="form-control" id="validity_days" name="validity_days" value="30">
+        </div>
+        <div>
+          <label class="form-label" style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" id="include_installation" onchange="document.getElementById('installation_charge').disabled = !this.checked;"> Include Installation Charge
+          </label>
+          <input type="number" step="0.01" min="0" class="form-control" id="installation_charge" name="installation_charge" value="0" disabled>
+        </div>
+        <div>
+          <label class="form-label" style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" id="include_transport" onchange="document.getElementById('transport_charge').disabled = !this.checked;"> Include Transport Charge
+          </label>
+          <input type="number" step="0.01" min="0" class="form-control" id="transport_charge" name="transport_charge" value="0" disabled>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label class="form-label">Other charges (optional)</label>
+        <div style="display:grid; grid-template-columns:2fr 1fr; gap:8px; margin-bottom:6px;">
+          <input type="text" class="form-control" name="other_charge_label[]" placeholder="e.g. Scaffolding">
+          <input type="number" step="0.01" min="0" class="form-control" name="other_charge_amount[]" placeholder="Amount">
+        </div>
+        <div style="display:grid; grid-template-columns:2fr 1fr; gap:8px;">
+          <input type="text" class="form-control" name="other_charge_label[]" placeholder="e.g. Permit fees">
+          <input type="number" step="0.01" min="0" class="form-control" name="other_charge_amount[]" placeholder="Amount">
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:12px; align-items:end;">
+        <div>
+          <label class="form-label" style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" name="amc_offered" id="amc_offered" value="1"
+                   onchange="document.getElementById('amc_offer_tier').disabled = !this.checked; document.getElementById('amc_price').disabled = !this.checked;"> Offer AMC
+          </label>
+        </div>
+        <div>
+          <label class="form-label" for="amc_offer_tier">AMC tier</label>
+          <select class="form-control" id="amc_offer_tier" name="amc_offer_tier" disabled>
+            <option value="">—</option>
+            <option value="Basic">Basic</option>
+            <option value="Standard">Standard</option>
+            <option value="Premium">Premium</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" for="amc_price">AMC price</label>
+          <input type="number" step="0.01" min="0" class="form-control" id="amc_price" name="amc_price" value="0" disabled>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 2fr; gap:12px; margin-bottom:14px;">
+        <div>
+          <label class="form-label" for="warranty_months">Warranty (months)</label>
+          <input type="number" min="0" class="form-control" id="warranty_months" name="warranty_months" value="12">
+        </div>
+        <div>
+          <label class="form-label" for="warranty_terms_text">Warranty terms (shown on quotation, not priced)</label>
+          <input type="text" class="form-control" id="warranty_terms_text" name="warranty_terms_text" placeholder="Standard 12-month manufacturer warranty">
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:14px;">
+        <div>
+          <label class="form-label" for="payment_terms_template">Payment terms</label>
+          <input type="text" class="form-control" id="payment_terms_template" name="payment_terms_template" placeholder="e.g. 50% advance, 50% on delivery">
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-sm">Generate Quotation →</button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('genQuoteForm').style.display='none';">Cancel</button>
+    </form>
 
     {# quotations passed from route, already sorted by created_at desc #}
     {% if quotes %}

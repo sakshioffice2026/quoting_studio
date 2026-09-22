@@ -65,6 +65,18 @@ class Quotation(db.Model):
     validity_days        = db.Column(db.Integer, nullable=False, default=30)
     validity_date        = db.Column(db.Date, nullable=True)
 
+    # Proposal charge rows (Section 7 extension — installation/transport/AMC/warranty)
+    installation_charge  = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    transport_charge     = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    other_charges_json   = db.Column(db.Text, nullable=True)  # [{label, amount}, ...]
+
+    amc_offered           = db.Column(db.Boolean, nullable=False, default=False)
+    amc_offer_tier        = db.Column(db.String(20), nullable=True)  # AmcTier.BASIC / STANDARD / PREMIUM
+    amc_price             = db.Column(db.Numeric(12, 2), nullable=True)
+
+    warranty_months       = db.Column(db.Integer, nullable=True, default=12)
+    warranty_terms_text   = db.Column(db.Text, nullable=True)
+
     # Workflow tracking
     prepared_by          = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     sent_by              = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
@@ -170,6 +182,16 @@ class Quotation(db.Model):
         except (ValueError, TypeError):
             return []
 
+    @property
+    def other_charges(self) -> list:
+        if not self.other_charges_json:
+            return []
+        try:
+            import json
+            return json.loads(self.other_charges_json)
+        except (ValueError, TypeError):
+            return []
+
     def to_dict(self) -> dict:
         return {
             'id':                   self.id,
@@ -191,6 +213,14 @@ class Quotation(db.Model):
             'payment_terms_template': self.payment_terms_template,
             'validity_days':        self.validity_days,
             'validity_date':        self.validity_date.isoformat() if self.validity_date else None,
+            'installation_charge':  float(self.installation_charge) if self.installation_charge else 0,
+            'transport_charge':     float(self.transport_charge) if self.transport_charge else 0,
+            'other_charges':        self.other_charges,
+            'amc_offered':          self.amc_offered,
+            'amc_offer_tier':       self.amc_offer_tier,
+            'amc_price':            float(self.amc_price) if self.amc_price else None,
+            'warranty_months':      self.warranty_months,
+            'warranty_terms_text':  self.warranty_terms_text,
             'is_expired':           self.is_expired,
             'days_until_expiry':    self.days_until_expiry,
             'sent_at':              self.sent_at.isoformat()      if self.sent_at      else None,
