@@ -2,6 +2,11 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 
 from ..models.order import Order, OrderStatus
+from ..models.payment import PaymentStatus, PaymentStage
+from ..models.manufacturing_job import JobStatus
+from ..models.delivery import DeliveryStatus
+from ..models.installation import InstallationStatus
+from ..models.amc import AmcStatus, AmcTier, WarrantyStatus
 from ..services.domain import order_service
 
 order_bp = Blueprint('order', __name__)
@@ -37,6 +42,14 @@ def detail(order_id):
         'order_detail.html',
         order=o,
         OrderStatus=OrderStatus,
+        PaymentStatus=PaymentStatus,
+        PaymentStage=PaymentStage,
+        JobStatus=JobStatus,
+        DeliveryStatus=DeliveryStatus,
+        InstallationStatus=InstallationStatus,
+        AmcStatus=AmcStatus,
+        AmcTier=AmcTier,
+        WarrantyStatus=WarrantyStatus,
     )
 
 
@@ -77,7 +90,7 @@ def confirm(order_id):
         order_confirmed_by_name = order.project.customer_name
     else:
         order_confirmed_by_name = request.form.get('order_confirmed_by_name', '').strip()
-    confirmation_method     = request.form.get('confirmation_method', 'email')
+    confirmation_method      = request.form.get('confirmation_method', 'email')
     assigned_project_manager = request.form.get('assigned_project_manager', type=int)
     if not order_confirmed_by_name:
         flash('Customer name is missing on this project.', 'error')

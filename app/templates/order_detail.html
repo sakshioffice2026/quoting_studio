@@ -73,8 +73,7 @@
     </div>
     {% endif %}
 
-    {# =================== 4. ACTION CARDS =================== #}
-
+    {# =================== 4. CONFIRM / CANCEL =================== #}
     {% if order.status == OrderStatus.PENDING_SIGNATURE %}
     <div class="action-grid">
       <form method="POST" class="ui-card action-panel" action="{{ url_for('order.confirm', order_id=order.id) }}">
@@ -115,30 +114,29 @@
     {% endif %}
 
     {% if order.status == OrderStatus.CONFIRMED %}
+
+    {# pre-compute shared variables used across all downstream sections #}
+    {% set _advance = order.payments.filter_by(payment_stage=PaymentStage.ADVANCE).first() %}
+    {% set _advance_received = _advance and _advance.status in [PaymentStatus.RECEIVED, PaymentStatus.CLOSED] %}
+    {% set _jobs = order.manufacturing_jobs.all() %}
+    {% set _deliveries = order.deliveries.all() %}
+    {% set _installations = order.installations.all() %}
+    {% set _warranty = order.warranty %}
+    {% set _amc_contracts = order.amc_contracts.all() %}
+
+    {# =================== 5. ADVANCE PAYMENT =================== #}
     <div class="ui-card action-panel-success" style="max-width:600px;">
       <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Order Confirmed</div>
-      {% set _raised_stage_names = order.payments.all() | map(attribute='payment_stage') | list %}
       {% if order.payments.first() %}
       <p class="action-note" style="margin-bottom:12px;">{{ order.payments.count() }} payment milestone(s) raised for this order.</p>
-      <a href="{{ url_for('payment.index') }}" class="btn btn-secondary btn-sm" style="margin-bottom:16px; display:inline-block;">View Payments →</a>
+      <a href="{{ url_for('payment.index') }}" class="btn btn-secondary btn-sm">View Payments →</a>
       {% else %}
       <p class="action-note">Proceed to <strong>Advance Payment</strong> to invoice and collect the advance before releasing to manufacturing.</p>
-      {% endif %}
-
-      {% set _remaining_stages = ['Advance', 'Pre-Dispatch', 'On-Installation', 'Retention'] | reject('in', _raised_stage_names) | list %}
-      {% if _remaining_stages %}
       <form method="POST" action="{{ url_for('payment.raise_invoice', order_id=order.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="payment_stage" value="Advance">
         <div class="form-group">
-          <label class="form-label" for="payment_stage">Milestone</label>
-          <select class="form-control" id="payment_stage" name="payment_stage" required>
-            {% for stage in _remaining_stages %}
-            <option value="{{ stage }}">{{ stage }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="invoice_amount">Invoice amount</label>
+          <label class="form-label" for="invoice_amount">Advance invoice amount</label>
           <input type="number" step="0.01" class="form-control" id="invoice_amount" name="invoice_amount"
                  value="{{ (order.total_amount|float * 0.5)|round(2) if order.total_amount else '' }}" required>
         </div>
@@ -146,22 +144,82 @@
           <label class="form-label" for="due_date">Due date (optional)</label>
           <input type="date" class="form-control" id="due_date" name="due_date">
         </div>
-        <button type="submit" class="btn btn-primary btn-sm">Raise Invoice →</button>
+        <button type="submit" class="btn btn-primary btn-sm">Raise Advance Invoice →</button>
       </form>
-      {% else %}
-      <p class="action-note" style="margin-top:12px;">All four payment milestones have been raised for this order.</p>
       {% endif %}
     </div>
-    {% endif %}
 
-    {# =================== 5. DELIVERIES =================== #}
-    {% if order.status == OrderStatus.CONFIRMED and order.manufacturing_jobs.first() %}
+    {# =================== 6. MANUFACTURING =================== #}
+    <div class="ui-card">
+      <div class="ui-card-title">Manufacturing</div>
+      {% if not _jobs %}
+        {% if _advance_received %}
+        <form method="POST" action="{{ url_for('manufacturing.generate', order_id=order.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <p class="action-note" style="margin-bottom:12px;">
+            Advance payment received. Release this order to the production floor to create one work order per opening.
+          </p>
+          <div class="form-group" style="max-width:280px;">
+            <label class="form-label" for="planned_completion_date">Planned completion date (optional)</label>
+            <input type="date" class="form-control" id="planned_completion_date" name="planned_completion_date">
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">Release to Manufacturing →</button>
+        </form>
+        {% else %}
+        <div class="empty-state">
+          <div class="empty-state-icon">🏭</div>
+          <p>Advance payment must be <strong>received</strong> before this order can be released to manufacturing.</p>
+          {% if _advance %}
+          <a href="{{ url_for('payment.detail', payment_id=_advance.id) }}" class="btn btn-secondary btn-sm" style="margin-top:8px;">View Advance Payment →</a>
+          {% endif %}
+        </div>
+        {% endif %}
+      {% else %}
+      {% set _completed_jobs = _jobs | selectattr('status', 'equalto', JobStatus.COMPLETED) | list %}
+      {% set _all_mfg_complete = _completed_jobs | length == _jobs | length %}
+      <div style="overflow-x:auto; margin-bottom:12px;">
+        <table class="data-table">
+          <thead>
+            <tr><th>Job #</th><th>Opening</th><th>Stage</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for _j in _jobs %}
+            <tr>
+              <td class="mono" style="font-size:12px; font-weight:600;">{{ _j.job_number }}</td>
+              <td style="font-size:13px;">{{ _j.opening.label if _j.opening else _j.opening_id }}</td>
+              <td style="font-size:12px;">{{ _j.stage_label }}</td>
+              <td>
+                {% if _j.status == JobStatus.COMPLETED %}
+                  {{ pill(_j.status_label, 'success') }}
+                {% elif _j.status == JobStatus.QC_HOLD %}
+                  {{ pill(_j.status_label, 'warn') }}
+                {% else %}
+                  {{ pill(_j.status_label, 'info') }}
+                {% endif %}
+              </td>
+              <td style="text-align:right;">
+                <a href="{{ url_for('manufacturing.detail', job_id=_j.id) }}" class="btn btn-secondary btn-sm">View →</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if _all_mfg_complete %}
+      <p class="action-note" style="color:var(--success); margin-bottom:0;">✓ All openings manufactured — ready to pack.</p>
+      {% else %}
+      <a href="{{ url_for('manufacturing.index') }}" class="btn btn-secondary btn-sm">View All Jobs →</a>
+      {% endif %}
+      {% endif %}
+    </div>
+
+    {# =================== 7. DELIVERIES =================== #}
+    {% if _jobs %}
     {% set _ns = namespace(taken=[]) %}
-    {% set _deliveries = order.deliveries.all() %}
     {% for _d in _deliveries %}{% for _i in _d.items %}{% set _ns.taken = _ns.taken + [_i.opening_id] %}{% endfor %}{% endfor %}
     {% set _ready = [] %}
-    {% for _j in order.manufacturing_jobs.all() %}
-      {% if _j.status == 'MFG-COMPLETED' and _j.opening_id not in _ns.taken %}{% set _ = _ready.append(_j) %}{% endif %}
+    {% for _j in _jobs %}
+      {% if _j.status == JobStatus.COMPLETED and _j.opening_id not in _ns.taken %}{% set _ = _ready.append(_j) %}{% endif %}
     {% endfor %}
 
     {% with order_id=order.id, current_delivery_id=None %}{% include '_delivery_progress.html' %}{% endwith %}
@@ -179,7 +237,7 @@
             <tr>
               <td class="mono" style="font-size:12px; font-weight:600;">{{ _d.delivery_number }}</td>
               <td class="mono" style="font-size:12px;">{{ _d.items|length }}</td>
-              <td>{{ pill(_d.status_label, 'neutral') }}</td>
+              <td>{{ pill(_d.status_label, 'success' if _d.status == DeliveryStatus.DELIVERED else ('warn' if _d.status == DeliveryStatus.DELIVERED_WITH_ISSUES else 'neutral')) }}</td>
               <td style="text-align:right;"><a href="{{ url_for('delivery.detail', delivery_id=_d.id) }}" class="btn btn-secondary btn-sm">View →</a></td>
             </tr>
             {% endfor %}
@@ -200,9 +258,8 @@
       <div class="ui-card-title" style="margin-bottom:6px;">Pack Delivery</div>
       <p class="action-note">
         {{ _ready|length }} finished opening{{ 's' if _ready|length != 1 }} ready.
-        Select the ones to send now — the rest can be packed and dispatched later as they are completed.
+        Select the ones to send now — the rest can be packed later as they complete.
       </p>
-
       <div style="margin-bottom:16px;">
         {% for _j in _ready %}
         <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px;">
@@ -214,7 +271,6 @@
         </label>
         {% endfor %}
       </div>
-
       <div class="slide-panel-grid">
         <div class="form-group form-group-full">
           <label class="form-label" for="delivery_address">Delivery address</label>
@@ -237,10 +293,224 @@
     </form>
     {% else %}
     <div class="empty-state" style="text-align:left;">
-      Nothing is ready to pack right now. Each opening becomes available here as soon as its manufacturing job is completed — no need to wait for the whole order.
+      Nothing is ready to pack right now. Each opening becomes available here as soon as its manufacturing job is completed.
     </div>
     {% endif %}
+    {% endif %} {# end _jobs #}
+
+    {# =================== 8. INSTALLATION =================== #}
+    {% set _delivered_count = order.deliveries.filter_by(status=DeliveryStatus.DELIVERED).count() %}
+    {% if _installations or _delivered_count > 0 %}
+
+    <div class="ui-card">
+      <div class="ui-card-title">Installation</div>
+      {% if _installations %}
+      <div style="overflow-x:auto; margin-bottom:12px;">
+        <table class="data-table">
+          <thead>
+            <tr><th>Install #</th><th>Scheduled</th><th>Team Lead</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for _inst in _installations %}
+            <tr>
+              <td class="mono" style="font-size:12px; font-weight:600;">{{ _inst.install_number }}</td>
+              <td style="font-size:12px;">{{ _inst.scheduled_date.strftime('%d %b %Y') if _inst.scheduled_date else '—' }}</td>
+              <td style="font-size:12px;">{{ _inst.team_lead_name or '—' }}</td>
+              <td>
+                {% if _inst.status == InstallationStatus.COMPLETED %}
+                  {{ pill(_inst.status_label, 'success') }}
+                {% elif _inst.status == InstallationStatus.SNAG %}
+                  {{ pill(_inst.status_label, 'warn') }}
+                {% else %}
+                  {{ pill(_inst.status_label, 'info') }}
+                {% endif %}
+              </td>
+              <td style="text-align:right;">
+                <a href="{{ url_for('installation.detail', installation_id=_inst.id) }}" class="btn btn-secondary btn-sm">View →</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-state-icon">🔧</div>
+        No installations scheduled yet.
+      </div>
+      {% endif %}
+    </div>
+
+    {# Schedule new installation for delivered-but-unscheduled openings #}
+    {% set _installed_ids = [] %}
+    {% for _inst in _installations %}
+      {% for _iitem in _inst.items %}
+        {% set _ = _installed_ids.append(_iitem.opening_id) %}
+      {% endfor %}
+    {% endfor %}
+    {% set _pending_install = [] %}
+    {% for _d in order.deliveries.filter_by(status=DeliveryStatus.DELIVERED).all() %}
+      {% for _ditem in _d.items %}
+        {% if _ditem.opening_id not in _installed_ids %}
+          {% set _ = _pending_install.append(_ditem) %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+
+    {% if _pending_install %}
+    <form method="POST" class="ui-card action-panel-wide" action="{{ url_for('installation.create', order_id=order.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="ui-card-title" style="margin-bottom:6px;">Schedule Installation</div>
+      <p class="action-note">
+        {{ _pending_install|length }} delivered opening{{ 's' if _pending_install|length != 1 }} awaiting installation scheduling.
+      </p>
+      <div style="margin-bottom:16px;">
+        {% for _ditem in _pending_install %}
+        <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px;">
+          <input type="checkbox" name="opening_ids" value="{{ _ditem.opening_id }}" checked>
+          <span>{{ _ditem.opening.label if _ditem.opening else _ditem.opening_id }}</span>
+          {% if _ditem.package_label %}
+          <span class="mono muted" style="font-size:11px;">{{ _ditem.package_label }}</span>
+          {% endif %}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="slide-panel-grid">
+        <div class="form-group">
+          <label class="form-label" for="scheduled_date">Scheduled date</label>
+          <input type="date" class="form-control" id="scheduled_date" name="scheduled_date">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="team_lead_name">Team lead name</label>
+          <input type="text" class="form-control" id="team_lead_name" name="team_lead_name">
+        </div>
+        <div class="form-group form-group-full">
+          <label class="form-label" for="installation_address">Installation address</label>
+          <textarea class="form-control" id="installation_address" name="installation_address" rows="2"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="inst_contact_name">Site contact name</label>
+          <input type="text" class="form-control" id="inst_contact_name" name="site_contact_name">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="inst_contact_phone">Site contact phone</label>
+          <input type="text" class="form-control" id="inst_contact_phone" name="site_contact_phone">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm" style="margin-top:8px;">Schedule Installation →</button>
+    </form>
     {% endif %}
+
+    {% endif %} {# end _installations or _delivered_count #}
+
+    {# =================== 9. WARRANTY & AMC =================== #}
+    {% set _all_installed = _installations | length > 0 and
+        (_installations | selectattr('status', 'equalto', InstallationStatus.COMPLETED) | list | length == _installations | length) %}
+
+    {% if _warranty or _all_installed %}
+    <div class="ui-card">
+      <div class="ui-card-title">Warranty &amp; AMC</div>
+
+      {% if _warranty %}
+      <div class="info-grid" style="margin-bottom:16px;">
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Warranty #</div>
+            <div class="info-grid-value mono">{{ _warranty.warranty_number }}</div>
+          </div>
+        </div>
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Period</div>
+            <div class="info-grid-value">
+              {{ _warranty.warranty_start_date.strftime('%d %b %Y') }} →
+              {{ _warranty.warranty_end_date.strftime('%d %b %Y') }}
+              ({{ _warranty.warranty_months }} months)
+            </div>
+          </div>
+        </div>
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Status</div>
+            <div class="info-grid-value">
+              {% if _warranty.in_period %}
+                {{ pill('Active — ' ~ _warranty.days_remaining ~ ' days remaining', 'success') }}
+              {% else %}
+                {{ pill('Warranty ended', 'neutral') }}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if _amc_contracts %}
+      <div style="overflow-x:auto; margin-bottom:12px;">
+        <table class="data-table">
+          <thead>
+            <tr><th>AMC #</th><th>Plan</th><th>Annual Fee</th><th>Term</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for _c in _amc_contracts %}
+            <tr>
+              <td class="mono" style="font-size:12px; font-weight:600;">{{ _c.amc_number }}</td>
+              <td style="font-size:12px;">{{ _c.plan_tier }} · {{ _c.visits_per_year }} visit(s)/yr</td>
+              <td style="font-size:12px;">{{ '₹{:,.2f}'.format(_c.annual_fee|float) if _c.annual_fee else '—' }}</td>
+              <td style="font-size:12px;">
+                {% if _c.amc_start_date and _c.amc_end_date %}
+                  {{ _c.amc_start_date.strftime('%d %b %Y') }} → {{ _c.amc_end_date.strftime('%d %b %Y') }}
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if _c.status == AmcStatus.ACTIVE %}
+                  {{ pill(_c.status_label, 'success') }}
+                {% elif _c.status == AmcStatus.OFFERED %}
+                  {{ pill(_c.status_label, 'info') }}
+                {% else %}
+                  {{ pill(_c.status_label, 'neutral') }}
+                {% endif %}
+              </td>
+              <td style="text-align:right;">
+                <a href="{{ url_for('amc.detail', contract_id=_c.id) }}" class="btn btn-secondary btn-sm">View →</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      <a href="{{ url_for('amc.index') }}" class="btn btn-secondary btn-sm">AMC Dashboard →</a>
+
+      {% else %}
+      {# Warranty not yet registered — show registration form #}
+      <div class="empty-state" style="text-align:left; margin-bottom:16px;">
+        <div class="empty-state-icon">🛡️</div>
+        <p>All openings installed and signed off. Register the warranty to begin the post-handover coverage period.</p>
+      </div>
+      <form method="POST" action="{{ url_for('amc.register_warranty', order_id=order.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="slide-panel-grid">
+          <div class="form-group">
+            <label class="form-label" for="warranty_months">Warranty period (months)</label>
+            <input type="number" class="form-control" id="warranty_months" name="warranty_months"
+                   value="12" min="1" max="120">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="warranty_start_date">Start date (optional — defaults to handover date)</label>
+            <input type="date" class="form-control" id="warranty_start_date" name="start_date">
+          </div>
+          <div class="form-group form-group-full">
+            <label class="form-label" for="warranty_terms">Terms (optional)</label>
+            <textarea class="form-control" id="warranty_terms" name="terms" rows="2"></textarea>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm" style="margin-top:8px;">Register Warranty →</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% endif %} {# end order.status == CONFIRMED #}
 
     {% if order.status == OrderStatus.CANCELLED %}
     <div class="ui-card action-panel-warning" style="max-width:600px;">

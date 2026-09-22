@@ -120,9 +120,12 @@ def active_contract_for_order(tenant_id: int, order_id: int) -> AmcContract | No
 
 
 def is_final_payment_closed(tenant_id: int, order_id: int) -> bool:
-    """Gate: every milestone on the order must be PAY-CLOSED before AMC activation."""
+    """Gate: every invoiced milestone on the order must be PAY-CLOSED before AMC activation.
+    Returns True when no payment milestones have been invoiced yet (nothing to block on)."""
     payments = Payment.query.filter_by(tenant_id=tenant_id, order_id=order_id).all()
-    return bool(payments) and all(p.status == PaymentStatus.CLOSED for p in payments)
+    if not payments:
+        return True
+    return all(p.status == PaymentStatus.CLOSED for p in payments)
 
 
 def coverage_for(tenant_id: int, order_id: int, on_date: date | None = None) -> str:
@@ -206,14 +209,6 @@ def register_warranty(
     if not installation_service.is_order_fully_installed(tenant_id, order_id):
         raise ValueError('Every opening must be INSTALL-COMPLETED before a warranty can be registered.')
 
-    quotation = order.quotation  # Section 7 quotation this order was raised from
-
-    # Default months/terms from what was actually sold in the quotation
-    if warranty_months is None and quotation is not None:
-        warranty_months = quotation.warranty_months
-    if terms is None and quotation is not None:
-        terms = quotation.warranty_terms_text
-
     months = warranty_months or DEFAULT_WARRANTY_MONTHS
     if months < 1 or months > 120:
         raise ValueError('Warranty period must be between 1 and 120 months.')
@@ -235,36 +230,6 @@ def register_warranty(
         updated_at          = now,
     )
     db.session.add(warranty)
-    db.session.flush()  # need warranty.id for the AMC contract below
-
-    # If the quotation sold an AMC add-on, spin up the downstream AMC record now.
-    # Quotation sells it (amc_offered/amc_offer_tier/amc_price) — this module tracks it (AmcContract).
-    if (quotation is not None
-            and quotation.amc_offered
-            and quotation.amc_offer_tier in AmcTier.ALL):
-        already_open = (AmcContract.query
-                        .filter(AmcContract.tenant_id == tenant_id,
-                                AmcContract.order_id == order.id,
-                                AmcContract.status.in_([AmcStatus.OFFERED, AmcStatus.ACTIVE]))
-                        .first())
-        if not already_open:
-            contract = AmcContract(
-                tenant_id       = tenant_id,
-                order_id        = order.id,
-                warranty_id     = warranty.id,
-                amc_number      = AmcContract.generate_number(tenant_id),
-                status          = AmcStatus.OFFERED,
-                plan_tier       = quotation.amc_offer_tier,
-                visits_per_year = AmcTier.VISITS[quotation.amc_offer_tier],
-                annual_fee      = quotation.amc_price,
-                offered_at      = now,
-                notes           = f'Auto-created from accepted quotation {quotation.quotation_number}.',
-                created_by      = created_by,
-                created_at      = now,
-                updated_at      = now,
-            )
-            db.session.add(contract)
-
     db.session.commit()
     return warranty
 
