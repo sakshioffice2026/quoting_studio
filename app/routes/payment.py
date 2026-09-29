@@ -3,7 +3,8 @@ from datetime import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 
-from ..models.payment import PaymentStatus, PaymentStage
+from ..models.payment import PaymentStatus, PaymentStage, ReleaseMode
+from ..models.order_unit_release import UnitReleaseStatus
 from ..services.domain import payment_service
 
 payment_bp = Blueprint('payment', __name__)
@@ -18,11 +19,21 @@ def index():
     status = request.args.get('status') or None
     payment_service.mark_overdue(current_user.tenant_id)
     payments = payment_service.list_payments(current_user.tenant_id, status=status)
+    release_progress = {}
+    for p in payments:
+        if p.payment_stage == PaymentStage.ADVANCE and p.is_unit_wise:
+            rows = payment_service.list_unit_releases(current_user.tenant_id, p.id)
+            release_progress[p.id] = {
+                'released': sum(1 for r in rows if r.is_released),
+                'total':    len(rows),
+            }
     return render_template(
         'payments.html',
         payments=payments,
         status_filter=status,
         PaymentStatus=PaymentStatus,
+        ReleaseMode=ReleaseMode,
+        release_progress=release_progress,
     )
 
 
@@ -36,10 +47,18 @@ def detail(payment_id):
     if not p:
         flash('Payment not found.', 'error')
         return redirect(url_for('payment.index'))
+    receipts      = payment_service.list_receipts(current_user.tenant_id, p.id)
+    unit_releases = (payment_service.list_unit_releases(current_user.tenant_id, p.id)
+                     if p.is_unit_wise else [])
     return render_template(
         'payment_detail.html',
         payment=p,
+        receipts=receipts,
+        unit_releases=unit_releases,
         PaymentStatus=PaymentStatus,
+        PaymentStage=PaymentStage,
+        ReleaseMode=ReleaseMode,
+        UnitReleaseStatus=UnitReleaseStatus,
     )
 
 
@@ -51,6 +70,8 @@ def detail(payment_id):
 def raise_invoice(order_id):
     payment_stage  = request.form.get('payment_stage', PaymentStage.ADVANCE)
     invoice_amount = request.form.get('invoice_amount', type=float, default=0.0)
+    release_mode   = request.form.get('release_mode', ReleaseMode.WHOLE_ORDER)
+    advance_pct    = request.form.get('advance_pct', type=float, default=50.0)
     due_date       = request.form.get('due_date') or None
     if due_date:
         due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
@@ -62,12 +83,51 @@ def raise_invoice(order_id):
             payment_stage  = payment_stage,
             invoice_amount = invoice_amount,
             due_date       = due_date,
+            release_mode   = release_mode,
+            advance_pct    = advance_pct,
         )
         flash(f'Invoice {p.payment_number} raised for {p.stage_label}.', 'success')
         return redirect(url_for('payment.detail', payment_id=p.id))
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
         return redirect(url_for('order.detail', order_id=order_id))
+
+
+# ------------------------------------------------------------------ #
+#  POST /payments/<id>/policy  — release mode + advance %
+# ------------------------------------------------------------------ #
+@payment_bp.route('/payments/<int:payment_id>/policy', methods=['POST'])
+@login_required
+def update_policy(payment_id):
+    release_mode = request.form.get('release_mode', ReleaseMode.WHOLE_ORDER)
+    advance_pct  = request.form.get('advance_pct') or None
+    try:
+        p = payment_service.update_release_policy(
+            current_user.tenant_id, payment_id, release_mode, advance_pct)
+        flash(f'Release policy updated: {p.release_mode_label}, {p.advance_pct}% advance.', 'success')
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('payment.detail', payment_id=payment_id))
+
+
+# ------------------------------------------------------------------ #
+#  POST /payments/<id>/priority  — reorder units for unit-wise release
+# ------------------------------------------------------------------ #
+@payment_bp.route('/payments/<int:payment_id>/priority', methods=['POST'])
+@login_required
+def reorder_units(payment_id):
+    raw = request.form.get('order', '')
+    try:
+        ids = [int(x) for x in raw.split(',') if x.strip()]
+    except ValueError:
+        flash('Invalid priority order.', 'error')
+        return redirect(url_for('payment.detail', payment_id=payment_id))
+    try:
+        payment_service.reorder_units(current_user.tenant_id, payment_id, ids)
+        flash('Unit priority updated.', 'success')
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('payment.detail', payment_id=payment_id))
 
 
 # ------------------------------------------------------------------ #
@@ -79,6 +139,7 @@ def record_receipt(payment_id):
     amount_received = request.form.get('amount_received', type=float, default=0.0)
     payment_mode    = request.form.get('payment_mode', '').strip()
     transaction_ref = request.form.get('transaction_ref') or None
+    notes           = request.form.get('notes') or None
     if not payment_mode:
         flash('Payment mode is required.', 'error')
         return redirect(url_for('payment.detail', payment_id=payment_id))
@@ -89,8 +150,15 @@ def record_receipt(payment_id):
             amount_received = amount_received,
             payment_mode    = payment_mode,
             transaction_ref = transaction_ref,
+            recorded_by     = current_user.id,
+            notes           = notes,
         )
-        if p.status == PaymentStatus.RECEIVED:
+        if p.is_unit_wise and p.payment_stage == PaymentStage.ADVANCE:
+            rows = payment_service.list_unit_releases(current_user.tenant_id, p.id)
+            done = sum(1 for r in rows if r.is_released)
+            flash(f'Receipt recorded. {done} of {len(rows)} units released to manufacturing.',
+                  'success' if done else 'warning')
+        elif p.status == PaymentStatus.RECEIVED:
             flash(f'Payment {p.payment_number} fully received.', 'success')
         else:
             flash(f'Partial payment recorded for {p.payment_number}. Balance: {p.balance}', 'warning')

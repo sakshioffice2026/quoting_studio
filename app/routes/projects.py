@@ -111,40 +111,16 @@ def detail(project_id):
 @login_required
 def facade(project_id):
     try:
-        import json
         project = _own_project(project_id)
-        windows = project.windows.order_by(Window.sequence_order).all()
-        # build a lightweight JSON list of units with their design for the client
-        units = []
-        for w in windows:
-            design = None
-            try:
-                if getattr(w, 'design_json', None):
-                    design = json.loads(w.design_json)
-            except Exception:
-                design = None
-            if not design:
-                design = {
-                    'width': w.width_mm, 'height': w.height_mm,
-                    'shape': 'rectangle', 'unitType': 'window',
-                    'frame': {'thickness': 58, 'color': w.frame_colour_hex},
-                    'panes': [{'id':'p1','x':0,'y':0,'w':1,'h':1,
-                               'opening':'Fixed','glazing':'Double, Low-E','glazingBars':[]}],
-                }
-            units.append({
-                'id': w.id, 'label': w.label,
-                'width': w.width_mm, 'height': w.height_mm,
-                'design': design,
-            })
-        facade_state = None
-        try:
-            if getattr(project, 'facade_json', None):
-                facade_state = json.loads(project.facade_json)
-        except Exception:
-            facade_state = None
-        return render_template('facade.html',
-                               project=project, units=units,
-                               facade_state=json.dumps(facade_state) if facade_state else 'null')
+        first_window = (project.windows
+                        .order_by(Window.sequence_order)
+                        .first())
+        if first_window is None:
+            flash('Add a unit first to open the visualiser.', 'error')
+            return redirect(url_for('projects.choose_unit', project_id=project_id))
+        window_id = request.args.get('window_id', type=int) or first_window.id
+        return redirect(url_for('visualiser.view',
+                                project_id=project_id, window_id=window_id))
     except Exception as exc:
         current_app.logger.exception('Facade view error id=%d: %s', project_id, exc)
         flash('Could not load facade view.', 'error')

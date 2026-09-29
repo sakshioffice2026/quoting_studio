@@ -209,6 +209,8 @@ input[type=range] { width:100%;accent-color:var(--copper); }
           <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;"
                   onclick="removeOpening()">Remove</button>
         </div>
+        <button class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;margin-bottom:8px;"
+                onclick="autoPlaceAll()">⚡ Auto-place all units</button>
         <select id="openingDesign" class="form-control"
                 style="font-size:12px;margin-bottom:6px;"
                 onchange="setOpeningDesign(this.value)">
@@ -328,9 +330,105 @@ let lastCorner    = 'br';   // last touched corner — arrow keys nudge it
 let showOverlay   = true;   // before/after
 let openings      = [];     // [{id, design_window_id, corners, opacity, brightness}]
 let activeIdx     = 0;      // which opening the handles/sliders control
-const MAX_OPENINGS = 12;
+const MAX_OPENINGS = 24;
 const RENDER_URLS  = {{ (render_urls | tojson) if render_urls else '{}' }};
 const _texCache    = {};    // window_id -> canvas | 'loading' | 'none'
+const DESIGNS      = {{ (designs | tojson) if designs else '{}' }};
+
+/* Draw a window / door texture from its design JSON when no saved render exists */
+function rasterDesign(d) {
+  d = d || {};
+  const W = d.width || 1200, H = d.height || 1400;
+  const s = 1400 / Math.max(W, H);
+  const cw = Math.max(60, Math.round(W * s)), ch = Math.max(60, Math.round(H * s));
+  const cv = document.createElement('canvas');
+  cv.width = cw; cv.height = ch;
+  const g = cv.getContext('2d');
+  const shape  = d.shape || 'rectangle';
+  const isDoor = d.unitType === 'door';
+  const bar    = (d.frame && d.frame.thickness) || 68;
+  const col    = (d.frame && d.frame.color) || '#2B2F33';
+  const rise   = (d.archRise != null) ? d.archRise : Math.min(W * 0.25, 400);
+  const panes  = (d.panes && d.panes.length) ? d.panes
+               : [{ x: 0, y: 0, w: 1, h: 1, infill: 'glass', glazingBars: [] }];
+
+  function path(inset) {
+    const x0 = inset * s, x1 = (W - inset) * s, y0 = inset * s;
+    const y1 = (H - (isDoor ? 0 : inset)) * s;
+    const w = x1 - x0, cx = x0 + w / 2, spring = y0 + rise * s;
+    const p = new Path2D();
+    if (shape === 'circular') {
+      p.ellipse(cx, (y0 + y1) / 2, Math.max(w / 2, 0.01), Math.max((y1 - y0) / 2, 0.01), 0, 0, Math.PI * 2);
+      return p;
+    }
+    if (shape === 'arched') {
+      p.moveTo(x0, y1); p.lineTo(x0, spring);
+      p.ellipse(cx, spring, Math.max(w / 2, 0.01), Math.max(spring - y0, 0.01), 0, Math.PI, Math.PI * 2, false);
+      p.lineTo(x1, y1); p.closePath();
+      return p;
+    }
+    if (shape === 'gothic') {
+      const ctrl = y0 * 0.6 + spring * 0.4;
+      p.moveTo(x0, y1); p.lineTo(x0, spring);
+      p.quadraticCurveTo(x0, ctrl, cx, y0);
+      p.quadraticCurveTo(x1, ctrl, x1, spring);
+      p.lineTo(x1, y1); p.closePath();
+      return p;
+    }
+    p.rect(x0, y0, w, y1 - y0);
+    return p;
+  }
+
+  const outer = path(0), inner = path(bar);
+  const ring = new Path2D();
+  ring.addPath(outer); ring.addPath(inner);
+  g.fillStyle = col;
+  g.fill(ring, 'evenodd');
+
+  g.save();
+  g.clip(inner);
+  g.fillStyle = col;
+  g.fillRect(0, 0, cw, ch);
+  const mb = bar * 0.6, half = mb / 2, eps = 0.001;
+  panes.forEach(p => {
+    const insL = (p.x <= eps) ? bar : half;
+    const insT = (p.y <= eps) ? bar : half;
+    const insR = (p.x + p.w >= 1 - eps) ? bar : half;
+    const insB = (p.y + p.h >= 1 - eps) ? (isDoor ? 0 : bar) : half;
+    const x = (p.x * W + insL) * s, y = (p.y * H + insT) * s;
+    const w = (p.w * W - insL - insR) * s, h = (p.h * H - insT - insB) * s;
+    if (w <= 0 || h <= 0) return;
+    if (p.infill === 'panel') {
+      g.fillStyle = col;
+      g.fillRect(x, y, w, h);
+      g.fillStyle = 'rgba(255,255,255,.10)';
+      g.fillRect(x, y, w, h);
+      g.strokeStyle = 'rgba(0,0,0,.35)';
+      g.lineWidth = 2;
+      g.strokeRect(x + w * 0.1, y + h * 0.06, w * 0.8, h * 0.88);
+    } else {
+      const gr = g.createLinearGradient(x, y, x + w, y + h);
+      gr.addColorStop(0, 'rgba(170,210,225,.75)');
+      gr.addColorStop(1, 'rgba(110,160,185,.75)');
+      g.fillStyle = gr;
+      g.fillRect(x, y, w, h);
+      g.strokeStyle = 'rgba(0,0,0,.25)';
+      g.lineWidth = 1;
+      g.strokeRect(x, y, w, h);
+    }
+    (p.glazingBars || []).forEach(gb => {
+      const t = Math.max(2, (gb.thickness || 18) * s);
+      g.fillStyle = col;
+      if (gb.type === 'vertical') g.fillRect(x + w * gb.pos - t / 2, y, t, h);
+      else                        g.fillRect(x, y + h * gb.pos - t / 2, w, t);
+    });
+  });
+  g.restore();
+  g.strokeStyle = 'rgba(0,0,0,.45)';
+  g.lineWidth = 1.5;
+  g.stroke(outer);
+  return cv;
+}
 
 /* -------- zoom / pan state -------- */
 let zoom          = 1;
@@ -503,11 +601,17 @@ async function loadState() {
     // load render texture
     const RENDER_URL = {{ (render_url | tojson) if render_url else 'null' }};
     if (RENDER_URL) await loadRenderTexture(RENDER_URL);
+    else if (DESIGNS[QS_WINDOW_ID]) {
+      srcTexCanvas = rasterDesign(DESIGNS[QS_WINDOW_ID]);
+      _tex2d = srcTexCanvas;
+      document.getElementById('srcLabel').textContent = '{{ window.label }} — from design ✓';
+      setStatus('stRender', '● Design loaded', true);
+    }
     else { document.getElementById('srcLabel').textContent='No render — open editor and click → Visualise'; setStatus('stRender','○ No render',false); }
 
+    if (d.exists) _restoreOpenings(d);
+    ensureAllPlaced();
     if (d.exists) {
-      // restore saved openings (falls back to the legacy single-corner record)
-      _restoreOpenings(d);
       // restore saved photo
       if (d.photo_url) {
         const img = new Image();
@@ -549,7 +653,10 @@ function _openingTex(op) {
   if (cached && cached !== 'loading' && cached !== 'none') return cached;
   if (cached) return null;
   const url = RENDER_URLS[id];
-  if (!url) { _texCache[id] = 'none'; return null; }
+  if (!url) {
+    if (DESIGNS[id]) { _texCache[id] = rasterDesign(DESIGNS[id]); return _texCache[id]; }
+    _texCache[id] = 'none'; return null;
+  }
   _texCache[id] = 'loading';
   const img = new Image();
   img.onload = () => {
@@ -559,7 +666,10 @@ function _openingTex(op) {
     _texCache[id] = c;
     render();
   };
-  img.onerror = () => { _texCache[id] = 'none'; };
+  img.onerror = () => {
+    _texCache[id] = DESIGNS[id] ? rasterDesign(DESIGNS[id]) : 'none';
+    render();
+  };
   img.src = url;
   return null;
 }
@@ -622,6 +732,77 @@ function selectOpening(i) {
   lastCorner     = 'br';
   _syncPanelToActive();
   render();
+}
+
+const UNIT_IDS = {{ (all_windows | map(attribute='id') | list | tojson) }};
+
+/* grid layout for a list of unit ids: uniform scale, bottoms aligned per row */
+function _gridLayout() {
+  const ids = UNIT_IDS.slice(0, MAX_OPENINGS);
+  const out = {};
+  if (!ids.length) return out;
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+  const n = ids.length;
+  const cols = Math.min(n, Math.max(1, Math.ceil(Math.sqrt(n * cw / ch))));
+  const rows = Math.ceil(n / cols);
+  const mx = cw * 0.06, my = ch * 0.08;
+  const cellW = (cw - 2 * mx) / cols, cellH = (ch - 2 * my) / rows;
+  let sc = Infinity;
+  ids.forEach(id => {
+    const d = DESIGNS[id] || {};
+    const W = d.width || 1200, H = d.height || 1400;
+    sc = Math.min(sc, (cellW * 0.8) / W, (cellH * 0.8) / H);
+  });
+  ids.forEach((id, i) => {
+    const d = DESIGNS[id] || {};
+    const W = d.width || 1200, H = d.height || 1400;
+    const r = Math.floor(i / cols), c = i % cols;
+    const cx = mx + cellW * (c + 0.5);
+    const bottom = my + cellH * (r + 1) - cellH * 0.1;
+    const w = W * sc, h = H * sc;
+    out[id] = {
+      tl: { x: cx - w / 2, y: bottom - h }, tr: { x: cx + w / 2, y: bottom - h },
+      bl: { x: cx - w / 2, y: bottom },     br: { x: cx + w / 2, y: bottom },
+    };
+  });
+  return out;
+}
+
+/* place every window and door of the project on the photo automatically */
+function autoPlaceAll() {
+  const layout = _gridLayout();
+  const ids = UNIT_IDS.slice(0, MAX_OPENINGS);
+  if (!ids.length) return;
+  const prev = {};
+  openings.forEach(o => { prev[o.design_window_id] = o; });
+  openings = ids.map(id => {
+    const op = _makeOpening(layout[id], id);
+    if (prev[id]) { op.opacity = prev[id].opacity; op.brightness = prev[id].brightness; }
+    return op;
+  });
+  const idx = ids.indexOf(QS_WINDOW_ID);
+  activeIdx      = idx >= 0 ? idx : 0;
+  corners        = openings[activeIdx].corners;
+  defaultCorners = _cloneCorners(corners);
+  _syncPanelToActive();
+  render();
+  scheduleVis();
+}
+
+/* on load: make sure every unit has an opening (manual moves are kept) */
+function ensureAllPlaced() {
+  if (!UNIT_IDS.length) return;
+  const have = new Set(openings.map(o => o.design_window_id));
+  const missing = UNIT_IDS.filter(id => !have.has(id));
+  if (!missing.length) return;
+  if (openings.length <= 1) { autoPlaceAll(); return; }
+  const layout = _gridLayout();
+  missing.slice(0, Math.max(0, MAX_OPENINGS - openings.length)).forEach(id => {
+    if (layout[id]) openings.push(_makeOpening(layout[id], id));
+  });
+  _syncPanelToActive();
+  render();
+  scheduleVis();
 }
 
 function addOpening() {
@@ -880,8 +1061,15 @@ function loadRenderTexture(url) {
       resolve();
     };
     img.onerror = () => {
-      document.getElementById('srcLabel').textContent = 'No render — open editor and click → Visualise';
-      setStatus('stRender', '○ No render', false);
+      if (DESIGNS[QS_WINDOW_ID]) {
+        srcTexCanvas = rasterDesign(DESIGNS[QS_WINDOW_ID]);
+        _tex2d = srcTexCanvas;
+        document.getElementById('srcLabel').textContent = '{{ window.label }} — from design ✓';
+        setStatus('stRender', '● Design loaded', true);
+      } else {
+        document.getElementById('srcLabel').textContent = 'No render — open editor and click → Visualise';
+        setStatus('stRender', '○ No render', false);
+      }
       resolve();
     };
     img.src = url;

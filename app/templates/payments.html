@@ -49,6 +49,7 @@
             <th>Order</th>
             <th>Stage</th>
             <th>Status</th>
+            <th>Release</th>
             <th style="text-align:right;">Invoice</th>
             <th style="text-align:right;">Received</th>
             <th style="text-align:right;">Balance</th>
@@ -76,6 +77,15 @@
               {% if p.is_overdue and p.status != PaymentStatus.OVERDUE %}
                 <span class="expiry-tag text-error">Overdue</span>
               {% endif %}
+            </td>
+            <td class="mono" style="font-size:12px;">
+              {% if p.payment_stage == 'Advance' %}
+                {% if p.is_unit_wise and release_progress.get(p.id) %}
+                  {{ release_progress[p.id].released }}/{{ release_progress[p.id].total }} units
+                {% else %}
+                  {{ p.release_mode_label }}
+                {% endif %}
+              {% else %}—{% endif %}
             </td>
             <td class="num-cell">{{ '₹{:,.2f}'.format(p.invoice_amount|float) if p.invoice_amount else '—' }}</td>
             <td class="num-cell">{{ '₹{:,.2f}'.format(p.amount_received|float) if p.amount_received else '—' }}</td>

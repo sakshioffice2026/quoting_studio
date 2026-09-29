@@ -79,6 +79,22 @@
           <div class="info-grid-label">Milestone</div>
           <div class="info-grid-value">{{ payment.stage_label }}</div>
         </div></div>
+        {% if payment.payment_stage == PaymentStage.ADVANCE %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Release Mode</div>
+          <div class="info-grid-value">{{ payment.release_mode_label }}</div>
+        </div></div>
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Advance %</div>
+          <div class="info-grid-value">{{ payment.advance_pct }}%</div>
+        </div></div>
+        {% if payment.order_total_basis %}
+        <div class="info-grid-item"><div>
+          <div class="info-grid-label">Order Value</div>
+          <div class="info-grid-value">{{ '₹{:,.2f}'.format(payment.order_total_basis|float) }}</div>
+        </div></div>
+        {% endif %}
+        {% endif %}
         {% if payment.received_at %}
         <div class="info-grid-item"><div>
           <div class="info-grid-label">Last Receipt</div>
@@ -103,6 +119,126 @@
         {% endif %}
       </div>
     </div>
+
+    {# =================== 3b. RELEASE POLICY =================== #}
+    {% if payment.payment_stage == PaymentStage.ADVANCE and not payment.amount_received and payment.status in (PaymentStatus.INVOICED, PaymentStatus.OVERDUE) %}
+    <form method="POST" class="ui-card action-panel" style="max-width:600px;"
+          action="{{ url_for('payment.update_policy', payment_id=payment.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="ui-card-title" style="margin-bottom:6px;">Advance Release Policy</div>
+      <div class="form-group">
+        <label class="form-label" for="release_mode">Release mode</label>
+        <select class="form-control" id="release_mode" name="release_mode">
+          <option value="{{ ReleaseMode.WHOLE_ORDER }}" {{ 'selected' if payment.release_mode == ReleaseMode.WHOLE_ORDER }}>Whole order — release all units once the advance is received</option>
+          <option value="{{ ReleaseMode.UNIT_WISE }}" {{ 'selected' if payment.release_mode == ReleaseMode.UNIT_WISE }}>Unit-wise — release each unit as its advance share is covered</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="advance_pct">Advance % of order value</label>
+        <input type="number" step="0.01" min="1" max="100" class="form-control" id="advance_pct" name="advance_pct" value="{{ payment.advance_pct }}">
+      </div>
+      <button type="submit" class="btn btn-secondary btn-sm">Update Policy</button>
+    </form>
+    {% endif %}
+
+    {# =================== 3c. UNIT-WISE RELEASE =================== #}
+    {% if payment.is_unit_wise and unit_releases %}
+    {% set released_n = unit_releases | selectattr('is_released') | list | length %}
+    <div class="ui-card">
+      <div class="ui-card-title">Unit-wise Release — {{ released_n }} of {{ unit_releases | length }} units released</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width:60px;">Priority</th>
+            <th>Unit</th>
+            <th>Type</th>
+            <th style="text-align:right;">Unit Value</th>
+            <th style="text-align:right;">Advance Needed</th>
+            <th style="text-align:right;">Allocated</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="unitRows">
+          {% for u in unit_releases %}
+          <tr data-id="{{ u.id }}">
+            <td>
+              <span class="mono">{{ loop.index }}</span>
+              {% if not u.is_released %}
+              <button type="button" class="btn btn-ghost btn-sm" onclick="moveUnit(this,-1)" title="Move up">↑</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="moveUnit(this,1)" title="Move down">↓</button>
+              {% endif %}
+            </td>
+            <td>{{ u.label or ('Unit ' ~ u.window_id) }}</td>
+            <td>{{ pill(u.unit_type|capitalize, 'neutral') }}</td>
+            <td class="num-cell">{{ '₹{:,.2f}'.format(u.line_amount|float) }}</td>
+            <td class="num-cell">{{ '₹{:,.2f}'.format(u.required_advance|float) }}</td>
+            <td class="num-cell">{{ '₹{:,.2f}'.format(u.allocated_amount|float) }}</td>
+            <td>
+              {% set ut = {'UNIT-RELEASED': 'success', 'UNIT-PARTIAL': 'warn', 'UNIT-PENDING': 'neutral'} %}
+              {{ pill(u.status_label, ut.get(u.status, 'neutral')) }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <form method="POST" id="prioForm" style="margin-top:10px;"
+            action="{{ url_for('payment.reorder_units', payment_id=payment.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="order" id="prioOrder">
+        <button type="submit" class="btn btn-secondary btn-sm">Save Priority</button>
+        <span class="action-note" style="margin-left:8px;">Advance is allocated top to bottom. A unit is released only when its full advance is covered.</span>
+      </form>
+
+      {% if released_n > 0 %}
+      <form method="POST" style="margin-top:14px;"
+            action="{{ url_for('manufacturing.generate', order_id=payment.order_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Generate Manufacturing Jobs for Released Units →</button>
+      </form>
+      {% endif %}
+    </div>
+    <script>
+    function moveUnit(btn, dir) {
+      const tr = btn.closest('tr'), tb = tr.parentElement;
+      if (dir < 0 && tr.previousElementSibling) tb.insertBefore(tr, tr.previousElementSibling);
+      if (dir > 0 && tr.nextElementSibling)     tb.insertBefore(tr.nextElementSibling, tr);
+      [...tb.rows].forEach((r, i) => { r.querySelector('.mono').textContent = i + 1; });
+    }
+    document.getElementById('prioForm').addEventListener('submit', () => {
+      document.getElementById('prioOrder').value =
+        [...document.querySelectorAll('#unitRows tr')].map(r => r.dataset.id).join(',');
+    });
+    </script>
+    {% endif %}
+
+    {# =================== 3d. RECEIPT HISTORY =================== #}
+    {% if receipts %}
+    <div class="ui-card">
+      <div class="ui-card-title">Receipt History</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Mode</th>
+            <th>Reference</th>
+            <th>Notes</th>
+            <th style="text-align:right;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in receipts %}
+          <tr>
+            <td class="mono" style="font-size:12px;">{{ r.received_at.strftime('%d %b %Y, %H:%M') if r.received_at else '—' }}</td>
+            <td>{{ (r.payment_mode or '—')|replace('_', ' ')|title }}</td>
+            <td class="mono" style="font-size:12px;">{{ r.transaction_ref or '—' }}</td>
+            <td>{{ r.notes or '—' }}</td>
+            <td class="num-cell">{{ '₹{:,.2f}'.format(r.amount|float) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
 
     {# =================== 4. ACTION CARDS =================== #}
 
@@ -129,6 +265,10 @@
         <div class="form-group">
           <label class="form-label" for="transaction_ref">Transaction ref (optional)</label>
           <input type="text" class="form-control" id="transaction_ref" name="transaction_ref">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="notes">Notes (optional)</label>
+          <input type="text" class="form-control" id="notes" name="notes">
         </div>
         <button type="submit" class="btn btn-primary btn-sm">Record Receipt</button>
       </form>

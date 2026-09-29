@@ -15,7 +15,7 @@
       </div>
     </div>
     <div class="flex gap-8">
-      <a href="{{ url_for('projects.facade', project_id=project.id) }}" class="btn btn-primary btn-sm">🏠 Facade View</a>
+      <a href="{{ url_for('projects.facade', project_id=project.id) }}" class="btn btn-primary btn-sm">🏠 Visualiser</a>
       {% if latest_design_approval %}
       <a href="{{ url_for('design_approval.detail', approval_id=latest_design_approval.id) }}" class="btn btn-secondary btn-sm">
         Design: {{ latest_design_approval.status_label }}

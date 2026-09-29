@@ -41,6 +41,18 @@ class PaymentStatus:
     TERMINAL = {RECEIVED, CLOSED}
 
 
+class ReleaseMode:
+    WHOLE_ORDER = 'whole_order'
+    UNIT_WISE   = 'unit_wise'
+
+    ALL = [WHOLE_ORDER, UNIT_WISE]
+
+    LABELS = {
+        WHOLE_ORDER: 'Whole order',
+        UNIT_WISE:   'Unit-wise',
+    }
+
+
 class Payment(db.Model):
     """
     Section 9 — Advance Payment / Section 10 — Payment Journey (Milestone Billing).
@@ -62,6 +74,10 @@ class Payment(db.Model):
 
     due_date          = db.Column(db.Date, nullable=True)
 
+    # Advance release policy (used on the Advance milestone row)
+    release_mode      = db.Column(db.String(20), nullable=False, default=ReleaseMode.WHOLE_ORDER)
+    advance_pct       = db.Column(db.Numeric(5, 2), nullable=False, default=50)
+    order_total_basis = db.Column(db.Numeric(12, 2), nullable=True)
     payment_mode      = db.Column(db.String(50), nullable=True)   # bank transfer / card / cheque / financing
     transaction_ref   = db.Column(db.String(100), nullable=True)
     received_at       = db.Column(db.DateTime, nullable=True)
@@ -116,6 +132,14 @@ class Payment(db.Model):
         return PaymentStage.LABELS.get(self.payment_stage, self.payment_stage)
 
     @property
+    def is_unit_wise(self) -> bool:
+        return self.release_mode == ReleaseMode.UNIT_WISE
+
+    @property
+    def release_mode_label(self) -> str:
+        return ReleaseMode.LABELS.get(self.release_mode, self.release_mode)
+
+    @property
     def balance(self):
         inv = self.invoice_amount or 0
         rec = self.amount_received or 0
@@ -148,6 +172,10 @@ class Payment(db.Model):
             'amount_received':   float(self.amount_received) if self.amount_received else 0,
             'balance':           float(self.balance) if self.balance is not None else None,
             'due_date':          self.due_date.isoformat() if self.due_date else None,
+            'release_mode':      self.release_mode,
+            'release_mode_label': self.release_mode_label,
+            'advance_pct':       float(self.advance_pct) if self.advance_pct is not None else None,
+            'order_total_basis': float(self.order_total_basis) if self.order_total_basis else None,
             'is_overdue':        self.is_overdue,
             'payment_mode':      self.payment_mode,
             'transaction_ref':   self.transaction_ref,
