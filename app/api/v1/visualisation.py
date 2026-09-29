@@ -1,16 +1,59 @@
 import base64
 import glob
+import json
 import os
 import uuid
 
 from flask import Blueprint, jsonify, request, current_app
-from flask_login import login_required
+from flask_login import login_required, current_user
 
 from ...extensions import db
-from ...models import Visualisation
+from ...models import Visualisation, Window
 from ._helpers import _own_window
 
 vis_bp = Blueprint('api_v1_vis', __name__)
+
+MAX_OPENINGS = 12
+
+
+def _num(v, default=0.0):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clean_openings(raw):
+    """Sanitise the openings list coming from the client."""
+    if not isinstance(raw, list):
+        return []
+    tenant_window_ids = {
+        w.id for w in Window.query.filter_by(tenant_id=current_user.tenant_id).all()
+    }
+    out = []
+    for item in raw[:MAX_OPENINGS]:
+        if not isinstance(item, dict):
+            continue
+        c = item.get('corners') or {}
+        try:
+            corners = {k: [_num(c[k][0]), _num(c[k][1])] for k in ('tl', 'tr', 'bl', 'br')}
+        except (KeyError, TypeError, IndexError):
+            continue
+        design_id = item.get('design_window_id')
+        try:
+            design_id = int(design_id)
+        except (TypeError, ValueError):
+            design_id = None
+        if design_id not in tenant_window_ids:
+            design_id = None
+        out.append({
+            'id':               str(item.get('id') or uuid.uuid4().hex[:8])[:16],
+            'design_window_id': design_id,
+            'corners':          corners,
+            'opacity':          min(1.0, max(0.1, _num(item.get('opacity'), 0.92))),
+            'brightness':       min(1.6, max(0.4, _num(item.get('brightness'), 1.0))),
+        })
+    return out
 
 
 # POST /api/v1/windows/<id>/render
@@ -120,11 +163,7 @@ def get_visualisation(window_id):
         if not vis:
             return jsonify({'exists': False})
 
-        render_dir = os.path.join(current_app.config.get('UPLOAD_FOLDER', 'uploads'), 'renders')
-        pattern    = os.path.join(render_dir, f'window-{window_id}-*.png')
-        matches    = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
-        render_url = (f'/uploads/renders/{os.path.basename(matches[0])}'
-                      if matches else None)
+        render_url = (f'/uploads/{vis.rendered_path}' if vis.rendered_path else None)
         photo_url  = f'/uploads/{vis.photo_path}' if vis.photo_path else None
 
         return jsonify({
@@ -134,6 +173,7 @@ def get_visualisation(window_id):
             'photo_url':  photo_url,
             'opacity':    vis.opacity,
             'brightness': vis.brightness,
+            'openings':   vis.openings,
             'corners': {
                 'tl': [vis.corner_tl_x, vis.corner_tl_y],
                 'tr': [vis.corner_tr_x, vis.corner_tr_y],
@@ -175,6 +215,9 @@ def save_visualisation(window_id):
 
         if 'opacity'    in data: vis.opacity    = float(data['opacity'])
         if 'brightness' in data: vis.brightness = float(data['brightness'])
+
+        if 'openings' in data:
+            vis.openings_json = json.dumps(_clean_openings(data['openings']))
 
         db.session.commit()
         current_app.logger.debug('save_visualisation: window=%d vis=%d', window_id, vis.id)

@@ -19,6 +19,7 @@ class Visualisation(db.Model):
     opacity       = db.Column(db.Float, default=0.92)
     brightness    = db.Column(db.Float, default=1.0)
     rendered_path = db.Column(db.String(500), nullable=True)
+    openings_json = db.Column(db.Text, nullable=True)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
 
     @property
@@ -30,6 +31,17 @@ class Visualisation(db.Model):
             'br': (self.corner_br_x, self.corner_br_y),
         }
 
+    @property
+    def openings(self) -> list:
+        import json
+        if not self.openings_json:
+            return []
+        try:
+            data = json.loads(self.openings_json)
+            return data if isinstance(data, list) else []
+        except (ValueError, TypeError):
+            return []
+
     def to_dict(self) -> dict:
         return {
             'id':         self.id,
@@ -37,6 +49,7 @@ class Visualisation(db.Model):
             'corners':    self.corners,
             'opacity':    self.opacity,
             'brightness': self.brightness,
+            'openings':   self.openings,
         }
 
     def __repr__(self):

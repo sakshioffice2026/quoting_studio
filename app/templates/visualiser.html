@@ -3,6 +3,11 @@
 
 {% block head %}
 <meta name="csrf-token" content="{{ csrf_token() }}">
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<style>
+.src-tab.active { background:var(--copper);color:#fff;border-color:var(--copper); }
+</style>
 <style>
 body { overflow: hidden; }
 .app-main { height: calc(100vh - 52px); overflow: hidden; }
@@ -194,8 +199,41 @@ input[type=range] { width:100%;accent-color:var(--copper); }
         <input type="file" id="photoUpload" accept="image/*" style="display:none"
                onchange="handlePhotoUpload(event)">
 
+        <div class="sec-head">Openings</div>
+        <div id="openingList" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;">
+          <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;"
+                  onclick="addOpening()">+ Add opening</button>
+          <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;"
+                  onclick="removeOpening()">Remove</button>
+        </div>
+        <select id="openingDesign" class="form-control"
+                style="font-size:12px;margin-bottom:6px;"
+                onchange="setOpeningDesign(this.value)">
+          {% for w in all_windows %}
+          <option value="{{ w.id }}" {{ 'selected' if w.id == window.id }}>
+            {{ w.label }} — {{ w.width_mm }}×{{ w.height_mm }}mm
+          </option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;margin-bottom:12px;"
+                onclick="applyDesignToAll()">Apply this design to all openings</button>
+
+        <div class="divider"></div>
+
         <div class="sec-head">Design source</div>
         <div class="src-box" id="srcLabel">Loading window render…</div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <button class="btn btn-ghost btn-sm src-tab active" id="btnSrc2d"
+                  style="flex:1;justify-content:center;" onclick="setSourceMode('2d')">2D render</button>
+          <button class="btn btn-ghost btn-sm src-tab" id="btnSrc3d"
+                  style="flex:1;justify-content:center;" onclick="setSourceMode('3d')">3D model</button>
+        </div>
+        <div class="slider-field" id="yawRow" style="display:none;">
+          <label>3D view angle <span id="yawVal">0°</span></label>
+          <input type="range" min="-40" max="40" value="0" id="yawSlider"
+                 oninput="onYawInput(this.value)">
+        </div>
 
         <div class="divider"></div>
 
@@ -203,13 +241,25 @@ input[type=range] { width:100%;accent-color:var(--copper); }
         <div class="slider-field">
           <label>Opacity <span id="opVal">92%</span></label>
           <input type="range" min="10" max="100" value="92" id="opacitySlider"
-                 oninput="document.getElementById('opVal').textContent=this.value+'%';scheduleVis();">
+                 oninput="onOpacityInput(this.value)">
         </div>
         <div class="slider-field">
           <label>Brightness <span id="brVal">100%</span></label>
           <input type="range" min="40" max="160" value="100" id="brightnessSlider"
-                 oninput="document.getElementById('brVal').textContent=this.value+'%';scheduleVis();">
+                 oninput="onBrightnessInput(this.value)">
         </div>
+        <div class="slider-field">
+          <label>Shadow <span id="shVal">40%</span></label>
+          <input type="range" min="0" max="100" value="40" id="shadowSlider"
+                 oninput="document.getElementById('shVal').textContent=this.value+'%';render();">
+        </div>
+        <div class="slider-field">
+          <label>Glass reflection <span id="rfVal">50%</span></label>
+          <input type="range" min="0" max="100" value="50" id="reflectSlider"
+                 oninput="document.getElementById('rfVal').textContent=this.value+'%';render();">
+        </div>
+        <button class="btn btn-secondary" style="width:100%;justify-content:center;margin-bottom:12px;"
+                onclick="matchDaylight()">☀ Match daylight</button>
 
         <div class="divider"></div>
 
@@ -223,7 +273,7 @@ input[type=range] { width:100%;accent-color:var(--copper); }
 
         <div class="divider"></div>
 
-        <div class="sec-head">Swap design</div>
+        <div class="sec-head">Open another window</div>
         <select id="windowSwap" class="form-control"
                 style="font-size:12px;margin-bottom:12px;"
                 onchange="swapWindow(this.value)">
@@ -274,6 +324,11 @@ let defaultCorners= null;   // remembered layout for double-click-to-reset
 let dragging      = null;   // which corner key is being dragged
 let lastCorner    = 'br';   // last touched corner — arrow keys nudge it
 let showOverlay   = true;   // before/after
+let openings      = [];     // [{id, design_window_id, corners, opacity, brightness}]
+let activeIdx     = 0;      // which opening the handles/sliders control
+const MAX_OPENINGS = 12;
+const RENDER_URLS  = {{ (render_urls | tojson) if render_urls else '{}' }};
+const _texCache    = {};    // window_id -> canvas | 'loading' | 'none'
 
 /* -------- zoom / pan state -------- */
 let zoom          = 1;
@@ -307,6 +362,9 @@ window.addEventListener('load', () => {
   houseCanvas.height = wrap.clientHeight;
 
   resetCorners();
+  openings = [_makeOpening(corners, QS_WINDOW_ID)];
+  activeIdx = 0;
+  renderOpeningList();
   drawPaintedHouse(houseCtx, houseCanvas.width, houseCanvas.height);
 
   houseCanvas.addEventListener('pointerdown', onPointerDown);
@@ -338,11 +396,26 @@ window.addEventListener('load', () => {
 
 function onWindowResize() {
   const wrap = houseCanvas.parentElement;
-  houseCanvas.width  = wrap.clientWidth;
-  houseCanvas.height = wrap.clientHeight;
-  resetView();
-  resetCorners();
+  const oldW = houseCanvas.width, oldH = houseCanvas.height;
+  const newW = wrap.clientWidth,  newH = wrap.clientHeight;
+  if (!newW || !newH || !oldW || !oldH) return;
+  const sx = newW / oldW, sy = newH / oldH;
+  houseCanvas.width  = newW;
+  houseCanvas.height = newH;
+  const scaleSet = (set) => {
+    if (!set) return;
+    for (const k of ['tl','tr','bl','br']) {
+      set[k] = { x: set[k].x * sx, y: set[k].y * sy };
+    }
+  };
+  openings.forEach(o => { if (o.corners !== corners) scaleSet(o.corners); });
+  scaleSet(corners);
+  scaleSet(defaultCorners);
+  panX *= sx;
+  panY *= sy;
+  updateCornerLabels();
   render();
+  if (corners) scheduleVis();
 }
 
 /* ================================================================
@@ -371,7 +444,24 @@ function setZoom(newZoom, pivotRaw) {
 }
 function zoomBy(factor) { setZoom(zoom * factor); }
 function resetView() { zoom = 1; panX = 0; panY = 0; document.getElementById('zoomPct').textContent = '100%'; render(); }
-function fitToScreen() { resetView(); }
+function fitToScreen() {
+  if (!corners) { resetView(); return; }
+  const pts = ['tl','tr','bl','br'].map(k => corners[k]);
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const bw = maxX - minX, bh = maxY - minY;
+  if (bw < 1 || bh < 1) { resetView(); return; }
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+  const pad = 0.25;
+  const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
+    Math.min(cw / (bw * (1 + 2 * pad)), ch / (bh * (1 + 2 * pad)))));
+  zoom = z;
+  panX = cw / 2 - ((minX + maxX) / 2) * z;
+  panY = ch / 2 - ((minY + maxY) / 2) * z;
+  document.getElementById('zoomPct').textContent = Math.round(zoom * 100) + '%';
+  render();
+}
 
 function onWheel(evt) {
   evt.preventDefault();
@@ -406,27 +496,11 @@ async function loadState() {
     // load render texture
     const RENDER_URL = {{ (render_url | tojson) if render_url else 'null' }};
     if (RENDER_URL) await loadRenderTexture(RENDER_URL);
-    else { document.getElementById('srcLabel').textContent='No render — open editor and click → Visualise'; setStatus('stRender','○ No render',false); return; }
+    else { document.getElementById('srcLabel').textContent='No render — open editor and click → Visualise'; setStatus('stRender','○ No render',false); }
 
     if (d.exists) {
-      // restore saved sliders
-      if (d.opacity !== undefined) {
-        document.getElementById('opacitySlider').value   = Math.round(d.opacity * 100);
-        document.getElementById('opVal').textContent     = Math.round(d.opacity * 100) + '%';
-      }
-      if (d.brightness !== undefined) {
-        document.getElementById('brightnessSlider').value= Math.round(d.brightness * 100);
-        document.getElementById('brVal').textContent     = Math.round(d.brightness * 100) + '%';
-      }
-      // restore saved corners
-      if (d.corners) {
-        corners = {
-          tl: { x: d.corners.tl[0], y: d.corners.tl[1] },
-          tr: { x: d.corners.tr[0], y: d.corners.tr[1] },
-          bl: { x: d.corners.bl[0], y: d.corners.bl[1] },
-          br: { x: d.corners.br[0], y: d.corners.br[1] },
-        };
-      }
+      // restore saved openings (falls back to the legacy single-corner record)
+      _restoreOpenings(d);
       // restore saved photo
       if (d.photo_url) {
         const img = new Image();
@@ -443,6 +517,348 @@ async function loadState() {
   }
 }
 
+/* ================================================================
+   MULTIPLE OPENINGS — several windows on one photo, each with its own
+   design, corners, opacity and brightness
+   ================================================================ */
+function _newOpeningId() { return Math.random().toString(36).slice(2, 8); }
+
+function _cloneCorners(c) { return JSON.parse(JSON.stringify(c)); }
+
+function _makeOpening(c, designId) {
+  return {
+    id: _newOpeningId(),
+    design_window_id: designId || QS_WINDOW_ID,
+    corners: c,
+    opacity: 0.92,
+    brightness: 1,
+  };
+}
+
+function _openingTex(op) {
+  const id = op.design_window_id || QS_WINDOW_ID;
+  if (id === QS_WINDOW_ID) return srcTexCanvas;
+  const cached = _texCache[id];
+  if (cached && cached !== 'loading' && cached !== 'none') return cached;
+  if (cached) return null;
+  const url = RENDER_URLS[id];
+  if (!url) { _texCache[id] = 'none'; return null; }
+  _texCache[id] = 'loading';
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    c.getContext('2d').drawImage(img, 0, 0);
+    _texCache[id] = c;
+    render();
+  };
+  img.onerror = () => { _texCache[id] = 'none'; };
+  img.src = url;
+  return null;
+}
+
+function _paintAll(ctx, cw, ch, mapPt) {
+  if (!showOverlay) return;
+  openings.forEach(op => {
+    const tex = _openingTex(op);
+    if (!tex || !op.corners) return;
+    const c = op.corners;
+    const s = { tl: mapPt(c.tl), tr: mapPt(c.tr), bl: mapPt(c.bl), br: mapPt(c.br) };
+    const savedTex = srcTexCanvas, savedOp = _curOp, savedBr = _curBr;
+    srcTexCanvas = tex; _curOp = op.opacity; _curBr = op.brightness;
+    try {
+      _drawWindowShadow(ctx, s);
+      _applyHomographyWarp(ctx, cw, ch, s);
+    } finally {
+      srcTexCanvas = savedTex; _curOp = savedOp; _curBr = savedBr;
+    }
+  });
+}
+
+function renderOpeningList() {
+  const box = document.getElementById('openingList');
+  if (!box) return;
+  box.innerHTML = '';
+  openings.forEach((op, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn btn-ghost btn-sm src-tab' + (i === activeIdx ? ' active' : '');
+    b.style.minWidth = '34px';
+    b.style.justifyContent = 'center';
+    b.textContent = String(i + 1);
+    b.title = 'Select opening ' + (i + 1);
+    b.onclick = () => selectOpening(i);
+    box.appendChild(b);
+  });
+}
+
+function _syncPanelToActive() {
+  const op = openings[activeIdx];
+  if (!op) return;
+  const opPct = Math.round(op.opacity * 100);
+  const brPct = Math.round(op.brightness * 100);
+  document.getElementById('opacitySlider').value = opPct;
+  document.getElementById('opVal').textContent   = opPct + '%';
+  document.getElementById('brightnessSlider').value = brPct;
+  document.getElementById('brVal').textContent      = brPct + '%';
+  const sel = document.getElementById('openingDesign');
+  if (sel) sel.value = String(op.design_window_id || QS_WINDOW_ID);
+  renderOpeningList();
+  updateCornerLabels();
+}
+
+function selectOpening(i) {
+  if (i < 0 || i >= openings.length) return;
+  if (openings[activeIdx]) openings[activeIdx].corners = corners;
+  activeIdx      = i;
+  corners        = openings[i].corners;
+  defaultCorners = _cloneCorners(corners);
+  lastCorner     = 'br';
+  _syncPanelToActive();
+  render();
+}
+
+function addOpening() {
+  if (openings.length >= MAX_OPENINGS) return;
+  const base = corners
+    ? _cloneCorners(corners)
+    : { tl: {x: 100, y: 100}, tr: {x: 300, y: 100}, bl: {x: 100, y: 350}, br: {x: 300, y: 350} };
+  const off = 40;
+  for (const k of ['tl','tr','bl','br']) { base[k].x += off; base[k].y += off; }
+  const cur = openings[activeIdx];
+  const op  = _makeOpening(base, cur ? cur.design_window_id : QS_WINDOW_ID);
+  if (cur) { op.opacity = cur.opacity; op.brightness = cur.brightness; }
+  openings.push(op);
+  selectOpening(openings.length - 1);
+  scheduleVis();
+}
+
+function removeOpening() {
+  if (openings.length <= 1) return;
+  openings.splice(activeIdx, 1);
+  activeIdx = Math.min(activeIdx, openings.length - 1);
+  corners = openings[activeIdx].corners;
+  defaultCorners = _cloneCorners(corners);
+  _syncPanelToActive();
+  scheduleVis();
+}
+
+function setOpeningDesign(v) {
+  const op = openings[activeIdx];
+  if (!op) return;
+  op.design_window_id = parseInt(v, 10) || QS_WINDOW_ID;
+  _openingTex(op);
+  scheduleVis();
+}
+
+function applyDesignToAll() {
+  const cur = openings[activeIdx];
+  if (!cur) return;
+  openings.forEach(o => { o.design_window_id = cur.design_window_id; });
+  _openingTex(cur);
+  scheduleVis();
+}
+
+function onOpacityInput(v) {
+  document.getElementById('opVal').textContent = v + '%';
+  if (openings[activeIdx]) openings[activeIdx].opacity = v / 100;
+  scheduleVis();
+}
+
+function onBrightnessInput(v) {
+  document.getElementById('brVal').textContent = v + '%';
+  if (openings[activeIdx]) openings[activeIdx].brightness = v / 100;
+  scheduleVis();
+}
+
+function _openingsPayload() {
+  return openings.map(o => ({
+    id: o.id,
+    design_window_id: o.design_window_id,
+    corners: {
+      tl: [o.corners.tl.x, o.corners.tl.y],
+      tr: [o.corners.tr.x, o.corners.tr.y],
+      bl: [o.corners.bl.x, o.corners.bl.y],
+      br: [o.corners.br.x, o.corners.br.y],
+    },
+    opacity: o.opacity,
+    brightness: o.brightness,
+  }));
+}
+
+function _restoreOpenings(d) {
+  const toC = (c) => ({
+    tl: { x: c.tl[0], y: c.tl[1] }, tr: { x: c.tr[0], y: c.tr[1] },
+    bl: { x: c.bl[0], y: c.bl[1] }, br: { x: c.br[0], y: c.br[1] },
+  });
+  let list = [];
+  try {
+    if (Array.isArray(d.openings) && d.openings.length) {
+      list = d.openings.map(o => ({
+        id: o.id || _newOpeningId(),
+        design_window_id: o.design_window_id || QS_WINDOW_ID,
+        corners: toC(o.corners),
+        opacity: o.opacity != null ? o.opacity : 0.92,
+        brightness: o.brightness != null ? o.brightness : 1,
+      }));
+    } else if (d.corners) {
+      list = [{
+        id: _newOpeningId(),
+        design_window_id: QS_WINDOW_ID,
+        corners: toC(d.corners),
+        opacity: d.opacity != null ? d.opacity : 0.92,
+        brightness: d.brightness != null ? d.brightness : 1,
+      }];
+    }
+  } catch (e) {
+    console.warn('[QS] restoreOpenings failed:', e);
+    list = [];
+  }
+  if (!list.length) return;
+  openings       = list;
+  activeIdx      = 0;
+  corners        = openings[0].corners;
+  defaultCorners = _cloneCorners(corners);
+  _syncPanelToActive();
+}
+
+/* ================================================================
+   SOURCE MODE — 2D editor render  /  3D model (GLB via Three.js)
+   ================================================================ */
+const FRAME_HEX = '{{ window.frame_colour_hex | default("#555a60") }}';
+let _tex2d = null, _tex3d = null, _srcMode = '2d';
+let _m3d = null, _yawTimer = null;
+
+function _m3dInit() {
+  if (_m3d) return _m3d;
+  const cnv = document.createElement('canvas');
+  const renderer = new THREE.WebGLRenderer({
+    canvas: cnv, antialias: true, alpha: true, preserveDrawingBuffer: true,
+  });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputEncoding = (typeof THREE.sRGBEncoding !== 'undefined') ? THREE.sRGBEncoding : 3001;
+
+  const scene = new THREE.Scene();
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  scene.add(new THREE.HemisphereLight(0xcfd8e3, 0x5a6472, 0.65));
+  const key = new THREE.DirectionalLight(0xffffff, 0.85);
+  key.position.set(0.6, 1, 1.2).normalize();
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0xaec8d8, 0.45);
+  fill.position.set(-1, 0.2, 0.5).normalize();
+  scene.add(fill);
+
+  _m3d = { renderer, scene, cnv, group: null,
+           size: new THREE.Vector3(1000, 1000, 70), center: new THREE.Vector3() };
+  return _m3d;
+}
+
+function _m3dLoad() {
+  const m = _m3dInit();
+  if (m.group) return Promise.resolve(m);
+  return new Promise((resolve, reject) => {
+    const url = `${API}/windows/${QS_WINDOW_ID}/3d/glb?method=auto`;
+    new THREE.GLTFLoader().load(url, (gltf) => {
+      const g  = gltf.scene;
+      const fc = new THREE.Color(FRAME_HEX);
+      g.traverse(o => {
+        if (!o.isMesh) return;
+        const isGlass = /glass/i.test(o.name) ||
+          (o.material && o.material.transparent && o.material.opacity < 0.85);
+        if (isGlass) {
+          o.material = new THREE.MeshPhysicalMaterial({
+            color: 0x6ab3c8, metalness: 0.05, roughness: 0.06,
+            transparent: true, opacity: 0.30, side: THREE.DoubleSide,
+          });
+        } else {
+          o.material = new THREE.MeshStandardMaterial({
+            color: fc, metalness: 0.18, roughness: 0.55,
+            emissive: fc.clone().multiplyScalar(0.10), side: THREE.DoubleSide,
+          });
+        }
+      });
+      const box = new THREE.Box3().setFromObject(g);
+      box.getSize(m.size);
+      box.getCenter(m.center);
+      m.scene.add(g);
+      m.group = g;
+      resolve(m);
+    }, undefined, reject);
+  });
+}
+
+async function build3DTexture() {
+  const m   = await _m3dLoad();
+  const yaw = (+document.getElementById('yawSlider').value) * Math.PI / 180;
+  const c   = m.center;
+  const w = m.size.x, h = m.size.y, dep = m.size.z;
+
+  // projected width grows with depth when the view is rotated (shows the reveal)
+  const pw = Math.abs(w * Math.cos(yaw)) + Math.abs(dep * Math.sin(yaw));
+  const H  = 1400;
+  const W  = Math.min(2400, Math.max(200, Math.round(H * pw / h)));
+
+  m.renderer.setSize(W, H, false);
+  const dist = Math.max(w, h, dep) * 3;
+  const cam  = new THREE.OrthographicCamera(-pw / 2, pw / 2, h / 2, -h / 2, -dist * 4, dist * 4);
+  cam.position.set(c.x + dist * Math.sin(yaw), c.y, c.z + dist * Math.cos(yaw));
+  cam.lookAt(c);
+  cam.updateProjectionMatrix();
+
+  m.renderer.render(m.scene, cam);
+
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  out.getContext('2d').drawImage(m.cnv, 0, 0);
+  if (_tex3d) _glForget(_tex3d);
+  _tex3d = out;
+  return out;
+}
+
+async function setSourceMode(mode) {
+  const label = document.getElementById('srcLabel');
+  if (mode === '3d') {
+    setStatus('stRender', '○ Building 3D…', false);
+    label.textContent = '3D model — building…';
+    try {
+      srcTexCanvas = await build3DTexture();
+      label.textContent = '{{ window.label }} — 3D model ✓';
+      setStatus('stRender', '● 3D render loaded', true);
+      _srcMode = '3d';
+    } catch (e) {
+      console.error('[QS] 3D source failed:', e);
+      label.textContent = '3D unavailable — using 2D render';
+      setStatus('stRender', _tex2d ? '● Render loaded' : '○ No render', !!_tex2d);
+      if (_tex2d) srcTexCanvas = _tex2d;
+      _srcMode = '2d';
+    }
+  } else {
+    _srcMode = '2d';
+    if (_tex2d) {
+      srcTexCanvas = _tex2d;
+      label.textContent = '{{ window.label }} — synced ✓';
+      setStatus('stRender', '● Render loaded', true);
+    } else {
+      label.textContent = 'No render — open editor and click → Visualise';
+      setStatus('stRender', '○ No render', false);
+    }
+  }
+  document.getElementById('btnSrc2d').classList.toggle('active', _srcMode === '2d');
+  document.getElementById('btnSrc3d').classList.toggle('active', _srcMode === '3d');
+  document.getElementById('yawRow').style.display = _srcMode === '3d' ? 'block' : 'none';
+  render();
+}
+
+function onYawInput(v) {
+  document.getElementById('yawVal').textContent = v + '°';
+  clearTimeout(_yawTimer);
+  _yawTimer = setTimeout(async () => {
+    if (_srcMode !== '3d') return;
+    try { srcTexCanvas = await build3DTexture(); render(); }
+    catch (e) { console.error('[QS] 3D rebuild failed:', e); }
+  }, 120);
+}
+
 function loadRenderTexture(url) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -451,6 +867,7 @@ function loadRenderTexture(url) {
       srcTexCanvas.width  = img.width;
       srcTexCanvas.height = img.height;
       srcTexCanvas.getContext('2d').drawImage(img, 0, 0);
+      _tex2d = srcTexCanvas;
       document.getElementById('srcLabel').textContent = '{{ window.label }} — synced ✓';
       setStatus('stRender', '● Render loaded', true);
       resolve();
@@ -530,9 +947,10 @@ function hitCorner(raw) {
 
 /* point-in-quad test (ray casting) — used to detect a click inside the
    window overlay so the whole thing can be dragged as one unit */
-function pointInQuad(raw) {
-  if (!corners) return false;
-  const poly = ['tl','tr','br','bl'].map(k => toScreen(corners[k]));
+function pointInQuad(raw, cs) {
+  cs = cs || corners;
+  if (!cs) return false;
+  const poly = ['tl','tr','br','bl'].map(k => toScreen(cs[k]));
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
@@ -569,6 +987,12 @@ function onPointerDown(evt) {
     panLast   = raw;
     houseCanvas.classList.add('panning');
     return;
+  }
+
+  if (!hitCorner(raw) && !(corners && pointInQuad(raw))) {
+    for (let i = openings.length - 1; i >= 0; i--) {
+      if (i !== activeIdx && pointInQuad(raw, openings[i].corners)) { selectOpening(i); break; }
+    }
   }
 
   const hit = hitCorner(raw);
@@ -734,13 +1158,11 @@ function render() {
   drawBackground(houseCtx, cw, ch);
   houseCtx.setTransform(1, 0, 0, 1, 0, 0);
 
-  // window overlay — pixel-level compositing ignores ctx transform, so we
-  // pass it corners already converted to screen space
-  if (showOverlay && srcTexCanvas && corners) {
-    const s = { tl: toScreen(corners.tl), tr: toScreen(corners.tr),
-                bl: toScreen(corners.bl), br: toScreen(corners.br) };
-    _applyHomographyWarp(houseCtx, cw, ch, s);
-  }
+  if (openings[activeIdx]) openings[activeIdx].corners = corners;
+
+  // window overlays — pixel-level compositing ignores ctx transform, so
+  // corners are converted to screen space before warping
+  _paintAll(houseCtx, cw, ch, p => toScreen(p));
 
   drawHandles();
   drawDrawPreview();
@@ -760,7 +1182,181 @@ function drawDrawPreview() {
   ctx.restore();
 }
 
+/* ================================================================
+   WEBGL HOMOGRAPHY WARP (GPU) — CPU version kept as automatic fallback
+   ================================================================ */
+let _gl = null, _glCanvas = null, _glProg = null, _glTex = null;
+let _glTexSrc = null, _glLoc = null, _glFailed = false;
+const _glTexCache = new Map();   // source canvas -> WebGLTexture
+
+function _glForget(canvas) {
+  const tex = _glTexCache.get(canvas);
+  if (tex && _gl && !_gl.isContextLost()) _gl.deleteTexture(tex);
+  _glTexCache.delete(canvas);
+}
+
+/* per-opening warp parameters (null = fall back to the sliders) */
+let _curOp = null, _curBr = null;
+
+function _glCompile(gl, type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(sh) || 'shader compile failed');
+  }
+  return sh;
+}
+
+function _glInit() {
+  if (_glFailed) return false;
+  if (_gl && !_gl.isContextLost()) return true;
+  try {
+    _glCanvas = document.createElement('canvas');
+    _glCanvas.width = 2; _glCanvas.height = 2;
+    _gl = _glCanvas.getContext('webgl', {
+      premultipliedAlpha: true, alpha: true, antialias: false,
+      preserveDrawingBuffer: false,
+    });
+    if (!_gl) throw new Error('WebGL not available');
+    const gl = _gl;
+
+    const vsSrc = 'attribute vec2 aPos; void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }';
+    const fsSrc = [
+      '#ifdef GL_FRAGMENT_PRECISION_HIGH',
+      'precision highp float;',
+      '#else',
+      'precision mediump float;',
+      '#endif',
+      'uniform sampler2D uTex;',
+      'uniform mat3 uH;',
+      'uniform vec2 uSrc;',
+      'uniform float uCanvasH;',
+      'uniform float uOpacity;',
+      'uniform float uBright;',
+      'uniform float uReflect;',
+      'void main(){',
+      '  vec3 p = uH * vec3(gl_FragCoord.x, uCanvasH - gl_FragCoord.y, 1.0);',
+      '  vec2 s = p.xy / p.z;',
+      '  if (s.x < 0.0 || s.y < 0.0 || s.x > uSrc.x || s.y > uSrc.y) discard;',
+      '  vec2 uv = s / uSrc;',
+      '  vec4 t = texture2D(uTex, uv);',
+      '  vec2 e = min(uv, vec2(1.0) - uv);',
+      '  float feather = smoothstep(0.0, 0.004, min(e.x, e.y));',
+      '  float diag = uv.x * 0.8 + (1.0 - uv.y) * 0.6;',
+      '  float b1 = smoothstep(0.30, 0.42, diag) * (1.0 - smoothstep(0.46, 0.62, diag));',
+      '  float b2 = smoothstep(0.66, 0.72, diag) * (1.0 - smoothstep(0.74, 0.86, diag));',
+      '  float sheen = (b1 * 0.18 + b2 * 0.08) * uReflect;',
+      '  vec3 col = t.rgb * uBright + vec3(sheen) * t.a;',
+      '  float a = t.a * uOpacity * feather;',
+      '  if (a < 0.004) discard;',
+      '  gl_FragColor = vec4(min(col, vec3(t.a)) * uOpacity * feather, a);',
+      '}',
+    ].join('\n');
+
+    _glProg = gl.createProgram();
+    gl.attachShader(_glProg, _glCompile(gl, gl.VERTEX_SHADER, vsSrc));
+    gl.attachShader(_glProg, _glCompile(gl, gl.FRAGMENT_SHADER, fsSrc));
+    gl.linkProgram(_glProg);
+    if (!gl.getProgramParameter(_glProg, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(_glProg) || 'program link failed');
+    }
+    gl.useProgram(_glProg);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(_glProg, 'aPos');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    _glLoc = {
+      tex:     gl.getUniformLocation(_glProg, 'uTex'),
+      H:       gl.getUniformLocation(_glProg, 'uH'),
+      src:     gl.getUniformLocation(_glProg, 'uSrc'),
+      canvasH: gl.getUniformLocation(_glProg, 'uCanvasH'),
+      opacity: gl.getUniformLocation(_glProg, 'uOpacity'),
+      bright:  gl.getUniformLocation(_glProg, 'uBright'),
+      reflect: gl.getUniformLocation(_glProg, 'uReflect'),
+    };
+    _glTex = gl.createTexture();
+    _glTexSrc = null;
+    _glTexCache.clear();
+    return true;
+  } catch (e) {
+    console.warn('[QS] WebGL warp unavailable, using CPU fallback:', e);
+    _glFailed = true;
+    _gl = null;
+    return false;
+  }
+}
+
+function _glWarp(targetCtx, cw, ch, s) {
+  if (!_glInit()) return false;
+  const gl = _gl;
+
+  if (_glCanvas.width !== cw || _glCanvas.height !== ch) {
+    _glCanvas.width = cw; _glCanvas.height = ch;
+  }
+  if (gl.drawingBufferWidth < cw || gl.drawingBufferHeight < ch) return false;
+
+  const sw = srcTexCanvas.width, sh = srcTexCanvas.height;
+
+  gl.viewport(0, 0, cw, ch);
+  gl.useProgram(_glProg);
+
+  gl.activeTexture(gl.TEXTURE0);
+  let tex = _glTexCache.get(srcTexCanvas);
+  if (!tex) {
+    tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcTexCanvas);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    _glTexCache.set(srcTexCanvas, tex);
+  } else {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+  }
+
+  const src = [[0, 0], [sw, 0], [0, sh], [sw, sh]];
+  const dst = [[s.tl.x, s.tl.y], [s.tr.x, s.tr.y], [s.bl.x, s.bl.y], [s.br.x, s.br.y]];
+  const Hinv = computeH(dst, src);   // house px -> window texture px (row-major)
+  const [a, b, c, d, e, f, g, h, i] = Hinv;
+  gl.uniformMatrix3fv(_glLoc.H, false, new Float32Array([a, d, g, b, e, h, c, f, i]));
+  gl.uniform1i(_glLoc.tex, 0);
+  gl.uniform2f(_glLoc.src, sw, sh);
+  gl.uniform1f(_glLoc.canvasH, ch);
+  gl.uniform1f(_glLoc.opacity, _curOp != null ? _curOp : +document.getElementById('opacitySlider').value / 100);
+  gl.uniform1f(_glLoc.bright,  _curBr != null ? _curBr : +document.getElementById('brightnessSlider').value / 100);
+  gl.uniform1f(_glLoc.reflect, +document.getElementById('reflectSlider').value / 100);
+
+  gl.disable(gl.BLEND);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  targetCtx.save();
+  targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+  targetCtx.drawImage(_glCanvas, 0, 0, cw, ch, 0, 0, cw, ch);
+  targetCtx.restore();
+  return true;
+}
+
 function _applyHomographyWarp(targetCtx, cw, ch, dstCorners) {
+  try {
+    if (_glWarp(targetCtx, cw, ch, dstCorners)) return;
+  } catch (e) {
+    console.warn('[QS] WebGL warp failed, switching to CPU:', e);
+    _glFailed = true;
+  }
+  _applyHomographyWarpCPU(targetCtx, cw, ch, dstCorners);
+}
+
+function _applyHomographyWarpCPU(targetCtx, cw, ch, dstCorners) {
   const sw = srcTexCanvas.width, sh = srcTexCanvas.height;
 
   // compute homography src (window canvas) → dst (given quad, already in
@@ -783,8 +1379,8 @@ function _applyHomographyWarp(targetCtx, cw, ch, dstCorners) {
   const y0   = Math.max(0, Math.floor(Math.min(...ys)));
   const y1   = Math.min(ch, Math.ceil(Math.max(...ys)));
 
-  const opacity    = +document.getElementById('opacitySlider').value / 100;
-  const brightness = +document.getElementById('brightnessSlider').value / 100;
+  const opacity    = _curOp != null ? _curOp : +document.getElementById('opacitySlider').value / 100;
+  const brightness = _curBr != null ? _curBr : +document.getElementById('brightnessSlider').value / 100;
 
   const srcCtx  = srcTexCanvas.getContext('2d');
   const srcData = srcCtx.getImageData(0, 0, sw, sh).data;
@@ -854,11 +1450,110 @@ function applyH(H, x, y) {
 }
 
 /* ================================================================
+   REALISM — soft contact shadow + daylight matching
+   ================================================================ */
+function _drawWindowShadow(ctx, s) {
+  const amt = +document.getElementById('shadowSlider').value / 100;
+  if (!amt) return;
+  const cw = ctx.canvas.width, ch = ctx.canvas.height;
+  const w    = Math.hypot(s.tr.x - s.tl.x, s.tr.y - s.tl.y);
+  const blur = Math.max(4, w * 0.035);
+  const off  = Math.max(2, w * 0.012);
+  const BIG  = 100000;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // clip out the window quad so the shadow never tints the glass itself
+  ctx.beginPath();
+  ctx.rect(0, 0, cw, ch);
+  ctx.moveTo(s.tl.x, s.tl.y);
+  ctx.lineTo(s.tr.x, s.tr.y);
+  ctx.lineTo(s.br.x, s.br.y);
+  ctx.lineTo(s.bl.x, s.bl.y);
+  ctx.closePath();
+  ctx.clip('evenodd');
+
+  // draw the shape far off-canvas; only its offset shadow lands on the photo
+  ctx.shadowColor   = 'rgba(0,0,0,' + (0.45 * amt) + ')';
+  ctx.shadowBlur    = blur;
+  ctx.shadowOffsetX = BIG + off;
+  ctx.shadowOffsetY = off * 1.4;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.moveTo(s.tl.x - BIG, s.tl.y);
+  ctx.lineTo(s.tr.x - BIG, s.tr.y);
+  ctx.lineTo(s.br.x - BIG, s.br.y);
+  ctx.lineTo(s.bl.x - BIG, s.bl.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function matchDaylight() {
+  if (!corners) return;
+  try {
+    const cw = houseCanvas.width, ch = houseCanvas.height;
+    const c  = document.createElement('canvas');
+    c.width = cw; c.height = ch;
+    const x = c.getContext('2d');
+    drawBackground(x, cw, ch);
+
+    const pts = ['tl','tr','bl','br'].map(k => corners[k]);
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const bw = Math.max(...xs) - Math.min(...xs);
+    const bh = Math.max(...ys) - Math.min(...ys);
+    const padX = bw * 0.4, padY = bh * 0.4;
+    const x0 = Math.max(0, Math.floor(Math.min(...xs) - padX));
+    const y0 = Math.max(0, Math.floor(Math.min(...ys) - padY));
+    const x1 = Math.min(cw, Math.ceil(Math.max(...xs) + padX));
+    const y1 = Math.min(ch, Math.ceil(Math.max(...ys) + padY));
+    if (x1 - x0 < 2 || y1 - y0 < 2) return;
+
+    const d = x.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+    let sum = 0, n = 0;
+    for (let i = 0; i < d.length; i += 16) {
+      sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      n++;
+    }
+    const lum = n ? sum / n / 255 : 0.6;          // 0..1 scene brightness
+    const b   = Math.min(1.6, Math.max(0.4, 0.55 + lum * 0.6));
+    const pct = Math.round(b * 100);
+
+    document.getElementById('brightnessSlider').value = pct;
+    document.getElementById('brVal').textContent = pct + '%';
+    if (openings[activeIdx]) openings[activeIdx].brightness = pct / 100;
+    scheduleVis();
+  } catch (e) {
+    console.warn('[QS] matchDaylight failed:', e);
+  }
+}
+
+/* ================================================================
    HANDLE DRAWING
    ================================================================ */
 function drawHandles() {
   if (!corners) return;
   const ctx = houseCtx;
+
+  // faint outline + number badge for the other openings
+  openings.forEach((op, i) => {
+    if (i === activeIdx || !op.corners) return;
+    const o = { tl: toScreen(op.corners.tl), tr: toScreen(op.corners.tr),
+                bl: toScreen(op.corners.bl), br: toScreen(op.corners.br) };
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(o.tl.x, o.tl.y); ctx.lineTo(o.tr.x, o.tr.y);
+    ctx.lineTo(o.br.x, o.br.y); ctx.lineTo(o.bl.x, o.bl.y);
+    ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(o.tl.x + 12, o.tl.y + 12, 9, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(27,36,48,.85)'; ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 10px Inter, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(i + 1), o.tl.x + 12, o.tl.y + 12);
+    ctx.restore();
+  });
   const s = { tl: toScreen(corners.tl), tr: toScreen(corners.tr),
               bl: toScreen(corners.bl), br: toScreen(corners.br) };
   ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
@@ -964,6 +1659,7 @@ async function saveVisState() {
           br: [corners.br.x, corners.br.y],
         },
         opacity, brightness,
+        openings: _openingsPayload(),
       }),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -1005,15 +1701,8 @@ function buildExportCanvas() {
 
   drawBackground(ectx, ex.width, ex.height);
 
-  if (showOverlay && srcTexCanvas && corners) {
-    const s = {
-      tl: { x: corners.tl.x * exportScale, y: corners.tl.y * exportScale },
-      tr: { x: corners.tr.x * exportScale, y: corners.tr.y * exportScale },
-      bl: { x: corners.bl.x * exportScale, y: corners.bl.y * exportScale },
-      br: { x: corners.br.x * exportScale, y: corners.br.y * exportScale },
-    };
-    _applyHomographyWarp(ectx, ex.width, ex.height, s);
-  }
+  _paintAll(ectx, ex.width, ex.height,
+            p => ({ x: p.x * exportScale, y: p.y * exportScale }));
   return ex;
 }
 

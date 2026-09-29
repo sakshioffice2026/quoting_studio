@@ -23,11 +23,22 @@ def view(project_id, window_id):
 
         render_url = ('/uploads/' + vis.rendered_path) if (vis and vis.rendered_path) else None
 
+        # render URL for every window in the project (used by multi-opening designs)
+        render_urls = {}
+        for w in all_windows:
+            wv = (Visualisation.query
+                  .filter_by(window_id=w.id)
+                  .order_by(Visualisation.created_at.desc())
+                  .first())
+            if wv and wv.rendered_path:
+                render_urls[w.id] = '/uploads/' + wv.rendered_path
+
         return render_template('visualiser.html',
                                project=project,
                                window=window,
                                vis=vis,
                                render_url=render_url,
+                               render_urls=render_urls,
                                all_windows=all_windows)
     except Exception as exc:
         current_app.logger.exception('Visualiser load error: %s', exc)
