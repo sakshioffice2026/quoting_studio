@@ -251,3 +251,69 @@ def mark_lost(quotation_id):
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
     return redirect(url_for('quotation.detail', quotation_id=quotation_id))
+
+
+# ------------------------------------------------------------------ #
+#  POST /quotations/<id>/edit
+# ------------------------------------------------------------------ #
+@quotation_bp.route('/quotations/<int:quotation_id>/edit', methods=['POST'])
+@login_required
+def edit(quotation_id):
+    other_labels  = request.form.getlist('other_charge_label[]')
+    other_amounts = request.form.getlist('other_charge_amount[]')
+    other_charges = []
+    try:
+        for label, amount in zip(other_labels, other_amounts):
+            if label.strip() and amount.strip():
+                other_charges.append({'label': label.strip(), 'amount': float(amount)})
+    except ValueError:
+        flash('Other charge amounts must be numbers.', 'error')
+        return redirect(url_for('quotation.detail', quotation_id=quotation_id))
+
+    amc_offered    = request.form.get('amc_offered') in ('1', 'true', 'on', 'yes')
+    amc_offer_tier = request.form.get('amc_offer_tier') or None
+    if amc_offered and amc_offer_tier not in AmcTier.ALL:
+        flash('AMC tier must be Basic, Standard or Premium.', 'error')
+        return redirect(url_for('quotation.detail', quotation_id=quotation_id))
+
+    try:
+        q = quotation_service.update_quotation(
+            tenant_id              = current_user.tenant_id,
+            quotation_id           = quotation_id,
+            discount_pct           = request.form.get('discount_pct',        type=float, default=0.0),
+            validity_days          = request.form.get('validity_days',       type=int,   default=30),
+            payment_terms_template = request.form.get('payment_terms_template') or None,
+            installation_charge    = request.form.get('installation_charge', type=float, default=0.0),
+            transport_charge       = request.form.get('transport_charge',    type=float, default=0.0),
+            other_charges          = other_charges,
+            amc_offered            = amc_offered,
+            amc_offer_tier         = amc_offer_tier,
+            amc_price              = request.form.get('amc_price',           type=float, default=0.0),
+            warranty_months        = request.form.get('warranty_months',     type=int,   default=12),
+            warranty_terms_text    = request.form.get('warranty_terms_text') or None,
+        )
+        if q.status == QuotationStatus.PENDING_DISCOUNT_APPROVAL:
+            flash(
+                f'Quotation {q.quotation_number} updated — discount requires manager approval before sending.',
+                'warning',
+            )
+        else:
+            flash(f'Quotation {q.quotation_number} updated.', 'success')
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('quotation.detail', quotation_id=quotation_id))
+
+
+# ------------------------------------------------------------------ #
+#  POST /quotations/<id>/delete
+# ------------------------------------------------------------------ #
+@quotation_bp.route('/quotations/<int:quotation_id>/delete', methods=['POST'])
+@login_required
+def delete(quotation_id):
+    try:
+        number = quotation_service.delete_quotation(current_user.tenant_id, quotation_id)
+        flash(f'Quotation {number} deleted.', 'success')
+        return redirect(url_for('quotation.index'))
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('quotation.detail', quotation_id=quotation_id))

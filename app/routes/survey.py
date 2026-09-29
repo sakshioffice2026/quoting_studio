@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 
 from ..services.domain import survey_service, preliminary_selection_service, lead_service
+from ..models.survey import SurveyStatus
 
 survey_bp = Blueprint('survey', __name__)
 
@@ -39,6 +40,19 @@ def schedule(presel_id):
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
         return redirect(url_for('presel.detail', presel_id=presel_id))
+
+
+@survey_bp.route('/surveys')
+@login_required
+def index():
+    status = request.args.get('status') or None
+    surveys = survey_service.list_surveys(current_user.tenant_id, status=status)
+    return render_template(
+        'surveys.html',
+        surveys=surveys,
+        status_filter=status,
+        SurveyStatus=SurveyStatus,
+    )
 
 
 @survey_bp.route('/surveys/<int:survey_id>')

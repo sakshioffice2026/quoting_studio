@@ -11,7 +11,8 @@
         <h1>Pick from Gallery</h1>
         <div class="sub mono">{{ quotation.quotation_number }} · {{ quotation.project.customer_name }}</div>
       </div>
-      <div>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn btn-primary" id="adAddSeries">+ Add Series</button>
         <a href="{{ url_for('quotation_flow.builder', quotation_id=quotation.id) }}" class="btn btn-secondary">← Back to Builder</a>
       </div>
     </div>
@@ -44,19 +45,57 @@
       .pv-fallback { font-size:13px; color:#6B7280; }
       .pv-fallback a { color:var(--copper); text-decoration:underline; }
       .pv-btns { display:flex; gap:8px; }
+
+      .gl-wrap { display:flex; flex-direction:column; gap:6px; }
+      .gl-actions { display:flex; gap:6px; }
+      .gl-actions form { display:inline; margin:0; }
+      .gl-danger { color:#B91C1C !important; }
+      .gl-series-actions { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; }
+      .gl-series-actions form { display:inline; margin:0; }
+      .gl-thumb { width:36px; height:36px; object-fit:cover; border-radius:6px; border:1px solid #E5E7EB; }
+      .gl-badge { font-size:11px; color:#6B7280; }
+
+      .ad-overlay { position:fixed; inset:0; background:rgba(15,23,42,.6); display:none; align-items:center; justify-content:center; z-index:1200; padding:16px; }
+      .ad-overlay.open { display:flex; }
+      .ad-modal { background:#fff; width:100%; max-width:480px; max-height:92vh; overflow:auto; border-radius:12px; box-shadow:0 20px 50px rgba(0,0,0,.4); }
+      .ad-head { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid #E5E7EB; }
+      .ad-head h3 { margin:0; font-size:17px; color:var(--navy); }
+      .ad-x { background:none; border:0; font-size:26px; line-height:1; cursor:pointer; color:#6B7280; }
+      .ad-body { padding:16px 20px; }
+      .ad-foot { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid #E5E7EB; }
+      .ad-check { display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:8px; }
     </style>
 
     {% if gallery %}
       {% for entry in gallery %}
       <div class="gl-series ui-card">
         <div class="gl-series-head">
+          {% if entry.series.thumbnail %}<img class="gl-thumb" src="{{ entry.series.thumbnail }}" alt="">{% endif %}
           <h3>{{ entry.series.name }}</h3>
           <span class="m">{{ entry.series.material }}{% if entry.series.description %} · {{ entry.series.description }}{% endif %}</span>
+          <div class="gl-series-actions">
+            <button type="button" class="btn btn-secondary btn-sm"
+                    data-add-style
+                    data-series-id="{{ entry.series.id }}"
+                    data-series-name="{{ entry.series.name }}">+ Add Product</button>
+            <button type="button" class="btn btn-secondary btn-sm"
+                    data-edit-series
+                    data-action="{{ url_for('quotation_flow.series_update', quotation_id=quotation.id, series_id=entry.series.id) }}"
+                    data-name="{{ entry.series.name }}"
+                    data-material="{{ entry.series.material or '' }}"
+                    data-description="{{ entry.series.description or '' }}">Edit</button>
+            <form method="post" action="{{ url_for('quotation_flow.series_delete', quotation_id=quotation.id, series_id=entry.series.id) }}"
+                  onsubmit="return confirm('Delete series &quot;{{ entry.series.name }}&quot; and all its products?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-secondary btn-sm gl-danger">Delete</button>
+            </form>
+          </div>
         </div>
 
         {% if entry.styles %}
         <div class="gl-grid">
           {% for s in entry.styles %}
+          <div class="gl-wrap">
           <button type="button" class="gl-card"
                   data-preview
                   data-name="{{ s.name }}"
@@ -71,9 +110,24 @@
             </div>
             <div class="gl-body">
               <div class="gl-name">{{ s.name }}</div>
-              <div class="gl-meta">{{ s.panels }} panel{{ 's' if s.panels != 1 }}</div>
+              <div class="gl-meta">{{ s.panels }} panel{{ 's' if s.panels != 1 }}{% if s.pdf_url %} · <span class="gl-badge">PDF</span>{% endif %}</div>
             </div>
           </button>
+          <div class="gl-actions">
+            <button type="button" class="btn btn-secondary btn-sm"
+                    data-edit-style
+                    data-action="{{ url_for('quotation_flow.style_update', quotation_id=quotation.id, style_id=s.id) }}"
+                    data-name="{{ s.name }}"
+                    data-panels="{{ s.panels }}"
+                    data-has-image="{{ '1' if s.image else '' }}"
+                    data-has-pdf="{{ '1' if s.pdf_url else '' }}">Edit</button>
+            <form method="post" action="{{ url_for('quotation_flow.style_delete', quotation_id=quotation.id, style_id=s.id) }}"
+                  onsubmit="return confirm('Delete product &quot;{{ s.name }}&quot;?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-secondary btn-sm gl-danger">Delete</button>
+            </form>
+          </div>
+          </div>
           {% endfor %}
         </div>
         {% else %}
@@ -91,6 +145,90 @@
       </div>
     {% endif %}
 
+  </div>
+</div>
+
+{# ---------- Series modal (add / edit) ---------- #}
+<div class="ad-overlay" id="adSeriesOverlay" aria-hidden="true">
+  <div class="ad-modal" role="dialog" aria-modal="true">
+    <form method="post" enctype="multipart/form-data" id="adSeriesForm" action="{{ url_for('quotation_flow.series_create', quotation_id=quotation.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="ad-head">
+        <h3 id="adSeriesTitle">Add Series</h3>
+        <button type="button" class="ad-x" data-ad-close>&times;</button>
+      </div>
+      <div class="ad-body">
+        <div class="form-group">
+          <label class="form-label" for="adSeriesName">Series name</label>
+          <input type="text" class="form-control" id="adSeriesName" name="name" maxlength="120" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="adSeriesMaterial">Material</label>
+          <input type="text" class="form-control" id="adSeriesMaterial" name="material" maxlength="50" value="Aluminium">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="adSeriesDesc">Description</label>
+          <textarea class="form-control" id="adSeriesDesc" name="description" rows="2" maxlength="400"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="adSeriesImage">Image (PNG, JPG, WEBP — max 5 MB)</label>
+          <input type="file" class="form-control" id="adSeriesImage" name="image" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="adSeriesPdf">Brochure PDF (max 25 MB)</label>
+          <input type="file" class="form-control" id="adSeriesPdf" name="pdf" accept=".pdf,application/pdf">
+        </div>
+        <label class="ad-check" id="adSeriesRemovePdfRow" style="display:none;">
+          <input type="checkbox" name="remove_pdf" value="1"> Remove existing PDF
+        </label>
+      </div>
+      <div class="ad-foot">
+        <button type="button" class="btn btn-secondary" data-ad-close>Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ---------- Product (style) modal (add / edit) ---------- #}
+<div class="ad-overlay" id="adStyleOverlay" aria-hidden="true">
+  <div class="ad-modal" role="dialog" aria-modal="true">
+    <form method="post" enctype="multipart/form-data" id="adStyleForm" action="{{ url_for('quotation_flow.style_create', quotation_id=quotation.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="series_id" id="adStyleSeriesId" value="">
+      <div class="ad-head">
+        <h3 id="adStyleTitle">Add Product</h3>
+        <button type="button" class="ad-x" data-ad-close>&times;</button>
+      </div>
+      <div class="ad-body">
+        <div class="form-group">
+          <label class="form-label" for="adStyleName">Product name</label>
+          <input type="text" class="form-control" id="adStyleName" name="name" maxlength="120" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="adStylePanels">Panels</label>
+          <input type="number" class="form-control" id="adStylePanels" name="panels" min="1" value="1" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="adStyleImage">Image (PNG, JPG, WEBP — max 5 MB)</label>
+          <input type="file" class="form-control" id="adStyleImage" name="image" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="adStylePdf">Brochure PDF (max 25 MB)</label>
+          <input type="file" class="form-control" id="adStylePdf" name="pdf" accept=".pdf,application/pdf">
+        </div>
+        <label class="ad-check" id="adStyleRemoveImageRow" style="display:none;">
+          <input type="checkbox" name="remove_image" value="1"> Remove existing image
+        </label>
+        <label class="ad-check" id="adStyleRemovePdfRow" style="display:none;">
+          <input type="checkbox" name="remove_pdf" value="1"> Remove existing PDF
+        </label>
+      </div>
+      <div class="ad-foot">
+        <button type="button" class="btn btn-secondary" data-ad-close>Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -168,6 +306,89 @@
   document.getElementById('pvClose').addEventListener('click', close);
   overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && overlay.classList.contains('open')) close(); });
+})();
+</script>
+
+<script>
+(function () {
+  var CREATE_SERIES = "{{ url_for('quotation_flow.series_create', quotation_id=quotation.id) }}";
+  var CREATE_STYLE  = "{{ url_for('quotation_flow.style_create', quotation_id=quotation.id) }}";
+
+  var sOverlay = document.getElementById('adSeriesOverlay');
+  var sForm    = document.getElementById('adSeriesForm');
+  var stOverlay = document.getElementById('adStyleOverlay');
+  var stForm    = document.getElementById('adStyleForm');
+
+  function show(o) { o.classList.add('open'); o.setAttribute('aria-hidden', 'false'); document.body.style.overflow = 'hidden'; }
+  function hide(o) { o.classList.remove('open'); o.setAttribute('aria-hidden', 'true'); document.body.style.overflow = ''; }
+
+  function openSeries(opts) {
+    sForm.reset();
+    sForm.action = opts.action;
+    document.getElementById('adSeriesTitle').textContent = opts.title;
+    document.getElementById('adSeriesName').value = opts.name || '';
+    document.getElementById('adSeriesMaterial').value = opts.material || 'Aluminium';
+    document.getElementById('adSeriesDesc').value = opts.description || '';
+    document.getElementById('adSeriesRemovePdfRow').style.display = opts.edit ? 'flex' : 'none';
+    show(sOverlay);
+  }
+
+  function openStyle(opts) {
+    stForm.reset();
+    stForm.action = opts.action;
+    document.getElementById('adStyleTitle').textContent = opts.title;
+    document.getElementById('adStyleSeriesId').value = opts.seriesId || '';
+    document.getElementById('adStyleName').value = opts.name || '';
+    document.getElementById('adStylePanels').value = opts.panels || 1;
+    document.getElementById('adStyleRemoveImageRow').style.display = opts.hasImage ? 'flex' : 'none';
+    document.getElementById('adStyleRemovePdfRow').style.display = opts.hasPdf ? 'flex' : 'none';
+    show(stOverlay);
+  }
+
+  document.getElementById('adAddSeries').addEventListener('click', function () {
+    openSeries({ action: CREATE_SERIES, title: 'Add Series' });
+  });
+
+  document.querySelectorAll('[data-edit-series]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      openSeries({
+        action: b.dataset.action, title: 'Edit Series', edit: true,
+        name: b.dataset.name, material: b.dataset.material, description: b.dataset.description
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-add-style]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      openStyle({
+        action: CREATE_STYLE, title: 'Add Product to ' + b.dataset.seriesName,
+        seriesId: b.dataset.seriesId
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-edit-style]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      openStyle({
+        action: b.dataset.action, title: 'Edit Product',
+        name: b.dataset.name, panels: b.dataset.panels,
+        hasImage: !!b.dataset.hasImage, hasPdf: !!b.dataset.hasPdf
+      });
+    });
+  });
+
+  [sOverlay, stOverlay].forEach(function (o) {
+    o.addEventListener('click', function (e) { if (e.target === o) hide(o); });
+    o.querySelectorAll('[data-ad-close]').forEach(function (x) {
+      x.addEventListener('click', function () { hide(o); });
+    });
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (sOverlay.classList.contains('open')) hide(sOverlay);
+    if (stOverlay.classList.contains('open')) hide(stOverlay);
+  });
 })();
 </script>
 {% endblock %}

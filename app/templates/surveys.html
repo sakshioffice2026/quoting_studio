@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+{% from '_ui_macros.html' import pill %}
+{% block title %}Surveys — FenestraOne{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    {% set tone_map = {
+      'SURVEY-SCHEDULED': 'info', 'SURVEY-COMPLETED': 'success',
+      'SURVEY-ISSUES_FOUND': 'warn', 'SURVEY-RESCHEDULED': 'neutral'
+    } %}
+
+    <div class="page-header">
+      <div>
+        <h1>Surveys</h1>
+        <div class="sub mono">{{ surveys|length }} record{{ 's' if surveys|length != 1 }}</div>
+      </div>
+    </div>
+
+    <style>
+      .sv-filters { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+      .sv-name { font-weight:600; color:var(--navy); }
+      .sv-name:hover { color:var(--copper); }
+    </style>
+
+    <div class="ui-card">
+      <div class="sv-filters">
+        <a href="{{ url_for('survey.index') }}"
+           class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
+        {% for code in SurveyStatus.ALL %}
+        <a href="{{ url_for('survey.index', status=code) }}"
+           class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">
+          {{ SurveyStatus.LABELS[code] }}
+        </a>
+        {% endfor %}
+      </div>
+
+      {% if surveys %}
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Project</th>
+              <th>Surveyor</th>
+              <th>Scheduled</th>
+              <th>Completed</th>
+              <th style="text-align:center;">Openings</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in surveys %}
+            <tr>
+              <td>
+                {% if s.lead %}
+                  <a href="{{ url_for('leads.detail', lead_id=s.lead_id) }}" class="sv-name">{{ s.lead.display_name }}</a>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if s.project %}
+                  <a href="{{ url_for('projects.detail', project_id=s.project_id) }}" class="sv-name">{{ s.project.display_name }}</a>
+                {% else %}—{% endif %}
+              </td>
+              <td>{{ s.surveyor_name or '—' }}</td>
+              <td class="muted mono" style="font-size:12px;">{{ s.scheduled_date.strftime('%d %b %Y') if s.scheduled_date else '—' }}</td>
+              <td class="muted mono" style="font-size:12px;">{{ s.completed_date.strftime('%d %b %Y') if s.completed_date else '—' }}</td>
+              <td class="mono" style="font-size:12px; text-align:center;">{{ s.opening_count }}</td>
+              <td>{{ pill(s.status_label, tone_map.get(s.status, 'neutral')) }}</td>
+              <td style="text-align:right; white-space:nowrap;">
+                <a href="{{ url_for('survey.detail', survey_id=s.id) }}" class="btn btn-secondary btn-sm">View →</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">📐</div>
+        <p>No surveys yet. Schedule one from a shortlisted preliminary selection.</p>
+        <a href="{{ url_for('leads.index') }}" class="btn btn-primary">Go to Leads</a>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}

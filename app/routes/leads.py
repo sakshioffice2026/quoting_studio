@@ -1,6 +1,7 @@
-from flask import Blueprint, render_template, current_app, request, redirect, url_for, flash
+from flask import Blueprint, render_template, current_app, request, redirect, url_for, flash, jsonify
 from flask_login import login_required, current_user
 
+from ..extensions import db
 from ..models import User
 from ..models.lead import LeadStatus, FollowUpStatus
 from ..services.domain import lead_service, interaction_service, preliminary_selection_service, survey_service
@@ -19,17 +20,157 @@ def index():
     return render_template('leads.html', leads=leads, status_filter=status, LeadStatus=LeadStatus)
 
 
+TIMELINE_STAGES = [
+    ('lead',         'Lead'),
+    ('presel',       'Preliminary'),
+    ('survey',       'Survey'),
+    ('design',       'Design'),
+    ('quotation',    'Quotation'),
+    ('order',        'Order'),
+    ('delivery',     'Delivery'),
+    ('installation', 'Installation'),
+]
+TIMELINE_STAGE_LABELS = dict(TIMELINE_STAGES)
+TIMELINE_STAGE_ORDER = {key: i for i, (key, _) in enumerate(TIMELINE_STAGES)}
+TIMELINE_PAGE_SIZE = 20
+
+
+def _lead_stages(leads) -> dict:
+    """Furthest workflow stage reached per lead — batched, no per-lead queries."""
+    from ..models import (PreliminarySelection, Survey, Quotation, Order,
+                          Delivery, Installation)
+
+    lead_ids = [l.id for l in leads]
+    project_ids = list({l.project_id for l in leads if l.project_id})
+    if not lead_ids:
+        return {}
+
+    presel_leads = {r[0] for r in db.session.query(PreliminarySelection.lead_id)
+                    .filter(PreliminarySelection.lead_id.in_(lead_ids)).all()}
+    survey_leads = {r[0] for r in db.session.query(Survey.lead_id)
+                    .filter(Survey.lead_id.in_(lead_ids)).all()}
+
+    quoted_projects, orders_by_project = set(), {}
+    delivered_orders, installed_orders = set(), set()
+    if project_ids:
+        quoted_projects = {r[0] for r in db.session.query(Quotation.project_id)
+                           .filter(Quotation.project_id.in_(project_ids)).all()}
+        for oid, pid in (db.session.query(Order.id, Order.project_id)
+                         .filter(Order.project_id.in_(project_ids)).all()):
+            orders_by_project.setdefault(pid, []).append(oid)
+        all_order_ids = [oid for ids in orders_by_project.values() for oid in ids]
+        if all_order_ids:
+            delivered_orders = {r[0] for r in db.session.query(Delivery.order_id)
+                                .filter(Delivery.order_id.in_(all_order_ids)).all()}
+            installed_orders = {r[0] for r in db.session.query(Installation.order_id)
+                                .filter(Installation.order_id.in_(all_order_ids)).all()}
+
+    stages = {}
+    for l in leads:
+        stage = 'lead'
+        if l.id in presel_leads:
+            stage = 'presel'
+        if l.id in survey_leads:
+            stage = 'survey'
+        if l.project_id:
+            stage = 'design'
+            if l.project_id in quoted_projects:
+                stage = 'quotation'
+            order_ids = orders_by_project.get(l.project_id, [])
+            if order_ids:
+                stage = 'order'
+                if any(o in delivered_orders for o in order_ids):
+                    stage = 'delivery'
+                if any(o in installed_orders for o in order_ids):
+                    stage = 'installation'
+        stages[l.id] = stage
+    return stages
+
+
+def _timeline_all(tenant_id: int, q: str = '') -> list:
+    leads = lead_service.list_leads(tenant_id)
+    term = (q or '').strip().lower()
+    if term:
+        def hit(l):
+            hay = ' '.join(filter(None, [
+                l.customer_name, l.project_name, l.phone, l.email, l.project_city,
+            ])).lower()
+            return term in hay
+        leads = [l for l in leads if hit(l)]
+
+    stages = _lead_stages(leads)
+    rows = []
+    for l in leads:
+        key = stages.get(l.id, 'lead')
+        rows.append({
+            'id':           l.id,
+            'name':         l.display_name,
+            'customer':     l.customer_name,
+            'phone':        l.phone or '',
+            'city':         l.project_city or '',
+            'status_label': l.status_label,
+            'stage':        key,
+            'stage_label':  TIMELINE_STAGE_LABELS[key],
+            'stage_index':  TIMELINE_STAGE_ORDER[key],
+            'url':          url_for('leads.flow', lead_id=l.id),
+        })
+    return rows
+
+
 @leads_bp.route('/timeline')
 @login_required
 def timeline_index():
-    """Sidebar shortcut — pick any lead and open its project timeline."""
-    status = request.args.get('status') or None
+    """Sidebar shortcut — search projects, filter by stage, open a timeline."""
+    q = (request.args.get('q') or '').strip()
+    stage = request.args.get('stage') or None
+    if stage not in TIMELINE_STAGE_LABELS:
+        stage = None
+    page = max(request.args.get('page', 1, type=int) or 1, 1)
+
     try:
-        leads = lead_service.list_leads(current_user.tenant_id, status=status)
+        rows = _timeline_all(current_user.tenant_id, q)
     except Exception as exc:
         current_app.logger.exception('Timeline index error: %s', exc)
-        leads = []
-    return render_template('timeline_index.html', leads=leads, status_filter=status, LeadStatus=LeadStatus)
+        rows = []
+
+    stage_counts = {key: 0 for key, _ in TIMELINE_STAGES}
+    for r in rows:
+        stage_counts[r['stage']] += 1
+
+    filtered = [r for r in rows if r['stage'] == stage] if stage else rows
+    total = len(filtered)
+    pages = max((total + TIMELINE_PAGE_SIZE - 1) // TIMELINE_PAGE_SIZE, 1)
+    page = min(page, pages)
+    start = (page - 1) * TIMELINE_PAGE_SIZE
+
+    return render_template(
+        'timeline_index.html',
+        rows=filtered[start:start + TIMELINE_PAGE_SIZE],
+        total=total,
+        all_total=len(rows),
+        page=page,
+        pages=pages,
+        q=q,
+        stage_filter=stage,
+        stages=TIMELINE_STAGES,
+        stage_counts=stage_counts,
+    )
+
+
+@leads_bp.route('/timeline/search')
+@login_required
+def timeline_search():
+    """Live search feed for the timeline page (top 8 matches)."""
+    q = (request.args.get('q') or '').strip()
+    stage = request.args.get('stage') or None
+    try:
+        rows = _timeline_all(current_user.tenant_id, q)
+    except Exception as exc:
+        current_app.logger.exception('Timeline search error: %s', exc)
+        rows = []
+    if stage in TIMELINE_STAGE_LABELS:
+        rows = [r for r in rows if r['stage'] == stage]
+    return jsonify(rows[:8])
 
 
 @leads_bp.route('/leads/new', methods=['GET', 'POST'])

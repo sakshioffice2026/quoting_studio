@@ -88,8 +88,17 @@
             <td class="muted mono" style="font-size:12px;">
               {{ q.sent_at.strftime('%d %b %Y') if q.sent_at else '—' }}
             </td>
-            <td style="text-align:right;">
+            <td style="text-align:right; white-space:nowrap;">
               <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}" class="btn btn-secondary btn-sm">View →</a>
+              {% if q.is_editable %}
+              <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}#edit-quotation" class="btn btn-secondary btn-sm">Edit</a>
+              {% endif %}
+              {% if q.status != QuotationStatus.ACCEPTED %}
+              <form method="post" action="{{ url_for('quotation.delete', quotation_id=q.id) }}" style="display:inline;" onsubmit="return confirm('Delete quotation {{ q.quotation_number }}? This cannot be undone.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-secondary btn-sm" style="color:#B91C1C;">Delete</button>
+              </form>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}

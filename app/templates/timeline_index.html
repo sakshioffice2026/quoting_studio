@@ -8,51 +8,246 @@
     <div class="page-header">
       <div>
         <h1>Timeline</h1>
-        <div class="sub mono">Select a project to view its workflow timeline</div>
+        <div class="sub mono">Search a project to view its workflow timeline · {{ all_total }} project{{ 's' if all_total != 1 }}</div>
       </div>
     </div>
 
-    {% if leads %}
-    <div class="action-panel action-panel-wide" style="max-width:560px;">
-      <h4 class="action-title">Project</h4>
-      <div class="form-group">
-        <label class="form-label" for="timeline_project">Choose project</label>
-        <select class="form-control" id="timeline_project">
-          <option value="">Select a project…</option>
-          {% for lead in leads %}
-          <option value="{{ url_for('leads.flow', lead_id=lead.id) }}">
-            {{ lead.display_name }} ({{ lead.customer_name }}) — {{ lead.status_label }}
-          </option>
-          {% endfor %}
-        </select>
+    {# ---------- 1. Search ---------- #}
+    <div class="ui-card tl-search-card">
+      <form method="get" action="{{ url_for('leads.timeline_index') }}" class="tl-search-form" autocomplete="off">
+        {% if stage_filter %}<input type="hidden" name="stage" value="{{ stage_filter }}">{% endif %}
+        <div class="tl-search-wrap">
+          <input type="search" name="q" id="tlSearch" class="form-control tl-search-input"
+                 value="{{ q }}" placeholder="Search by project, customer, phone, email or city…"
+                 aria-label="Search projects" autofocus>
+          <div class="tl-suggest" id="tlSuggest" role="listbox" hidden></div>
+        </div>
+        <button type="submit" class="btn btn-primary">Search</button>
+        {% if q or stage_filter %}
+        <a href="{{ url_for('leads.timeline_index') }}" class="btn btn-secondary">Clear</a>
+        {% endif %}
+      </form>
+
+      {# ---------- 2. Recent projects ---------- #}
+      <div class="tl-recent" id="tlRecent" hidden>
+        <span class="tl-label">Recent</span>
+        <span class="tl-recent-list" id="tlRecentList"></span>
+        <button type="button" class="tl-clear" id="tlRecentClear">Clear</button>
       </div>
-      <button type="button" class="btn btn-primary btn-sm" id="timeline_open" disabled>Open Timeline →</button>
     </div>
 
-    <script>
-      (function () {
-        var select = document.getElementById('timeline_project');
-        var button = document.getElementById('timeline_open');
-
-        function go() {
-          if (select.value) { window.location.href = select.value; }
-        }
-
-        select.addEventListener('change', function () {
-          button.disabled = !select.value;
-          go();
-        });
-        button.addEventListener('click', go);
-      })();
-    </script>
-
-    {% else %}
-    <div class="empty-state">
-      <div class="icon">◱</div>
-      <p>No projects yet. Capture a lead to start a timeline.</p>
-      <a href="{{ url_for('leads.new') }}" class="btn btn-primary">+ New Lead</a>
+    {# ---------- 3. Stage filter ---------- #}
+    <div class="tl-stages">
+      <a href="{{ url_for('leads.timeline_index', q=q or None) }}"
+         class="tl-stage {{ 'active' if not stage_filter }}">All <span>{{ all_total }}</span></a>
+      {% for key, label in stages %}
+      <a href="{{ url_for('leads.timeline_index', q=q or None, stage=key) }}"
+         class="tl-stage {{ 'active' if stage_filter == key }} {{ 'empty' if not stage_counts[key] }}">{{ label }} <span>{{ stage_counts[key] }}</span></a>
+      {% endfor %}
     </div>
-    {% endif %}
+
+    {# ---------- Results ---------- #}
+    <div class="ui-card">
+      {% if rows %}
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Project</th>
+              <th>Customer</th>
+              <th>Phone</th>
+              <th>City</th>
+              <th>Progress</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td>
+                <a href="{{ r.url }}" class="tl-name" data-tl-open
+                   data-id="{{ r.id }}" data-name="{{ r.name }}" data-customer="{{ r.customer }}">{{ r.name }}</a>
+              </td>
+              <td>{{ r.customer }}</td>
+              <td class="mono" style="font-size:12px;">{{ r.phone or '—' }}</td>
+              <td>{{ r.city or '—' }}</td>
+              <td>
+                <div class="tl-progress" title="{{ r.stage_label }}">
+                  {% for key, label in stages %}
+                  <i class="{{ 'on' if loop.index0 <= r.stage_index }}"></i>
+                  {% endfor %}
+                </div>
+                <div class="tl-progress-label">{{ r.stage_label }}</div>
+              </td>
+              <td style="text-align:right; white-space:nowrap;">
+                <a href="{{ r.url }}" class="btn btn-secondary btn-sm" data-tl-open
+                   data-id="{{ r.id }}" data-name="{{ r.name }}" data-customer="{{ r.customer }}">Open →</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if pages > 1 %}
+      <div class="tl-pager">
+        {% if page > 1 %}
+        <a class="btn btn-secondary btn-sm" href="{{ url_for('leads.timeline_index', q=q or None, stage=stage_filter, page=page - 1) }}">← Prev</a>
+        {% endif %}
+        <span class="mono">Page {{ page }} of {{ pages }} · {{ total }} result{{ 's' if total != 1 }}</span>
+        {% if page < pages %}
+        <a class="btn btn-secondary btn-sm" href="{{ url_for('leads.timeline_index', q=q or None, stage=stage_filter, page=page + 1) }}">Next →</a>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% elif all_total == 0 %}
+      <div class="empty-state">
+        <div class="icon">◱</div>
+        <p>No projects yet. Capture a lead to start a timeline.</p>
+        <a href="{{ url_for('leads.new') }}" class="btn btn-primary">+ New Lead</a>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">🔍</div>
+        <p>No projects match your search{{ ' in this stage' if stage_filter }}.</p>
+        <a href="{{ url_for('leads.timeline_index') }}" class="btn btn-secondary">Reset filters</a>
+      </div>
+      {% endif %}
+    </div>
   </div>
 </div>
+
+<script>
+(function () {
+  var SEARCH_URL = "{{ url_for('leads.timeline_search') }}";
+  var STAGE = {{ (stage_filter or '')|tojson }};
+  var KEY = 'tl_recent';
+  var MAX_RECENT = 6;
+
+  var input   = document.getElementById('tlSearch');
+  var suggest = document.getElementById('tlSuggest');
+  var recent  = document.getElementById('tlRecent');
+  var list    = document.getElementById('tlRecentList');
+  var timer = null, seq = 0;
+
+  /* ---------- recents (localStorage) ---------- */
+  function load() {
+    try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; }
+  }
+  function save(items) {
+    try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {}
+  }
+  function remember(item) {
+    var items = load().filter(function (i) { return String(i.id) !== String(item.id); });
+    items.unshift(item);
+    save(items.slice(0, MAX_RECENT));
+  }
+  function renderRecent() {
+    var items = load();
+    list.innerHTML = '';
+    recent.hidden = !items.length;
+    items.forEach(function (i) {
+      var a = document.createElement('a');
+      a.className = 'tl-chip';
+      a.href = i.url;
+      a.textContent = i.name;
+      a.title = i.customer || '';
+      a.addEventListener('click', function () { remember(i); });
+      list.appendChild(a);
+    });
+  }
+  document.getElementById('tlRecentClear').addEventListener('click', function () {
+    save([]); renderRecent();
+  });
+
+  document.querySelectorAll('[data-tl-open]').forEach(function (a) {
+    a.addEventListener('click', function () {
+      remember({
+        id: a.dataset.id, name: a.dataset.name,
+        customer: a.dataset.customer, url: a.getAttribute('href')
+      });
+    });
+  });
+
+  /* ---------- live search ---------- */
+  function hide() { suggest.hidden = true; suggest.innerHTML = ''; }
+
+  function show(rows) {
+    suggest.innerHTML = '';
+    if (!rows.length) {
+      var none = document.createElement('div');
+      none.className = 'tl-suggest-empty';
+      none.textContent = 'No matching projects';
+      suggest.appendChild(none);
+      suggest.hidden = false;
+      return;
+    }
+    rows.forEach(function (r) {
+      var a = document.createElement('a');
+      a.className = 'tl-suggest-item';
+      a.href = r.url;
+      a.setAttribute('role', 'option');
+
+      var main = document.createElement('span');
+      main.className = 'tl-suggest-main';
+      var name = document.createElement('strong');
+      name.textContent = r.name;
+      var sub = document.createElement('small');
+      sub.textContent = [r.customer, r.phone, r.city].filter(Boolean).join(' · ');
+      main.appendChild(name); main.appendChild(sub);
+
+      var pill = document.createElement('span');
+      pill.className = 'tl-suggest-stage';
+      pill.textContent = r.stage_label;
+
+      a.appendChild(main); a.appendChild(pill);
+      a.addEventListener('click', function () {
+        remember({ id: r.id, name: r.name, customer: r.customer, url: r.url });
+      });
+      suggest.appendChild(a);
+    });
+    suggest.hidden = false;
+  }
+
+  function search() {
+    var term = input.value.trim();
+    if (term.length < 2) { hide(); return; }
+    var mine = ++seq;
+    var url = SEARCH_URL + '?q=' + encodeURIComponent(term) +
+              (STAGE ? '&stage=' + encodeURIComponent(STAGE) : '');
+    fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+      .then(function (res) { return res.ok ? res.json() : []; })
+      .then(function (rows) { if (mine === seq) show(rows); })
+      .catch(function () { if (mine === seq) hide(); });
+  }
+
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(search, 200);
+  });
+  input.addEventListener('focus', function () { if (input.value.trim().length >= 2) search(); });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') hide();
+    if (e.key === 'ArrowDown') {
+      var first = suggest.querySelector('.tl-suggest-item');
+      if (first) { e.preventDefault(); first.focus(); }
+    }
+  });
+  suggest.addEventListener('keydown', function (e) {
+    var cur = document.activeElement;
+    if (e.key === 'ArrowDown' && cur.nextElementSibling) { e.preventDefault(); cur.nextElementSibling.focus(); }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (cur.previousElementSibling) cur.previousElementSibling.focus(); else input.focus();
+    }
+    if (e.key === 'Escape') { hide(); input.focus(); }
+  });
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.tl-search-wrap')) hide();
+  });
+
+  renderRecent();
+})();
+</script>
 {% endblock %}

@@ -450,3 +450,162 @@ def expire_overdue(tenant_id: int | None = None) -> int:
     if overdue:
         db.session.commit()
     return len(overdue)
+
+
+# ------------------------------------------------------------------ #
+#  Totals (used by edit)
+# ------------------------------------------------------------------ #
+
+def _recompute_totals(q: Quotation) -> None:
+    subtotal = sum(
+        (Decimal(str(i.get('amount') or 0)) for i in q.line_items), Decimal('0')
+    )
+    disc_pct    = Decimal(str(q.discount_pct or 0))
+    disc_amount = (subtotal * disc_pct / 100).quantize(Decimal('0.01'))
+
+    amc_amt   = Decimal(str(q.amc_price or 0)) if q.amc_offered else Decimal('0')
+    other_amt = sum(
+        (Decimal(str(c.get('amount') or 0)) for c in q.other_charges), Decimal('0')
+    )
+
+    taxable = (
+        subtotal - disc_amount
+        + Decimal(str(q.installation_charge or 0))
+        + Decimal(str(q.transport_charge or 0))
+        + amc_amt
+        + other_amt
+    )
+    tax_amount = (taxable * Decimal(str(q.tax_rate or 0))).quantize(Decimal('0.01'))
+
+    q.subtotal        = subtotal.quantize(Decimal('0.01'))
+    q.discount_amount = disc_amount
+    q.tax_amount      = tax_amount
+    q.grand_total     = (taxable + tax_amount).quantize(Decimal('0.01'))
+    q.updated_at      = datetime.utcnow()
+
+
+# ------------------------------------------------------------------ #
+#  Edit quotation  (QUOTE-DRAFT / QUOTE-PENDING_DISCOUNT_APPROVAL only)
+# ------------------------------------------------------------------ #
+
+def update_quotation(
+    tenant_id:              int,
+    quotation_id:           int,
+    discount_pct:           float = 0.0,
+    validity_days:          int   = DEFAULT_VALIDITY_DAYS,
+    payment_terms_template: str   | None = None,
+    installation_charge:    float = 0.0,
+    transport_charge:       float = 0.0,
+    other_charges:          list  | None = None,
+    amc_offered:            bool  = False,
+    amc_offer_tier:         str   | None = None,
+    amc_price:              float = 0.0,
+    warranty_months:        int   = 12,
+    warranty_terms_text:    str   | None = None,
+) -> Quotation:
+    q = get_quotation(tenant_id, quotation_id)
+    if not q:
+        raise LookupError('Quotation not found')
+    if q.status not in QuotationStatus.EDITABLE:
+        raise ValueError('Only draft quotations can be edited.')
+
+    disc = Decimal(str(discount_pct or 0))
+    if disc < 0 or disc > 100:
+        raise ValueError('Discount must be between 0 and 100.')
+    if not validity_days or validity_days < 1:
+        raise ValueError('Validity must be at least 1 day.')
+    if (Decimal(str(installation_charge or 0)) < 0
+            or Decimal(str(transport_charge or 0)) < 0
+            or Decimal(str(amc_price or 0)) < 0):
+        raise ValueError('Charges cannot be negative.')
+
+    old_disc = Decimal(str(q.discount_pct or 0))
+
+    q.discount_pct           = disc
+    q.validity_days          = int(validity_days)
+    q.validity_date          = date.today() + timedelta(days=int(validity_days))
+    q.payment_terms_template = payment_terms_template or None
+    q.installation_charge    = Decimal(str(installation_charge or 0))
+    q.transport_charge       = Decimal(str(transport_charge or 0))
+
+    cleaned = [
+        {'label': str(c.get('label', '')).strip(), 'amount': float(c.get('amount') or 0)}
+        for c in (other_charges or [])
+        if str(c.get('label', '')).strip() and c.get('amount')
+    ]
+    q.other_charges_json = json.dumps(cleaned) if cleaned else None
+
+    q.amc_offered    = bool(amc_offered)
+    q.amc_offer_tier = amc_offer_tier if amc_offered else None
+    q.amc_price      = Decimal(str(amc_price or 0)) if amc_offered else None
+
+    q.warranty_months     = warranty_months
+    q.warranty_terms_text = warranty_terms_text or None
+
+    if disc > DISCOUNT_APPROVAL_THRESHOLD:
+        if disc != old_disc or not q.discount_approved:
+            q.discount_approved_by = None
+            q.discount_approved_at = None
+            q.status               = QuotationStatus.PENDING_DISCOUNT_APPROVAL
+    else:
+        q.discount_approved_by = None
+        q.discount_approved_at = None
+        q.status               = QuotationStatus.DRAFT
+
+    _recompute_totals(q)
+    db.session.commit()
+    return q
+
+
+# ------------------------------------------------------------------ #
+#  Delete quotation
+# ------------------------------------------------------------------ #
+
+def delete_block_reason(q: Quotation) -> str | None:
+    from ...models.order import Order
+    if q.status == QuotationStatus.ACCEPTED:
+        return 'An accepted quotation cannot be deleted.'
+    if Order.query.filter_by(quotation_id=q.id).first():
+        return 'This quotation has an order raised against it and cannot be deleted.'
+    return None
+
+
+def delete_quotation(tenant_id: int, quotation_id: int) -> str:
+    import os
+    from flask import current_app
+
+    q = get_quotation(tenant_id, quotation_id)
+    if not q:
+        raise LookupError('Quotation not found')
+
+    reason = delete_block_reason(q)
+    if reason:
+        raise ValueError(reason)
+
+    number         = q.quotation_number
+    project        = q.project
+    was_flow_draft = q.design_approval_id is None
+    pdf_path       = q.pdf_path
+
+    for child in Quotation.query.filter_by(parent_quotation_id=q.id).all():
+        child.parent_quotation_id = q.parent_quotation_id
+
+    db.session.delete(q)
+    db.session.flush()
+
+    if project is not None and was_flow_draft:
+        remaining = Quotation.query.filter_by(project_id=project.id).count()
+        if remaining == 0 and project.windows.count() == 0:
+            db.session.delete(project)
+
+    db.session.commit()
+
+    if pdf_path:
+        full = os.path.join(current_app.config['UPLOAD_FOLDER'], pdf_path)
+        try:
+            if os.path.isfile(full):
+                os.remove(full)
+        except OSError:
+            pass
+
+    return number

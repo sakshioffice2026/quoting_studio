@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+{% block title %}Calendar — FenestraOne{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    <div class="page-header">
+      <div>
+        <h1>Calendar</h1>
+        <div class="sub mono">{{ month_label }} · {{ agenda|length }} event{{ 's' if agenda|length != 1 }}</div>
+      </div>
+      <div class="cal-nav">
+        <a href="{{ url_for('calendar.index', month=prev_month) }}" class="btn btn-secondary btn-sm">← Prev</a>
+        <a href="{{ url_for('calendar.index') }}" class="btn btn-secondary btn-sm">Today</a>
+        <a href="{{ url_for('calendar.index', month=next_month) }}" class="btn btn-secondary btn-sm">Next →</a>
+      </div>
+    </div>
+
+    <div class="cal-legend">
+      <span class="cal-chip cal-survey">Survey</span>
+      <span class="cal-chip cal-delivery">Dispatch</span>
+      <span class="cal-chip cal-install">Installation</span>
+      <span class="cal-chip cal-service">Service</span>
+      <span class="cal-chip cal-order">Promised delivery</span>
+      <span class="cal-chip cal-quote">Quote expiry</span>
+    </div>
+
+    <div class="ui-card cal-card">
+      <div class="cal-grid cal-head">
+        {% for d in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+        <div class="cal-dow">{{ d }}</div>
+        {% endfor %}
+      </div>
+
+      <div class="cal-grid">
+        {% for week in weeks %}
+          {% for day in week %}
+          {% set items = by_day.get(day, []) %}
+          <div class="cal-cell {{ 'cal-out' if day.month != month }} {{ 'cal-today' if day == today }}">
+            <div class="cal-daynum">{{ day.day }}</div>
+            {% for e in items[:3] %}
+            <a href="{{ e.url }}" class="cal-chip cal-{{ e.tone }}" title="{{ e.label }}">{{ e.label }}</a>
+            {% endfor %}
+            {% if items|length > 3 %}
+            <details class="cal-more">
+              <summary>+{{ items|length - 3 }} more</summary>
+              {% for e in items[3:] %}
+              <a href="{{ e.url }}" class="cal-chip cal-{{ e.tone }}" title="{{ e.label }}">{{ e.label }}</a>
+              {% endfor %}
+            </details>
+            {% endif %}
+          </div>
+          {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="ui-card">
+      <div class="ui-card-title" style="margin-bottom:10px;">This month</div>
+      {% if agenda %}
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr><th>Date</th><th>Type</th><th>Details</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for e in agenda %}
+            <tr>
+              <td class="mono" style="font-size:12px;">{{ e.date.strftime('%a, %d %b') }}</td>
+              <td><span class="cal-chip cal-{{ e.tone }}">{{ e.kind }}</span></td>
+              <td>{{ e.label }}</td>
+              <td style="text-align:right;"><a href="{{ e.url }}" class="btn btn-secondary btn-sm">View →</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="icon">📅</div>
+        <p>Nothing scheduled this month.</p>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}

@@ -1,6 +1,6 @@
 import os
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, flash, redirect, request, url_for
 from .extensions import db, login_manager, migrate, csrf
 from config import config
 
@@ -11,6 +11,9 @@ def create_app(config_name=None):
 
     app = Flask(__name__)
     app.config.from_object(config[config_name])
+    app.config['MAX_CONTENT_LENGTH'] = max(
+        app.config.get('MAX_CONTENT_LENGTH') or 0, 64 * 1024 * 1024
+    )
 
     # ensure upload sub-directories exist
     for sub in ('photos', 'renders', 'pdfs', 'logos'):
@@ -63,6 +66,8 @@ def create_app(config_name=None):
     from .routes.editor import editor_bp
     from .routes.visualiser import visualiser_bp
     from .routes.quotation import quotation_bp
+    from .routes.quotation_flow import quotation_flow_bp
+    from .routes.calendar_route import calendar_bp
     from .routes.order import order_bp
     from .routes.payment import payment_bp
     from .routes.manufacturing import manufacturing_bp
@@ -87,6 +92,8 @@ def create_app(config_name=None):
     app.register_blueprint(editor_bp)
     app.register_blueprint(visualiser_bp)
     app.register_blueprint(quotation_bp)
+    app.register_blueprint(quotation_flow_bp)
+    app.register_blueprint(calendar_bp)
     app.register_blueprint(order_bp)
     app.register_blueprint(payment_bp)
     app.register_blueprint(manufacturing_bp)
@@ -123,6 +130,14 @@ def create_app(config_name=None):
 
 
 def _register_error_handlers(app: Flask) -> None:
+
+    @app.errorhandler(413)
+    def too_large(e):
+        app.logger.warning('413 Request Entity Too Large — %s', _req_info())
+        if _is_api_request():
+            return jsonify(error='File too large'), 413
+        flash('Upload is too large. Image max 5 MB, PDF max 25 MB.', 'error')
+        return redirect(request.referrer or url_for('quotation.index'))
 
     @app.errorhandler(400)
     def bad_request(e):

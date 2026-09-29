@@ -25,6 +25,18 @@
           {% if quotation.project %}
           <a href="{{ url_for('projects.detail', project_id=quotation.project_id) }}" class="btn btn-secondary btn-sm">Project</a>
           {% endif %}
+          {% if quotation.is_editable %}
+          <a href="#edit-quotation" class="btn btn-secondary btn-sm">✎ Edit</a>
+          {% if not quotation.parent_quotation_id and not quotation.design_approval_id %}
+          <a href="{{ url_for('quotation_flow.builder', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">Edit Items</a>
+          {% endif %}
+          {% endif %}
+          {% if quotation.status != QuotationStatus.ACCEPTED %}
+          <form method="POST" action="{{ url_for('quotation.delete', quotation_id=quotation.id) }}" style="display:inline;" onsubmit="return confirm('Delete quotation {{ quotation.quotation_number }}? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary btn-sm" style="color:#B91C1C;">🗑 Delete</button>
+          </form>
+          {% endif %}
           <a href="{{ url_for('quotation.download_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Download PDF</a>
           <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>
@@ -223,6 +235,100 @@
         {% endif %}
       </div>
     </div>
+    {% endif %}
+
+    {# =================== 4b. EDIT QUOTATION =================== #}
+    {% if quotation.is_editable %}
+    <div class="ui-card" id="edit-quotation">
+      <div class="ui-card-title" style="margin-bottom:10px;">Edit Quotation</div>
+      <form method="POST" action="{{ url_for('quotation.edit', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+          <div class="form-group">
+            <label class="form-label" for="e_discount_pct">Discount (%)</label>
+            <input type="number" step="0.01" min="0" max="100" class="form-control" id="e_discount_pct" name="discount_pct" value="{{ quotation.discount_pct or 0 }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_validity_days">Validity (days)</label>
+            <input type="number" min="1" class="form-control" id="e_validity_days" name="validity_days" value="{{ quotation.validity_days or 30 }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_payment_terms">Payment terms</label>
+            <input type="text" class="form-control" id="e_payment_terms" name="payment_terms_template" value="{{ quotation.payment_terms_template or '' }}" placeholder="e.g. 50% advance, 50% on delivery">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_installation">Installation charge (₹)</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="e_installation" name="installation_charge" value="{{ quotation.installation_charge or 0 }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_transport">Transport charge (₹)</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="e_transport" name="transport_charge" value="{{ quotation.transport_charge or 0 }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_warranty">Warranty (months)</label>
+            <input type="number" min="0" class="form-control" id="e_warranty" name="warranty_months" value="{{ quotation.warranty_months or 0 }}">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="e_warranty_text">Warranty terms</label>
+          <textarea class="form-control" id="e_warranty_text" name="warranty_terms_text" rows="2">{{ quotation.warranty_terms_text or '' }}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Other charges</label>
+          <div id="e_other_rows">
+            {% for c in quotation.other_charges %}
+            <div class="e-other-row" style="display:flex; gap:8px; margin-bottom:6px;">
+              <input type="text" class="form-control" name="other_charge_label[]" value="{{ c.label }}" placeholder="Label">
+              <input type="number" step="0.01" class="form-control" name="other_charge_amount[]" value="{{ c.amount }}" placeholder="Amount" style="max-width:160px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="this.parentNode.remove()">✕</button>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="e_add_other">+ Add charge</button>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; align-items:end;">
+          <div class="form-group">
+            <label class="form-label" style="display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" name="amc_offered" value="1" {{ 'checked' if quotation.amc_offered }}> Offer AMC
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_amc_tier">AMC tier</label>
+            <select class="form-control" id="e_amc_tier" name="amc_offer_tier">
+              <option value="">—</option>
+              {% for tier in ['Basic', 'Standard', 'Premium'] %}
+              <option value="{{ tier }}" {{ 'selected' if quotation.amc_offer_tier == tier }}>{{ tier }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_amc_price">AMC price (₹)</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="e_amc_price" name="amc_price" value="{{ quotation.amc_price or 0 }}">
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+      </form>
+    </div>
+    <script>
+    (function () {
+      var rows = document.getElementById('e_other_rows');
+      document.getElementById('e_add_other').addEventListener('click', function () {
+        var div = document.createElement('div');
+        div.className = 'e-other-row';
+        div.style.cssText = 'display:flex; gap:8px; margin-bottom:6px;';
+        div.innerHTML =
+          '<input type="text" class="form-control" name="other_charge_label[]" placeholder="Label">' +
+          '<input type="number" step="0.01" class="form-control" name="other_charge_amount[]" placeholder="Amount" style="max-width:160px;">' +
+          '<button type="button" class="btn btn-secondary btn-sm" onclick="this.parentNode.remove()">✕</button>';
+        rows.appendChild(div);
+      });
+    })();
+    </script>
     {% endif %}
 
     {# =================== 5. ACTION CARDS =================== #}
