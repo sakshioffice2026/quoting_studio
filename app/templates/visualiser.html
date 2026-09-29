@@ -90,7 +90,7 @@ input[type=range] { width:100%;accent-color:var(--copper); }
 #houseCanvas.draw-mode { cursor:crosshair; }
 #houseCanvas.moving-window { cursor:move; }
 
-#btnDraw.active { background:var(--copper);color:#fff;border-color:var(--copper); }
+#btnDraw.active, #btnFree.active { background:var(--copper);color:#fff;border-color:var(--copper); }
 
 .zoom-controls {
   position:absolute;bottom:14px;right:14px;display:flex;align-items:center;
@@ -153,6 +153,8 @@ input[type=range] { width:100%;accent-color:var(--copper); }
       <button class="btn btn-ghost btn-sm" id="btnDraw" onclick="toggleDrawMode()"
               title="Click-drag on the photo to place a new window opening">✏ Draw window</button>
       <button class="btn btn-ghost btn-sm" onclick="resetCorners()">Reset placement</button>
+      <button class="btn btn-ghost btn-sm" id="btnFree" onclick="toggleFreeCorners()"
+              title="Off: simple move + resize. On: drag each corner freely for angled walls">◇ Perspective</button>
       <button class="btn btn-ghost btn-sm" onclick="straightenCorners()"
               title="Square the placement from the current top-left / bottom-right">⊞ Straighten</button>
       <button class="btn btn-ghost btn-sm" onclick="toggleBeforeAfter()" id="btnBA">Before / After</button>
@@ -168,7 +170,7 @@ input[type=range] { width:100%;accent-color:var(--copper); }
     <!-- Canvas -->
     <div class="photo-area">
       <canvas id="houseCanvas" class="pannable"></canvas>
-      <div class="photo-hint" id="photoHint">Drag inside the window to move it, or drag a copper handle to resize — scroll to zoom</div>
+      <div class="photo-hint" id="photoHint">Drag the window to move · drag a handle to resize (Shift = free) · scroll to zoom</div>
       <div class="pan-hint" id="panHint">⎵ Space + drag, or middle-click drag, to pan</div>
       <div class="before-after-strip">
         <button class="ba-pill" id="btnBefore"
@@ -350,6 +352,11 @@ let movingWindow    = false;
 let moveStartRaw    = null;      // raw canvas px where the move-drag started
 let moveStartCorners= null;      // snapshot of all 4 corners (world) at drag start
 
+/* -------- easy resize mode (default) vs free-corner perspective mode -------- */
+let freeCorners   = false;       // false = simple move/resize handles, true = 4 independent corners
+let resizing      = null;        // {h, box, start} while a resize handle is being dragged
+let _touchPointer = false;       // true when the current pointer is a finger (bigger hit areas)
+
 /* ================================================================
    INIT
    ================================================================ */
@@ -480,7 +487,7 @@ function toggleDrawMode() {
   houseCanvas.classList.toggle('draw-mode', drawMode);
   document.getElementById('photoHint').textContent = drawMode
     ? 'Click and drag on the photo to draw the window opening'
-    : 'Drag inside the window to move it, or drag a copper handle to resize — scroll to zoom';
+    : _defaultHint();
   if (!drawMode) { drawing = false; drawStart = null; drawCurrent = null; render(); }
 }
 
@@ -905,8 +912,12 @@ document.addEventListener('keydown', (e)=>{
   else return;
   if(e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
   e.preventDefault();
-  corners[lastCorner].x += dx;
-  corners[lastCorner].y += dy;
+  if (!freeCorners) {
+    for (const k of ['tl','tr','bl','br']) { corners[k].x += dx; corners[k].y += dy; }
+  } else {
+    corners[lastCorner].x += dx;
+    corners[lastCorner].y += dy;
+  }
   updateCornerLabels(); render(); scheduleVis();
 });
 
@@ -937,12 +948,126 @@ function updateCornerLabels() {
    POINTER HANDLING — corner drag / pan / pinch-zoom (mouse + touch)
    ================================================================ */
 function hitCorner(raw) {
+  if (!freeCorners || !corners) return null;
+  const R = _touchPointer ? 24 : 16;
   for (const k of ['tl','tr','br','bl']) {
     const s = toScreen(corners[k]);
     const dx = s.x - raw.x, dy = s.y - raw.y;
-    if (Math.sqrt(dx*dx + dy*dy) < 16) return k;
+    if (Math.sqrt(dx*dx + dy*dy) < R) return k;
   }
   return null;
+}
+
+/* ================================================================
+   EASY MODE — 8 handles on a clean bounding box:
+   corners resize (aspect locked, Shift = free, Alt = from centre),
+   edge handles stretch one side, dragging inside moves the window.
+   ================================================================ */
+const _HANDLES = [
+  { id: 'nw', fx: 0,  fy: 0  }, { id: 'ne', fx: 1,  fy: 0  },
+  { id: 'se', fx: 1,  fy: 1  }, { id: 'sw', fx: 0,  fy: 1  },
+  { id: 'n',  fx: .5, fy: 0  }, { id: 'e',  fx: 1,  fy: .5 },
+  { id: 's',  fx: .5, fy: 1  }, { id: 'w',  fx: 0,  fy: .5 },
+];
+const _HCURSOR = {
+  nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize',
+  n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
+};
+
+function _bbox(cs) {
+  const xs = [cs.tl.x, cs.tr.x, cs.bl.x, cs.br.x];
+  const ys = [cs.tl.y, cs.tr.y, cs.bl.y, cs.br.y];
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
+function _handlePoints() {
+  if (!corners) return [];
+  const b = _bbox(corners);
+  const sw = (b.x1 - b.x0) * zoom, sh = (b.y1 - b.y0) * zoom;
+  const showEdges = sw > 70 && sh > 70;      // tiny windows: corners only
+  return _HANDLES
+    .filter(h => showEdges || (h.fx !== .5 && h.fy !== .5))
+    .map(h => {
+      const p = toScreen({ x: b.x0 + (b.x1 - b.x0) * h.fx, y: b.y0 + (b.y1 - b.y0) * h.fy });
+      return { id: h.id, fx: h.fx, fy: h.fy, x: p.x, y: p.y };
+    });
+}
+
+function hitHandle(raw) {
+  if (freeCorners || !corners) return null;
+  const R = _touchPointer ? 24 : 14;
+  for (const h of _handlePoints()) {
+    if (Math.hypot(h.x - raw.x, h.y - raw.y) <= R) return h;
+  }
+  return null;
+}
+
+function _resizeBox(b, h, p, lock, fromCenter) {
+  const MIN = 24 / zoom;
+  let { x0, y0, x1, y1 } = b;
+  const w = (x1 - x0) || 1, ht = (y1 - y0) || 1;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const movesX = h.fx !== .5, movesY = h.fy !== .5;
+
+  if (fromCenter) {
+    if (movesX) { const hw = Math.max(Math.abs(p.x - cx), MIN / 2); x0 = cx - hw; x1 = cx + hw; }
+    if (movesY) { const hh = Math.max(Math.abs(p.y - cy), MIN / 2); y0 = cy - hh; y1 = cy + hh; }
+  } else {
+    if (movesX) { if (h.fx === 0) x0 = Math.min(p.x, x1 - MIN); else x1 = Math.max(p.x, x0 + MIN); }
+    if (movesY) { if (h.fy === 0) y0 = Math.min(p.y, y1 - MIN); else y1 = Math.max(p.y, y0 + MIN); }
+  }
+
+  if (lock && movesX && movesY) {                // keep the original proportions
+    const s  = Math.max((x1 - x0) / w, (y1 - y0) / ht);
+    const nw = w * s, nh = ht * s;
+    if (fromCenter) { x0 = cx - nw / 2; x1 = cx + nw / 2; y0 = cy - nh / 2; y1 = cy + nh / 2; }
+    else {
+      if (h.fx === 0) x0 = x1 - nw; else x1 = x0 + nw;
+      if (h.fy === 0) y0 = y1 - nh; else y1 = y0 + nh;
+    }
+  }
+  return { x0, y0, x1, y1 };
+}
+
+function _applyBox(start, ob, nb) {
+  const w = (ob.x1 - ob.x0) || 1, h = (ob.y1 - ob.y0) || 1;
+  for (const k of ['tl','tr','bl','br']) {
+    corners[k] = {
+      x: nb.x0 + (start[k].x - ob.x0) / w * (nb.x1 - nb.x0),
+      y: nb.y0 + (start[k].y - ob.y0) / h * (nb.y1 - nb.y0),
+    };
+  }
+}
+
+function updateHoverCursor(raw) {
+  if (drawMode) { houseCanvas.style.cursor = ''; return; }
+  let c = '';
+  if (!spaceHeld) {
+    const h = hitHandle(raw);
+    if (h) c = _HCURSOR[h.id];
+    else if (hitCorner(raw)) c = 'crosshair';
+    else if (corners && pointInQuad(raw)) c = 'move';
+  }
+  houseCanvas.style.cursor = c;
+}
+
+function _defaultHint() {
+  return freeCorners
+    ? 'Perspective mode — drag any corner freely · drag inside to move · scroll to zoom'
+    : 'Drag the window to move · drag a handle to resize (Shift = free) · scroll to zoom';
+}
+
+function toggleFreeCorners() {
+  freeCorners = !freeCorners;
+  if (!freeCorners && corners) {           // back to a clean rectangle
+    const b = _bbox(corners);
+    corners.tl = { x: b.x0, y: b.y0 }; corners.tr = { x: b.x1, y: b.y0 };
+    corners.bl = { x: b.x0, y: b.y1 }; corners.br = { x: b.x1, y: b.y1 };
+    scheduleVis();
+  }
+  document.getElementById('btnFree').classList.toggle('active', freeCorners);
+  if (!drawMode) document.getElementById('photoHint').textContent = _defaultHint();
+  updateCornerLabels(); render();
 }
 
 /* point-in-quad test (ray casting) — used to detect a click inside the
@@ -962,6 +1087,7 @@ function pointInQuad(raw, cs) {
 }
 
 function onPointerDown(evt) {
+  _touchPointer = evt.pointerType === 'touch';
   const raw = rawXY(evt);
   pointers.set(evt.pointerId, raw);
   houseCanvas.setPointerCapture(evt.pointerId);
@@ -969,6 +1095,7 @@ function onPointerDown(evt) {
   // two active pointers → pinch-zoom / two-finger pan, cancel any corner drag
   if (pointers.size === 2) {
     dragging = null;
+    resizing = null;
     movingWindow = false;
     houseCanvas.classList.remove('dragging-corner', 'moving-window');
     return;
@@ -989,10 +1116,18 @@ function onPointerDown(evt) {
     return;
   }
 
-  if (!hitCorner(raw) && !(corners && pointInQuad(raw))) {
+  if (!hitCorner(raw) && !hitHandle(raw) && !(corners && pointInQuad(raw))) {
     for (let i = openings.length - 1; i >= 0; i--) {
       if (i !== activeIdx && pointInQuad(raw, openings[i].corners)) { selectOpening(i); break; }
     }
+  }
+
+  const grab = hitHandle(raw);
+  if (grab) {                                     // easy mode: resize handle
+    resizing = { h: grab, box: _bbox(corners), start: _cloneCorners(corners) };
+    houseCanvas.style.cursor = _HCURSOR[grab.id];
+    render();
+    return;
   }
 
   const hit = hitCorner(raw);
@@ -1006,9 +1141,11 @@ function onPointerDown(evt) {
     moveStartRaw     = raw;
     moveStartCorners = JSON.parse(JSON.stringify(corners));
     houseCanvas.classList.add('moving-window');
+    houseCanvas.style.cursor = 'move';
   } else if (evt.pointerType !== 'touch' || pointers.size === 1) {
     isPanning = true;                            // drag empty space → pan
     panLast   = raw;
+    houseCanvas.style.cursor = '';
     houseCanvas.classList.add('panning');
   }
 }
@@ -1030,6 +1167,20 @@ function onPointerMove(evt) {
     return;
   }
   onPointerMove._pinchDist = null;
+
+  if (!drawing && !dragging && !movingWindow && !resizing && !isPanning) {
+    updateHoverCursor(raw);                       // show resize / move cursor on hover
+    return;
+  }
+
+  if (resizing) {
+    const p    = toWorld(raw);
+    const lock = resizing.h.fx !== .5 && resizing.h.fy !== .5 && !evt.shiftKey;
+    const nb   = _resizeBox(resizing.box, resizing.h, p, lock, evt.altKey);
+    _applyBox(resizing.start, resizing.box, nb);
+    updateCornerLabels(); render(); scheduleVis();
+    return;
+  }
 
   if (drawing) {
     drawCurrent = toWorld(raw);
@@ -1085,15 +1236,18 @@ function onPointerUp(evt) {
     return;
   }
 
-  if (pointers.size < 2 && (dragging || movingWindow)) scheduleVis();
+  if (pointers.size < 2 && (dragging || movingWindow || resizing)) scheduleVis();
   dragging  = null;
+  resizing  = null;
   isPanning = false;
   panLast   = null;
   movingWindow     = false;
   moveStartRaw     = null;
   moveStartCorners = null;
   houseCanvas.classList.remove('panning', 'dragging-corner', 'moving-window');
+  houseCanvas.style.cursor = '';
   hideMagnifier();
+  render();
 }
 
 function onDblClick(evt) {
@@ -1556,6 +1710,7 @@ function drawHandles() {
   });
   const s = { tl: toScreen(corners.tl), tr: toScreen(corners.tr),
               bl: toScreen(corners.bl), br: toScreen(corners.br) };
+  if (!freeCorners) { _drawEasyHandles(ctx, s); return; }
   ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
   ctx.beginPath();
   ctx.moveTo(s.tl.x, s.tl.y);
@@ -1574,6 +1729,37 @@ function drawHandles() {
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(k.toUpperCase(), p.x, p.y);
   }
+}
+
+function _drawEasyHandles(ctx, s) {
+  ctx.save();
+  const b = _bbox(corners);
+  const a = toScreen({ x: b.x0, y: b.y0 });
+  const z = toScreen({ x: b.x1, y: b.y1 });
+
+  // window outline (follows the quad) + clean bounding box
+  ctx.setLineDash([6, 4]); ctx.lineWidth = 2; ctx.strokeStyle = '#C97B3D';
+  ctx.beginPath();
+  ctx.moveTo(s.tl.x, s.tl.y); ctx.lineTo(s.tr.x, s.tr.y);
+  ctx.lineTo(s.br.x, s.br.y); ctx.lineTo(s.bl.x, s.bl.y);
+  ctx.closePath(); ctx.stroke();
+  ctx.setLineDash([]); ctx.lineWidth = 1.5;
+  ctx.strokeRect(a.x, a.y, z.x - a.x, z.y - a.y);
+
+  // handles: squares on corners, pills on edges
+  for (const h of _handlePoints()) {
+    const isCorner = h.fx !== .5 && h.fy !== .5;
+    const w  = isCorner ? 13 : (h.fy === .5 ? 8 : 20);
+    const ht = isCorner ? 13 : (h.fy === .5 ? 20 : 8);
+    const active = resizing && resizing.h.id === h.id;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(h.x - w / 2, h.y - ht / 2, w, ht, 3);
+    else ctx.rect(h.x - w / 2, h.y - ht / 2, w, ht);
+    ctx.fillStyle = active ? '#C97B3D' : '#FFFFFF';
+    ctx.fill();
+    ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /* ================================================================
