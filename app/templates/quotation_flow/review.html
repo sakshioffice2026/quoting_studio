@@ -80,7 +80,7 @@
               <input type="number" class="form-control" name="qty" id="rvQ" min="1" value="1" required>
             </div>
             <div class="form-group">
-              <label>Rate per sq.ft (₹) *</label>
+              <label>Rate per sq.ft ($) *</label>
               <input type="number" class="form-control" name="rate_per_sqft" id="rvR" min="0" step="0.01" value="0" required>
             </div>
           </div>
@@ -92,7 +92,7 @@
 
           <div class="rv-est">
             <span>Area: <strong id="rvArea">0.00</strong> sq.ft</span>
-            <span>Line total: <strong id="rvTotal">₹0.00</strong></span>
+            <span>Line total: <strong id="rvTotal">$0.00</strong></span>
           </div>
 
           <div class="rv-actions">
@@ -117,14 +117,14 @@
   var total = document.getElementById('rvTotal');
 
   function fmt(n) {
-    return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   function calc() {
     var a = ((parseFloat(w.value) || 0) * (parseFloat(h.value) || 0)) / SQMM_PER_SQFT;
     var t = a * (parseFloat(r.value) || 0) * (parseInt(q.value, 10) || 0);
     area.textContent = fmt(a);
-    total.textContent = '₹' + fmt(t);
+    total.textContent = '$' + fmt(t);
   }
 
   [w, h, q, r].forEach(function (el) { el.addEventListener('input', calc); });

@@ -87,8 +87,8 @@
                   </td>
                   <td class="mono" style="font-size:12px;">{{ item.width_mm }} × {{ item.height_mm }}</td>
                   <td class="num-cell">{{ item.qty }}</td>
-                  <td class="num-cell">₹{{ '{:,.2f}'.format(item.unit_total|float) }}</td>
-                  <td class="num-cell" style="font-weight:600;">₹{{ '{:,.2f}'.format(item.amount|float) }}</td>
+                  <td class="num-cell">${{ '{:,.2f}'.format(item.unit_total|float) }}</td>
+                  <td class="num-cell" style="font-weight:600;">${{ '{:,.2f}'.format(item.amount|float) }}</td>
                   <td style="text-align:right;">
                     <form method="post" action="{{ url_for('quotation_flow.delete_item', quotation_id=quotation.id, line_id=item.line_id) }}" onsubmit="return confirm('Remove this item?');">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -111,9 +111,9 @@
 
       <div class="ui-card">
         <h3 style="margin:0 0 12px;">Summary</h3>
-        <div class="qb-sum-row"><span>Subtotal</span><span class="mono">₹{{ '{:,.2f}'.format((quotation.subtotal or 0)|float) }}</span></div>
-        <div class="qb-sum-row"><span>Tax ({{ ((quotation.tax_rate or 0)|float * 100)|round(0)|int }}%)</span><span class="mono">₹{{ '{:,.2f}'.format((quotation.tax_amount or 0)|float) }}</span></div>
-        <div class="qb-sum-row total"><span>Grand Total</span><span class="mono">₹{{ '{:,.2f}'.format((quotation.grand_total or 0)|float) }}</span></div>
+        <div class="qb-sum-row"><span>Subtotal</span><span class="mono">${{ '{:,.2f}'.format((quotation.subtotal or 0)|float) }}</span></div>
+        <div class="qb-sum-row"><span>Tax ({{ ((quotation.tax_rate or 0)|float * 100)|round(0)|int }}%)</span><span class="mono">${{ '{:,.2f}'.format((quotation.tax_amount or 0)|float) }}</span></div>
+        <div class="qb-sum-row total"><span>Grand Total</span><span class="mono">${{ '{:,.2f}'.format((quotation.grand_total or 0)|float) }}</span></div>
 
         <form method="post" action="{{ url_for('quotation_flow.proceed', quotation_id=quotation.id) }}" style="margin-top:16px;">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

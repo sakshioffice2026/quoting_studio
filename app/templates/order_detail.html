@@ -42,7 +42,7 @@
     <div class="info-card-row">
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Total Amount</div>
-        <div class="info-card-value">{{ '₹{:,.2f}'.format(order.total_amount|float) if order.total_amount else '—' }}</div>
+        <div class="info-card-value">{{ '${:,.2f}'.format(order.total_amount|float) if order.total_amount else '—' }}</div>
       </div>
       <div class="info-card">
         <div class="info-card-label">Contract Ref</div>
@@ -117,7 +117,7 @@
 
     {# pre-compute shared variables used across all downstream sections #}
     {% set _advance = order.payments.filter_by(payment_stage=PaymentStage.ADVANCE).first() %}
-    {% set _advance_received = _advance and _advance.status in [PaymentStatus.RECEIVED, PaymentStatus.CLOSED] %}
+    {% set _advance_received = advance_unlocked or (_advance and _advance.status in [PaymentStatus.RECEIVED, PaymentStatus.CLOSED]) %}
     {% set _jobs = order.manufacturing_jobs.all() %}
     {% set _deliveries = order.deliveries.all() %}
     {% set _installations = order.installations.all() %}
@@ -130,6 +130,36 @@
       {% if order.payments.first() %}
       <p class="action-note" style="margin-bottom:12px;">{{ order.payments.count() }} payment milestone(s) raised for this order.</p>
       <a href="{{ url_for('payment.index') }}" class="btn btn-secondary btn-sm">View Payments →</a>
+      {% if order.payments.count() < 4 %}
+      <form method="POST" action="{{ url_for('payment.auto_invoice', order_id=order.id) }}" style="margin-top:10px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Auto-Invoice Next Stage →</button>
+      </form>
+      {% endif %}
+      {% if pay_summary %}
+      <p class="action-note" style="margin-top:12px;">
+        Received {{ pay_summary.received }} of {{ pay_summary.basis }} ({{ pay_summary.pct_received }}%) · Balance {{ pay_summary.balance }}
+      </p>
+      {% endif %}
+      {% if unit_balances %}
+      <div style="overflow-x:auto; margin-top:8px;">
+        <table class="ui-table">
+          <thead><tr><th>Unit</th><th>Total</th><th>Paid</th><th>Balance</th><th>% Paid</th><th>Status</th></tr></thead>
+          <tbody>
+          {% for u in unit_balances %}
+            <tr>
+              <td>{{ u.label }}</td>
+              <td>{{ u.total }}</td>
+              <td>{{ u.paid }}</td>
+              <td>{{ u.balance }}</td>
+              <td>{{ u.pct_paid }}%</td>
+              <td>{{ 'Fully paid' if u.fully_paid else 'Partly paid' if u.paid else 'Locked' }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
       {% else %}
       <p class="action-note">Proceed to <strong>Advance Payment</strong> to invoice and collect the advance before releasing to manufacturing.</p>
       <form method="POST" action="{{ url_for('payment.raise_invoice', order_id=order.id) }}">
@@ -454,7 +484,7 @@
             <tr>
               <td class="mono" style="font-size:12px; font-weight:600;">{{ _c.amc_number }}</td>
               <td style="font-size:12px;">{{ _c.plan_tier }} · {{ _c.visits_per_year }} visit(s)/yr</td>
-              <td style="font-size:12px;">{{ '₹{:,.2f}'.format(_c.annual_fee|float) if _c.annual_fee else '—' }}</td>
+              <td style="font-size:12px;">{{ '${:,.2f}'.format(_c.annual_fee|float) if _c.annual_fee else '—' }}</td>
               <td style="font-size:12px;">
                 {% if _c.amc_start_date and _c.amc_end_date %}
                   {{ _c.amc_start_date.strftime('%d %b %Y') }} → {{ _c.amc_end_date.strftime('%d %b %Y') }}

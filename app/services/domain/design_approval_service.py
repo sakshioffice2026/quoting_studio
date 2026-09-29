@@ -5,6 +5,7 @@ from ...extensions import db
 from ...repositories import design_approval_repo
 from ...models import Project, Window
 from ...models.design_approval import DesignApproval, DesignApprovalStatus
+from . import unit_gate_service
 
 # Default SLA if not overridden per-approval (matches doc: auto-reminder day 5 and day 9)
 DEFAULT_APPROVAL_SLA_DAYS = 10
@@ -43,6 +44,12 @@ def submit_for_approval(tenant_id: int, project_id: int, submitted_by: int, surv
     windows = _project_windows(tenant_id, project_id)
     if not windows:
         raise ValueError('Project has no windows/doors to submit for design approval')
+
+    locked_ids = unit_gate_service.design_locked_window_ids(tenant_id, project_id)
+    if locked_ids:
+        windows = [w for w in windows if w.id not in locked_ids]
+        if not windows:
+            raise ValueError('No unit has its advance received; design is locked for all units.')
 
     prior = design_approval_repo.get_latest_for_project(tenant_id, project_id)
     next_revision = (prior.revision_number + 1) if prior else 1

@@ -109,7 +109,7 @@
         <div>
           <div class="presel-stat-value">
             {% if presel.indicative_price_min or presel.indicative_price_max %}
-              ₹{{ '%.0f'|format(presel.indicative_price_min or 0) }}–{{ '%.0f'|format(presel.indicative_price_max or 0) }}
+              ${{ '%.0f'|format(presel.indicative_price_min or 0) }}–{{ '%.0f'|format(presel.indicative_price_max or 0) }}
             {% else %}—{% endif %}
           </div>
           <div class="presel-stat-label">Indicative price</div>

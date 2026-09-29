@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import login_required, current_user
 
 from ..models.payment import PaymentStatus, PaymentStage, ReleaseMode
@@ -91,6 +91,42 @@ def raise_invoice(order_id):
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
         return redirect(url_for('order.detail', order_id=order_id))
+
+
+# ------------------------------------------------------------------ #
+#  POST /orders/<id>/payments/auto-invoice  — next stage(s), auto-calculated
+# ------------------------------------------------------------------ #
+@payment_bp.route('/orders/<int:order_id>/payments/auto-invoice', methods=['POST'])
+@login_required
+def auto_invoice(order_id):
+    due_date = request.form.get('due_date') or None
+    if due_date:
+        due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
+    try:
+        raised = payment_service.auto_invoice_stages(
+            current_user.tenant_id, order_id, raised_by=current_user.id,
+            due_date=due_date, force_next=True)
+        if raised:
+            flash('Invoice raised: ' + ', '.join(
+                f'{p.payment_number} ({p.stage_label})' for p in raised), 'success')
+        else:
+            flash('All payment milestones are already invoiced.', 'warning')
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('order.detail', order_id=order_id))
+
+
+# ------------------------------------------------------------------ #
+#  GET /orders/<id>/units/balances  — live per-unit dues and lock state
+# ------------------------------------------------------------------ #
+@payment_bp.route('/orders/<int:order_id>/units/balances')
+@login_required
+def unit_balances(order_id):
+    tid = current_user.tenant_id
+    return jsonify(
+        summary=payment_service.order_payment_summary(tid, order_id),
+        units=payment_service.unit_balances(tid, order_id),
+    )
 
 
 # ------------------------------------------------------------------ #

@@ -5,6 +5,7 @@ from ...models.order import Order, OrderStatus
 from ...models.payment import Payment, PaymentStatus, PaymentStage
 from ...models.manufacturing_job import ManufacturingJob, JobStatus
 from ...models.delivery import Delivery, DeliveryItem, DeliveryStatus
+from . import unit_gate_service
 
 
 # ------------------------------------------------------------------ #
@@ -74,8 +75,12 @@ def _require_order(tenant_id: int, order_id: int) -> Order:
     return order
 
 
-def _require_payment_clear(tenant_id: int, order_id: int) -> None:
-    """Pre-Dispatch milestone (if invoiced) must be received and no hold may be active."""
+def _require_payment_clear(tenant_id: int, order_id: int,
+                           opening_ids: list[int] | None = None) -> None:
+    """
+    No hold may be active. Pre-Dispatch (if invoiced) must be received:
+    whole-order mode -> the invoice itself; unit-wise mode -> each opening's unit share.
+    """
     payments = Payment.query.filter_by(tenant_id=tenant_id, order_id=order_id).all()
 
     for p in payments:
@@ -84,12 +89,17 @@ def _require_payment_clear(tenant_id: int, order_id: int) -> None:
                 f'Dispatch is blocked: payment {p.payment_number} has a hold applied.'
             )
 
-    for p in payments:
-        if p.payment_stage == PaymentStage.PRE_DISPATCH and \
-                p.status not in (PaymentStatus.RECEIVED, PaymentStatus.CLOSED):
-            raise ValueError(
-                'Pre-Dispatch payment must be PAY-RECEIVED before dispatch.'
-            )
+    pre = next((p for p in payments if p.payment_stage == PaymentStage.PRE_DISPATCH), None)
+    if pre is None:
+        return
+
+    if pre.is_unit_wise and opening_ids:
+        unit_gate_service.require_openings_released(
+            tenant_id, order_id, opening_ids, PaymentStage.PRE_DISPATCH, action='deliver')
+    elif pre.status not in (PaymentStatus.RECEIVED, PaymentStatus.CLOSED):
+        raise ValueError(
+            'Pre-Dispatch payment must be PAY-RECEIVED before dispatch.'
+        )
 
 
 def _get_or_raise(tenant_id: int, delivery_id: int) -> Delivery:
@@ -128,8 +138,21 @@ def create_delivery(
                 f'Openings not ready for delivery (not MFG-COMPLETED or already packed): {invalid}'
             )
         selected = [available_map[oid] for oid in opening_ids]
+        _pre = unit_gate_service.stage_payment(tenant_id, order_id, PaymentStage.PRE_DISPATCH)
+        if _pre is not None and _pre.is_unit_wise:
+            unit_gate_service.require_openings_released(
+                tenant_id, order_id, opening_ids, PaymentStage.PRE_DISPATCH, action='pack')
     else:
         selected = available
+        _pre = unit_gate_service.stage_payment(tenant_id, order_id, PaymentStage.PRE_DISPATCH)
+        if _pre is not None and _pre.is_unit_wise:
+            selected = [
+                j for j in available
+                if unit_gate_service.is_unit_released(
+                    tenant_id, order_id, j.opening_id, PaymentStage.PRE_DISPATCH)
+            ]
+            if not selected:
+                raise ValueError('No completed unit has its Pre-Dispatch payment covered yet.')
 
     now = datetime.utcnow()
     delivery = Delivery(
@@ -188,7 +211,8 @@ def dispatch_delivery(
     if not delivery.items:
         raise ValueError('Delivery has no items.')
 
-    _require_payment_clear(tenant_id, delivery.order_id)
+    _require_payment_clear(
+        tenant_id, delivery.order_id, [i.opening_id for i in delivery.items])
 
     now = datetime.utcnow()
     delivery.status           = DeliveryStatus.DISPATCHED

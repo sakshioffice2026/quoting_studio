@@ -17,8 +17,8 @@ def _coerce_for_field(field_name: str, value):
             return None
 
     if field_name in ('indicative_price_min', 'indicative_price_max'):
-        # slider answers come in as budget bands ('₹', '₹₹', '₹₹₹') -> rough numeric bands
-        band_map = {'₹': 200000, '₹₹': 500000, '₹₹₹': 1000000}
+        # slider answers come in as budget bands ('$', '$$', '$$$') -> rough numeric bands
+        band_map = {'$': 200000, '$$': 500000, '$$$': 1000000}
         if isinstance(value, str) and value in band_map:
             return band_map[value]
         try:

@@ -126,6 +126,10 @@ def create_app(config_name=None):
             response.headers['Expires'] = '0'
         return response
 
+    # ---- background payment jobs (overdue + auto-invoicing) -------
+    from .services.domain.scheduler_service import start_scheduler
+    start_scheduler(app)
+
     return app
 
 

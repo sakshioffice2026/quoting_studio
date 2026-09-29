@@ -38,7 +38,7 @@
       </div>
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Pipeline value</div>
-        <div class="info-card-value">₹{{ '{:,.0f}'.format(stats.pipeline) }}</div>
+        <div class="info-card-value">${{ '{:,.0f}'.format(stats.pipeline) }}</div>
       </div>
     </div>
 
@@ -99,7 +99,7 @@
             <td class="mono" style="font-size:12px;">{{ p.window_count }}</td>
             <td class="mono" style="font-size:12px;">
               {% if p.latest_quote and p.latest_quote.grand_total %}
-                ₹{{ '{:,.2f}'.format(p.latest_quote.grand_total|float) }}
+                ${{ '{:,.2f}'.format(p.latest_quote.grand_total|float) }}
               {% else %}
                 <span class="muted">—</span>
               {% endif %}

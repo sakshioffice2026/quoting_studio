@@ -8,6 +8,7 @@ from ...models.payment import Payment, PaymentStatus, PaymentStage
 from ...models.manufacturing_job import (
     ManufacturingJob, JobStatus, ProductionStage, QcResult,
 )
+from . import unit_gate_service
 
 
 # ------------------------------------------------------------------ #
@@ -53,11 +54,20 @@ def _require_released_order(tenant_id: int, order_id: int) -> Order:
     advance = Payment.query.filter_by(
         tenant_id=tenant_id, order_id=order_id, payment_stage=PaymentStage.ADVANCE
     ).first()
-    if not advance or advance.status not in (PaymentStatus.RECEIVED, PaymentStatus.CLOSED):
+    if not advance:
+        raise ValueError('Advance invoice must be raised before releasing to manufacturing.')
+    if not unit_gate_service.any_unit_released(tenant_id, order_id, PaymentStage.ADVANCE):
         raise ValueError(
-            'Advance payment must be PAY-RECEIVED before releasing the order to manufacturing.'
+            'No unit has its advance fully received yet; nothing can be released to manufacturing.'
         )
     return order
+
+
+def _guard_job(job: ManufacturingJob) -> None:
+    """Real-time lock: a job may only move while its unit's advance is covered."""
+    unit_gate_service.require_unit_released(
+        job.tenant_id, job.order_id, job.opening_id,
+        PaymentStage.ADVANCE, action='progress manufacturing')
 
 
 # ------------------------------------------------------------------ #
@@ -72,16 +82,26 @@ def generate_jobs_for_order(
     order = _require_released_order(tenant_id, order_id)
 
     existing = list_for_order(tenant_id, order_id)
-    if existing:
-        raise ValueError('Manufacturing jobs already exist for this order.')
+    queued_ids = {j.opening_id for j in existing}
 
     project = Project.query.filter_by(id=order.project_id, tenant_id=tenant_id).first()
     if not project:
         raise LookupError('Project not found')
 
-    windows = project.windows.all()
-    if not windows:
+    all_windows = project.windows.all()
+    if not all_windows:
         raise ValueError('Project has no openings to manufacture.')
+
+    released = unit_gate_service.released_window_ids(tenant_id, order_id, PaymentStage.ADVANCE)
+    windows = [
+        w for w in all_windows
+        if w.id not in queued_ids and (released is None or w.id in released)
+    ]
+    if not windows:
+        raise ValueError(
+            'No newly released units pending manufacturing.' if existing
+            else 'No units are released for manufacturing yet.'
+        )
 
     jobs = []
     for w in windows:
@@ -120,6 +140,7 @@ def start_job(tenant_id: int, job_id: int, assigned_to: int | None = None) -> Ma
     job = get_job(tenant_id, job_id)
     if not job:
         raise LookupError('Manufacturing job not found')
+    _guard_job(job)
     if job.status != JobStatus.QUEUED:
         raise ValueError(f'Job must be MFG-QUEUED to start; status={job.status}')
 
@@ -148,6 +169,7 @@ def advance_stage(
     job = get_job(tenant_id, job_id)
     if not job:
         raise LookupError('Manufacturing job not found')
+    _guard_job(job)
     if job.status not in (JobStatus.IN_PROGRESS, JobStatus.QC_HOLD):
         raise ValueError(f'Job must be MFG-IN_PROGRESS or MFG-QC_HOLD to advance stage; status={job.status}')
 
@@ -196,6 +218,7 @@ def record_qc(
     job = get_job(tenant_id, job_id)
     if not job:
         raise LookupError('Manufacturing job not found')
+    _guard_job(job)
     if job.status not in (JobStatus.IN_PROGRESS, JobStatus.QC_HOLD):
         raise ValueError(f'Job must be MFG-IN_PROGRESS or MFG-QC_HOLD to record QC; status={job.status}')
     if job.production_stage != ProductionStage.QC:
@@ -228,6 +251,7 @@ def complete_job(tenant_id: int, job_id: int) -> ManufacturingJob:
     job = get_job(tenant_id, job_id)
     if not job:
         raise LookupError('Manufacturing job not found')
+    _guard_job(job)
     if job.status != JobStatus.IN_PROGRESS:
         raise ValueError(f'Job must be MFG-IN_PROGRESS to complete; status={job.status}')
     if job.production_stage != ProductionStage.QC:

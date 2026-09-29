@@ -11,9 +11,46 @@ from ...models.window import Window
 
 DEFAULT_ADVANCE_PCT = Decimal('50')
 
+# Share of the (100 - advance %) balance carried by each later stage.
+LATER_STAGE_WEIGHTS = {
+    PaymentStage.PRE_DISPATCH:    Decimal('70'),
+    PaymentStage.ON_INSTALLATION: Decimal('20'),
+    PaymentStage.RETENTION:       Decimal('10'),
+}
+
 
 def _q(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def stage_percentages(advance_pct) -> dict:
+    """Percent of order value billed at every stage; always sums to 100."""
+    adv       = Decimal(str(advance_pct))
+    remaining = Decimal('100') - adv
+    total_w   = sum(LATER_STAGE_WEIGHTS.values())
+    out = {PaymentStage.ADVANCE: adv}
+    stages = list(LATER_STAGE_WEIGHTS)
+    running = adv
+    for i, st in enumerate(stages):
+        if i == len(stages) - 1:
+            out[st] = Decimal('100') - running
+        else:
+            out[st] = (remaining * LATER_STAGE_WEIGHTS[st] / total_w).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP)
+            running += out[st]
+    return out
+
+
+def get_stage_payment(tenant_id: int, order_id: int, stage: str) -> Payment | None:
+    return (Payment.query
+            .filter_by(tenant_id=tenant_id, order_id=order_id, payment_stage=stage)
+            .order_by(Payment.id.asc())
+            .first())
+
+
+def stage_amount(order: Order, advance_pct, stage: str) -> Decimal:
+    pct = stage_percentages(advance_pct)[stage]
+    return _q(order_basis(order) * pct / Decimal('100'))
 
 
 # ------------------------------------------------------------------ #
@@ -219,6 +256,17 @@ def build_unit_ledger(payment: Payment) -> list[OrderUnitRelease]:
     # default priority: doors first, then sequence
     rows.sort(key=lambda r: (0 if r['unit_type'] == 'door' else 1, r['seq'], r['window_id']))
 
+    # later stages follow the priority already set on the advance ledger
+    if payment.payment_stage != PaymentStage.ADVANCE:
+        adv = get_advance_for_order(payment.tenant_id, order.id)
+        if adv is not None:
+            adv_prio = {r.window_id: r.priority for r in list_unit_releases(adv.tenant_id, adv.id)}
+            rows.sort(key=lambda r: adv_prio.get(r['window_id'], 10 ** 6))
+
+    stage_pct = (Decimal(str(payment.advance_pct))
+                 if payment.payment_stage == PaymentStage.ADVANCE
+                 else _q(Decimal(str(payment.invoice_amount)) / basis * Decimal('100')))
+
     # make required amounts add up exactly to the advance invoice
     diff = _q(payment.invoice_amount) - sum((r['required'] for r in rows), Decimal('0'))
     if rows and diff != 0:
@@ -231,6 +279,8 @@ def build_unit_ledger(payment: Payment) -> list[OrderUnitRelease]:
             order_id         = order.id,
             payment_id       = payment.id,
             window_id        = r['window_id'],
+            stage            = payment.payment_stage,
+            stage_pct        = stage_pct,
             label            = r['label'],
             unit_type        = r['unit_type'],
             line_amount      = r['gross'],
@@ -287,9 +337,12 @@ def allocate_advance(payment: Payment) -> list[OrderUnitRelease]:
             r.status           = UnitReleaseStatus.PENDING
 
     db.session.commit()
-    if newly_released:
+    if newly_released and payment.payment_stage == PaymentStage.ADVANCE:
         _release_units_to_manufacturing(payment.order, newly_released)
     return rows
+
+
+allocate_receipt = allocate_advance
 
 
 def reorder_units(tenant_id: int, payment_id: int, ordered_unit_ids: list[int]) -> Payment:
@@ -322,6 +375,8 @@ def update_release_policy(
         raise ValueError('Release policy applies only to the Advance milestone.')
     if (payment.amount_received or 0) > 0:
         raise ValueError('Release policy cannot change after a receipt is recorded.')
+    if any(p.id != payment.id for p in list_for_order(tenant_id, payment.order_id)):
+        raise ValueError('Release policy cannot change after later-stage invoices are raised.')
 
     pct_in = advance_pct if advance_pct not in (None, '') else payment.advance_pct
     mode, pct = _validate_policy(release_mode, pct_in)
@@ -380,6 +435,20 @@ def raise_invoice(
             pct = _q(Decimal(str(invoice_amount)) / basis * Decimal('100'))
             if pct > 100:
                 raise ValueError('Advance cannot exceed the order value.')
+    else:
+        if get_stage_payment(tenant_id, order_id, payment_stage):
+            raise ValueError(f'A {payment_stage} invoice already exists for this order.')
+        adv = get_advance_for_order(tenant_id, order_id)
+        if adv is None:
+            raise ValueError('Raise the advance invoice before later milestones.')
+        mode = adv.release_mode
+        pct  = adv.advance_pct
+        if not invoice_amount or Decimal(str(invoice_amount)) <= 0:
+            invoice_amount = stage_amount(order, adv.advance_pct, payment_stage)
+        already = sum((Decimal(str(p.invoice_amount or 0))
+                       for p in list_for_order(tenant_id, order_id)), Decimal('0'))
+        if basis > 0 and already + Decimal(str(invoice_amount)) > basis + Decimal('0.01'):
+            raise ValueError('Total invoiced would exceed the order value.')
 
     if not invoice_amount or Decimal(str(invoice_amount)) <= 0:
         raise ValueError('Invoice amount must be greater than zero.')
@@ -403,7 +472,7 @@ def raise_invoice(
     db.session.add(payment)
     db.session.commit()
 
-    if payment_stage == PaymentStage.ADVANCE and mode == ReleaseMode.UNIT_WISE:
+    if mode == ReleaseMode.UNIT_WISE:
         try:
             build_unit_ledger(payment)
         except ValueError:
@@ -464,25 +533,174 @@ def record_receipt(
     payment.updated_at = now
     db.session.commit()
 
-    if payment.payment_stage == PaymentStage.ADVANCE:
-        if payment.is_unit_wise:
-            allocate_advance(payment)
-        elif payment.status == PaymentStatus.RECEIVED:
-            _release_to_manufacturing(payment.order)
+    if payment.is_unit_wise:
+        allocate_receipt(payment)
+    elif payment.payment_stage == PaymentStage.ADVANCE and payment.status == PaymentStatus.RECEIVED:
+        _release_to_manufacturing(payment.order)
 
+    close_if_settled(tenant_id, payment.order_id)
     return payment
 
 
+def _queue_manufacturing(order: Order) -> None:
+    """Queue work orders for every unit currently cleared and not yet queued."""
+    from . import manufacturing_service
+    try:
+        manufacturing_service.generate_jobs_for_order(order.tenant_id, order.id)
+    except (ValueError, LookupError):
+        db.session.rollback()
+
+
 def _release_to_manufacturing(order: Order) -> None:
-    """Hook: advance PAY-RECEIVED unblocks Manufacturing (Section 11)."""
-    # Manufacturing reads the advance status directly (see manufacturing_service).
-    pass
+    """Whole-order advance PAY-RECEIVED clears every unit for Manufacturing."""
+    _queue_manufacturing(order)
 
 
 def _release_units_to_manufacturing(order: Order, units: list[OrderUnitRelease]) -> None:
-    """Hook: units whose advance is fully covered are cleared for Manufacturing."""
-    # Manufacturing reads released_window_ids() to filter the units it may build.
-    pass
+    """Units whose advance is fully covered are cleared and queued for Manufacturing."""
+    _queue_manufacturing(order)
+
+
+# ------------------------------------------------------------------ #
+#  Per-unit balances (auto-recalculated from the stage ledgers)
+# ------------------------------------------------------------------ #
+
+def unit_balances(tenant_id: int, order_id: int) -> list[dict]:
+    """One dict per unit: total value, paid, balance, % paid and status per stage."""
+    rows = (OrderUnitRelease.query
+            .filter_by(tenant_id=tenant_id, order_id=order_id)
+            .order_by(OrderUnitRelease.priority.asc(), OrderUnitRelease.id.asc())
+            .all())
+    units: dict = {}
+    for r in rows:
+        u = units.setdefault(r.window_id, {
+            'window_id':   r.window_id,
+            'label':       r.label,
+            'unit_type':   r.unit_type,
+            'total':       Decimal('0'),
+            'paid':        Decimal('0'),
+            'stages':      {},
+        })
+        u['total'] = max(u['total'], _q(r.line_amount))
+        u['paid']  += _q(r.allocated_amount)
+        u['stages'][r.stage] = {
+            'required':  float(r.required_advance or 0),
+            'allocated': float(r.allocated_amount or 0),
+            'shortfall': float(r.shortfall or 0),
+            'pct':       r.pct_covered,
+            'status':    r.status,
+        }
+    out = []
+    for u in units.values():
+        total, paid = u['total'], u['paid']
+        balance = total - paid
+        u['balance']    = float(balance)
+        u['pct_paid']   = float((paid / total * 100).quantize(Decimal('0.01'))) if total > 0 else 0.0
+        u['fully_paid'] = total > 0 and balance <= 0
+        u['total']      = float(total)
+        u['paid']       = float(paid)
+        out.append(u)
+    return out
+
+
+def order_payment_summary(tenant_id: int, order_id: int) -> dict:
+    payments = list_for_order(tenant_id, order_id)
+    invoiced = sum((Decimal(str(p.invoice_amount or 0)) for p in payments), Decimal('0'))
+    received = sum((Decimal(str(p.amount_received or 0)) for p in payments), Decimal('0'))
+    order    = Order.query.filter_by(id=order_id, tenant_id=tenant_id).first()
+    basis    = order_basis(order) if order else Decimal('0')
+    return {
+        'basis':        float(basis),
+        'invoiced':     float(invoiced),
+        'received':     float(received),
+        'balance':      float(basis - received),
+        'pct_received': float((received / basis * 100).quantize(Decimal('0.01'))) if basis > 0 else 0.0,
+    }
+
+
+# ------------------------------------------------------------------ #
+#  Auto-invoicing of later stages (Pre-Dispatch -> On-Installation -> Retention)
+# ------------------------------------------------------------------ #
+
+def _stage_trigger_met(tenant_id: int, order_id: int, stage: str) -> bool:
+    from ...models.manufacturing_job import ManufacturingJob, JobStatus
+    from ...models.delivery import Delivery, DeliveryStatus
+    from . import installation_service
+
+    if stage == PaymentStage.PRE_DISPATCH:
+        return ManufacturingJob.query.filter_by(
+            tenant_id=tenant_id, order_id=order_id, status=JobStatus.COMPLETED).first() is not None
+    if stage == PaymentStage.ON_INSTALLATION:
+        return Delivery.query.filter(
+            Delivery.tenant_id == tenant_id, Delivery.order_id == order_id,
+            Delivery.status.in_([DeliveryStatus.DELIVERED, DeliveryStatus.DELIVERED_WITH_ISSUES])
+        ).first() is not None
+    if stage == PaymentStage.RETENTION:
+        return installation_service.is_order_fully_installed(tenant_id, order_id)
+    return False
+
+
+def auto_invoice_stages(tenant_id: int, order_id: int, raised_by: int | None = None,
+                        due_date: date | None = None, force_next: bool = False) -> list[Payment]:
+    """
+    Raise every later-stage invoice whose trigger is met and which does not exist yet.
+    force_next=True raises the next missing stage regardless of trigger.
+    """
+    order = Order.query.filter_by(id=order_id, tenant_id=tenant_id).first()
+    if not order or order.status != OrderStatus.CONFIRMED:
+        return []
+    if get_advance_for_order(tenant_id, order_id) is None:
+        return []
+
+    raised = []
+    for stage in (PaymentStage.PRE_DISPATCH, PaymentStage.ON_INSTALLATION, PaymentStage.RETENTION):
+        if get_stage_payment(tenant_id, order_id, stage):
+            continue
+        if force_next or _stage_trigger_met(tenant_id, order_id, stage):
+            raised.append(raise_invoice(
+                tenant_id=tenant_id, order_id=order_id, raised_by=raised_by,
+                payment_stage=stage, invoice_amount=0.0, due_date=due_date))
+            if force_next:
+                break
+        else:
+            break
+    return raised
+
+
+def auto_invoice_all(tenant_id: int | None = None) -> int:
+    q = Order.query.filter_by(status=OrderStatus.CONFIRMED)
+    if tenant_id is not None:
+        q = q.filter_by(tenant_id=tenant_id)
+    count = 0
+    for o in q.all():
+        try:
+            count += len(auto_invoice_stages(o.tenant_id, o.id))
+        except (ValueError, LookupError):
+            db.session.rollback()
+    return count
+
+
+# ------------------------------------------------------------------ #
+#  Full payment -> PAY-CLOSED
+# ------------------------------------------------------------------ #
+
+def close_if_settled(tenant_id: int, order_id: int) -> int:
+    """Close every milestone once all four stages exist and are fully received."""
+    payments = list_for_order(tenant_id, order_id)
+    stages = {p.payment_stage for p in payments}
+    if not set(PaymentStage.ALL).issubset(stages):
+        return 0
+    if any(p.status not in (PaymentStatus.RECEIVED, PaymentStatus.CLOSED) for p in payments):
+        return 0
+    closed = 0
+    for p in payments:
+        if p.status == PaymentStatus.RECEIVED:
+            p.status     = PaymentStatus.CLOSED
+            p.updated_at = datetime.utcnow()
+            closed += 1
+    if closed:
+        db.session.commit()
+    return closed
 
 
 # ------------------------------------------------------------------ #

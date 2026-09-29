@@ -7,7 +7,7 @@ from ..models.manufacturing_job import JobStatus
 from ..models.delivery import DeliveryStatus
 from ..models.installation import InstallationStatus
 from ..models.amc import AmcStatus, AmcTier, WarrantyStatus
-from ..services.domain import order_service
+from ..services.domain import order_service, payment_service
 
 order_bp = Blueprint('order', __name__)
 
@@ -38,9 +38,13 @@ def detail(order_id):
     if not o:
         flash('Order not found.', 'error')
         return redirect(url_for('order.index'))
+    tid = current_user.tenant_id
     return render_template(
         'order_detail.html',
         order=o,
+        advance_unlocked=payment_service.is_order_released_for_manufacturing(tid, order_id),
+        unit_balances=payment_service.unit_balances(tid, order_id),
+        pay_summary=payment_service.order_payment_summary(tid, order_id),
         OrderStatus=OrderStatus,
         PaymentStatus=PaymentStatus,
         PaymentStage=PaymentStage,
