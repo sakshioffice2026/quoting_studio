@@ -28,7 +28,7 @@ class TestResult:
 
     ALL = [PENDING, PASS, SNAG]
 
-    __test__ = False  # not a pytest class
+    __test__ = False
 
 
 class InstallationItem(db.Model):
@@ -46,11 +46,10 @@ class InstallationItem(db.Model):
     installed_by         = db.Column(db.String(200), nullable=True)
     install_date         = db.Column(db.DateTime, nullable=True)
 
-    # Installation checklist
     fitted               = db.Column(db.Boolean, default=False, nullable=False)
     hardware_adjusted    = db.Column(db.Boolean, default=False, nullable=False)
     joints_sealed        = db.Column(db.Boolean, default=False, nullable=False)
-    site_cleaned         = db.Column(db.Boolean, default=False, nullable=False)
+    site_cleaned        = db.Column(db.Boolean, default=False, nullable=False)
 
     functional_test_result = db.Column(db.String(20), default=TestResult.PENDING, nullable=False, index=True)
     snag_list            = db.Column(db.Text, nullable=True)
@@ -104,7 +103,7 @@ class Installation(db.Model):
 
     id                   = db.Column(db.Integer, primary_key=True)
     tenant_id            = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, index=True)
-    order_id             = db.Column(db.Integer, db.ForeignKey('orders.id'),  nullable=False, index=True)
+    order_id             = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False, index=True)
 
     install_number       = db.Column(db.String(40), unique=True, nullable=False)
 
@@ -115,6 +114,7 @@ class Installation(db.Model):
     site_contact_phone   = db.Column(db.String(50), nullable=True)
 
     team_lead_name       = db.Column(db.String(200), nullable=True)
+    installer_name       = db.Column(db.String(200), nullable=True)
     scheduled_date       = db.Column(db.Date, nullable=True)
     started_at           = db.Column(db.DateTime, nullable=True)
 
@@ -141,9 +141,6 @@ class Installation(db.Model):
         lazy='select',
     )
 
-    # ------------------------------------------------------------------ #
-    #  Class methods
-    # ------------------------------------------------------------------ #
     @staticmethod
     def generate_number(tenant_id: int) -> str:
         today  = date.today()
@@ -162,9 +159,6 @@ class Installation(db.Model):
                 pass
         return f"{prefix}-{str(last + 1).zfill(3)}"
 
-    # ------------------------------------------------------------------ #
-    #  Properties
-    # ------------------------------------------------------------------ #
     @property
     def status_label(self) -> str:
         return InstallationStatus.LABELS.get(self.status, self.status)
@@ -197,16 +191,17 @@ class Installation(db.Model):
             'site_contact_name':    self.site_contact_name,
             'site_contact_phone':   self.site_contact_phone,
             'team_lead_name':       self.team_lead_name,
+            'installer_name':       self.installer_name,
             'scheduled_date':       self.scheduled_date.isoformat() if self.scheduled_date else None,
-            'started_at':           self.started_at.isoformat() if self.started_at else None,
+            'started_at':            self.started_at.isoformat() if self.started_at else None,
             'completed_at':         self.completed_at.isoformat() if self.completed_at else None,
             'customer_signoff_at':  self.customer_signoff_at.isoformat() if self.customer_signoff_at else None,
-            'signed_by':            self.signed_by,
-            'handover_notes':       self.handover_notes,
-            'handover_file_path':   self.handover_file_path,
-            'items':                [i.to_dict() for i in self.items],
-            'created_at':           self.created_at.isoformat() if self.created_at else None,
-            'updated_at':           self.updated_at.isoformat() if self.updated_at else None,
+            'signed_by':             self.signed_by,
+            'handover_notes':        self.handover_notes,
+            'handover_file_path':    self.handover_file_path,
+            'items':                 [i.to_dict() for i in self.items],
+            'created_at':            self.created_at.isoformat() if self.created_at else None,
+            'updated_at':            self.updated_at.isoformat() if self.updated_at else None,
         }
 
     def __repr__(self):

@@ -10,6 +10,7 @@
   'INSTALL-SNAG': 'warn', 'INSTALL-COMPLETED': 'success'
 } %}
 {% set project = installation.order.project if installation.order and installation.order.project else None %}
+
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
 
@@ -22,22 +23,43 @@
           <h1>{{ project.display_name if project else 'Installation' }}</h1>
           <span class="customer-chip">{{ installation.install_number }}</span>
         </div>
+
         <div class="lead-header-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
           {% if installation.is_completed %}
-          <a href="{{ url_for('installation.certificate', installation_id=installation.id) }}" target="_blank" class="btn btn-secondary btn-sm">Handover Certificate</a>
+          <a href="{{ url_for('installation.certificate', installation_id=installation.id) }}"
+             target="_blank"
+             class="btn btn-secondary btn-sm">
+            Handover Certificate
+          </a>
           {% endif %}
+
           {% if installation.order %}
-          <a href="{{ url_for('order.detail', order_id=installation.order_id) }}" class="btn btn-secondary btn-sm">Order</a>
+          <a href="{{ url_for('order.detail', order_id=installation.order_id) }}"
+             class="btn btn-secondary btn-sm">
+            Order
+          </a>
           {% endif %}
-          <a href="{{ url_for('installation.index') }}" class="btn btn-secondary btn-sm">← All Installations</a>
+
+          <a href="{{ url_for('installation.index') }}"
+             class="btn btn-secondary btn-sm">
+            ← All Installations
+          </a>
         </div>
       </div>
 
       <div class="lead-header-pills">
         {{ pill(installation.status_label, tone_map.get(installation.status, 'neutral')) }}
-        {% if installation.order %}{{ pill(installation.order.order_number, 'neutral') }}{% endif %}
+
+        {% if installation.order %}
+        {{ pill(installation.order.order_number, 'neutral') }}
+        {% endif %}
+
         {% if installation.open_snag_count %}
-          {{ pill(installation.open_snag_count ~ ' open snag' ~ ('s' if installation.open_snag_count != 1 else ''), 'warn') }}
+        {{ pill(
+          installation.open_snag_count ~ ' open snag' ~
+          ('s' if installation.open_snag_count != 1 else ''),
+          'warn'
+        ) }}
         {% endif %}
       </div>
 
@@ -50,80 +72,179 @@
         <div class="info-card-label">Status</div>
         <div class="info-card-value">{{ installation.status_label }}</div>
       </div>
+
       <div class="info-card">
         <div class="info-card-label">Openings Passed</div>
-        <div class="info-card-value">{{ installation.passed_count }} / {{ installation.items|length }}</div>
+        <div class="info-card-value">
+          {{ installation.passed_count }} / {{ installation.items|length }}
+        </div>
       </div>
+
       <div class="info-card">
         <div class="info-card-label">Open Snags</div>
         <div class="info-card-value">{{ installation.open_snag_count }}</div>
       </div>
+
       <div class="info-card">
         <div class="info-card-label">Scheduled</div>
-        <div class="info-card-value">{{ installation.scheduled_date.strftime('%d %b %Y') if installation.scheduled_date else '—' }}</div>
+        <div class="info-card-value">
+          {{ installation.scheduled_date.strftime('%d %b %Y')
+             if installation.scheduled_date else '—' }}
+        </div>
       </div>
     </div>
 
     {# =================== 3. SITE DETAILS =================== #}
     <div class="ui-card">
       <div class="ui-card-title">Site Details</div>
+
       <div class="info-grid">
-        <div class="info-grid-item"><div>
-          <div class="info-grid-label">Customer</div>
-          <div class="info-grid-value">{{ project.customer_name if project else '—' }}</div>
-        </div></div>
-        <div class="info-grid-item"><div>
-          <div class="info-grid-label">Site Address</div>
-          <div class="info-grid-value">{{ installation.installation_address or '—' }}</div>
-        </div></div>
-        <div class="info-grid-item"><div>
-          <div class="info-grid-label">Site Contact</div>
-          <div class="info-grid-value">{{ installation.site_contact_name or '—' }}{% if installation.site_contact_phone %} · {{ installation.site_contact_phone }}{% endif %}</div>
-        </div></div>
-        <div class="info-grid-item"><div>
-          <div class="info-grid-label">Team Lead</div>
-          <div class="info-grid-value">{{ installation.team_lead_name or '—' }}</div>
-        </div></div>
+
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Customer</div>
+            <div class="info-grid-value">
+              {{ project.customer_name if project else '—' }}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Site Address</div>
+            <div class="info-grid-value">
+              {{ installation.installation_address or '—' }}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Site Contact</div>
+            <div class="info-grid-value">
+              {{ installation.site_contact_name or '—' }}
+              {% if installation.site_contact_phone %}
+              · {{ installation.site_contact_phone }}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Team Lead</div>
+            <div class="info-grid-value">
+              {{ installation.team_lead_name or '—' }}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Installer Name</div>
+            <div class="info-grid-value">
+              {{ installation.installer_name or '—' }}
+            </div>
+          </div>
+        </div>
+
         {% if installation.started_at %}
-        <div class="info-grid-item"><div>
-          <div class="info-grid-label">Started</div>
-          <div class="info-grid-value">{{ installation.started_at.strftime('%d %b %Y, %H:%M') }}</div>
-        </div></div>
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Started</div>
+            <div class="info-grid-value">
+              {{ installation.started_at.strftime('%d %b %Y, %H:%M') }}
+            </div>
+          </div>
+        </div>
         {% endif %}
+
         {% if installation.customer_signoff_at %}
-        <div class="info-grid-item"><div>
-          <div class="info-grid-label">Customer Sign-off</div>
-          <div class="info-grid-value">{{ installation.customer_signoff_at.strftime('%d %b %Y, %H:%M') }} · by {{ installation.signed_by or '—' }}</div>
-        </div></div>
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Customer Sign-off</div>
+            <div class="info-grid-value">
+              {{ installation.customer_signoff_at.strftime('%d %b %Y, %H:%M') }}
+              · by {{ installation.signed_by or '—' }}
+            </div>
+          </div>
+        </div>
         {% endif %}
+
         {% if installation.handover_notes %}
-        <div class="info-grid-item"><div>
-          <div class="info-grid-label">Handover Notes</div>
-          <div class="info-grid-value">{{ installation.handover_notes }}</div>
-        </div></div>
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Handover Notes</div>
+            <div class="info-grid-value">
+              {{ installation.handover_notes }}
+            </div>
+          </div>
+        </div>
         {% endif %}
+
         {% if installation.handover_file_path %}
-        <div class="info-grid-item"><div>
-          <div class="info-grid-label">Signed Handover Certificate</div>
-          <div class="info-grid-value"><a href="{{ url_for('uploaded_file', filename=installation.handover_file_path) }}" target="_blank">View file</a></div>
-        </div></div>
+        <div class="info-grid-item">
+          <div>
+            <div class="info-grid-label">Signed Handover Certificate</div>
+            <div class="info-grid-value">
+              <a href="{{ url_for(
+                'uploaded_file',
+                filename=installation.handover_file_path
+              ) }}"
+                 target="_blank">
+                View file
+              </a>
+            </div>
+          </div>
+        </div>
         {% endif %}
+
       </div>
     </div>
 
     {# =================== 4. ORDER PROGRESS =================== #}
     <div class="ui-card">
       <div class="ui-card-title">Order Installation Progress</div>
+
       <div class="inst-chips">
-        <span class="inst-chip main"><strong>{{ _sum.installed }} of {{ _sum.total }}</strong> installed &amp; signed off</span>
-        {% if _sum.pending %}<span class="inst-chip"><strong>{{ _sum.pending }}</strong> pending</span>{% endif %}
-        {% if _sum.unscheduled %}<span class="inst-chip ready"><strong>{{ _sum.unscheduled }}</strong> delivered, not scheduled</span>{% endif %}
-        {% if _sum.open_snags %}<span class="inst-chip warn"><strong>{{ _sum.open_snags }}</strong> open snag{{ 's' if _sum.open_snags != 1 else '' }}</span>{% endif %}
+        <span class="inst-chip main">
+          <strong>{{ _sum.installed }} of {{ _sum.total }}</strong>
+          installed &amp; signed off
+        </span>
+
+        {% if _sum.pending %}
+        <span class="inst-chip">
+          <strong>{{ _sum.pending }}</strong> pending
+        </span>
+        {% endif %}
+
+        {% if _sum.unscheduled %}
+        <span class="inst-chip ready">
+          <strong>{{ _sum.unscheduled }}</strong>
+          delivered, not scheduled
+        </span>
+        {% endif %}
+
+        {% if _sum.open_snags %}
+        <span class="inst-chip warn">
+          <strong>{{ _sum.open_snags }}</strong>
+          open snag{{ 's' if _sum.open_snags != 1 else '' }}
+        </span>
+        {% endif %}
       </div>
+
       {% if _sum.total %}
       <div class="inst-bar" title="Installation progress">
-        <span class="b-installed" style="width:{{ _sum.installed * 100 / _sum.total }}%"></span>
-        <span class="b-scheduled" style="width:{{ (_sum.scheduled - _sum.installed) * 100 / _sum.total if _sum.scheduled > _sum.installed else 0 }}%"></span>
+        <span class="b-installed"
+              style="width:{{ _sum.installed * 100 / _sum.total }}%">
+        </span>
+
+        <span class="b-scheduled"
+              style="width:{{
+                (_sum.scheduled - _sum.installed) * 100 / _sum.total
+                if _sum.scheduled > _sum.installed else 0
+              }}%">
+        </span>
       </div>
       {% endif %}
     </div>
@@ -132,65 +253,104 @@
     {% if payments %}
     <div class="ui-card">
       <div class="ui-card-title">On-Installation Payment</div>
+
       <div style="overflow-x:auto;">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Payment #</th>
-            <th>Status</th>
-            <th>Invoice</th>
-            <th>Received</th>
-            <th>Due</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in payments %}
-          <tr>
-            <td class="mono" style="font-size:12px;">{{ p.payment_number }}</td>
-            <td style="font-size:12px;">{{ p.status_label }}</td>
-            <td class="mono" style="font-size:12px;">{{ p.invoice_amount }}</td>
-            <td class="mono" style="font-size:12px;">{{ p.amount_received }}</td>
-            <td class="muted mono" style="font-size:12px;">{{ p.due_date.strftime('%d %b %Y') if p.due_date else '—' }}</td>
-            <td style="text-align:right;">
-              <a href="{{ url_for('payment.detail', payment_id=p.id) }}" class="btn btn-secondary btn-sm">View →</a>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Payment #</th>
+              <th>Status</th>
+              <th>Invoice</th>
+              <th>Received</th>
+              <th>Due</th>
+              <th></th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {% for p in payments %}
+            <tr>
+              <td class="mono" style="font-size:12px;">
+                {{ p.payment_number }}
+              </td>
+
+              <td style="font-size:12px;">
+                {{ p.status_label }}
+              </td>
+
+              <td class="mono" style="font-size:12px;">
+                {{ p.invoice_amount }}
+              </td>
+
+              <td class="mono" style="font-size:12px;">
+                {{ p.amount_received }}
+              </td>
+
+              <td class="muted mono" style="font-size:12px;">
+                {{ p.due_date.strftime('%d %b %Y')
+                   if p.due_date else '—' }}
+              </td>
+
+              <td style="text-align:right;">
+                <a href="{{ url_for('payment.detail', payment_id=p.id) }}"
+                   class="btn btn-secondary btn-sm">
+                  View →
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
     {% endif %}
 
     {# =================== 6. OPENINGS CHECKLIST =================== #}
     <div class="section-title">Openings</div>
+
     {% for item in installation.items %}
     {% set _res = item.functional_test_result|lower %}
+
     <div class="inst-card {{ 'snag' if item.has_open_snag else ('pass' if item.is_passed else '') }}">
+
       <div class="inst-card-head">
-        <div class="inst-card-title">{{ item.opening.label if item.opening else item.opening_id }}</div>
+        <div class="inst-card-title">
+          {{ item.opening.label if item.opening else item.opening_id }}
+        </div>
+
         <div>
-          <span class="inst-pill {{ _res }}">{{ item.functional_test_result }}</span>
+          <span class="inst-pill {{ _res }}">
+            {{ item.functional_test_result }}
+          </span>
+
           {% if item.snag_resolved and not item.has_open_snag and not item.is_passed %}
-            <span class="inst-pill pending">Snag resolved — re-test</span>
+          <span class="inst-pill pending">
+            Snag resolved — re-test
+          </span>
           {% endif %}
         </div>
       </div>
 
       {% if item.installed_by or item.install_date %}
-      <div class="muted mono" style="font-size:12px; margin-bottom:8px;">
+      <div class="muted mono"
+           style="font-size:12px; margin-bottom:8px;">
         {{ item.installed_by or '—' }}
-        {% if item.install_date %}· {{ item.install_date.strftime('%d %b %Y, %H:%M') }}{% endif %}
+
+        {% if item.install_date %}
+        · {{ item.install_date.strftime('%d %b %Y, %H:%M') }}
+        {% endif %}
       </div>
       {% endif %}
 
       {% if item.snag_list %}
-      <div style="font-size:13px; margin-bottom:10px; white-space:pre-line;"><strong>Snag list:</strong>
-{{ item.snag_list }}</div>
+      <div style="font-size:13px; margin-bottom:10px; white-space:pre-line;">
+        <strong>Snag list:</strong>
+{{ item.snag_list }}
+      </div>
       {% endif %}
 
       {% if item.is_passed or not _active %}
+
       <div class="inst-checks" style="margin-bottom:0;">
         <span>{{ '✓' if item.fitted else '✗' }} Fitted</span>
         <span>{{ '✓' if item.hardware_adjusted else '✗' }} Hardware adjusted</span>
@@ -199,46 +359,125 @@
       </div>
 
       {% elif item.has_open_snag %}
-      <form method="POST" style="display:flex; gap:6px; flex-wrap:wrap;"
-            action="{{ url_for('installation.resolve_item', installation_id=installation.id, item_id=item.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="text" class="form-control" name="resolution_notes" placeholder="Resolution notes" style="width:260px;">
-        <button type="submit" class="btn btn-secondary btn-sm">Resolve Snag</button>
+
+      <form method="POST"
+            style="display:flex; gap:6px; flex-wrap:wrap;"
+            action="{{ url_for(
+              'installation.resolve_item',
+              installation_id=installation.id,
+              item_id=item.id
+            ) }}">
+
+        <input type="hidden"
+               name="csrf_token"
+               value="{{ csrf_token() }}">
+
+        <input type="text"
+               class="form-control"
+               name="resolution_notes"
+               placeholder="Resolution notes"
+               style="width:260px;">
+
+        <button type="submit"
+                class="btn btn-secondary btn-sm">
+          Resolve Snag
+        </button>
       </form>
 
       {% else %}
+
       <form method="POST"
-            action="{{ url_for('installation.record_item', installation_id=installation.id, item_id=item.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            action="{{ url_for(
+              'installation.record_item',
+              installation_id=installation.id,
+              item_id=item.id
+            ) }}">
+
+        <input type="hidden"
+               name="csrf_token"
+               value="{{ csrf_token() }}">
 
         <div class="inst-checks">
-          <label><input type="checkbox" name="fitted"            {{ 'checked' if item.fitted }}> Fitted</label>
-          <label><input type="checkbox" name="hardware_adjusted" {{ 'checked' if item.hardware_adjusted }}> Hardware adjusted</label>
-          <label><input type="checkbox" name="joints_sealed"     {{ 'checked' if item.joints_sealed }}> Joints sealed</label>
-          <label><input type="checkbox" name="site_cleaned"      {{ 'checked' if item.site_cleaned }}> Site cleaned</label>
+          <label>
+            <input type="checkbox"
+                   name="fitted"
+                   {{ 'checked' if item.fitted }}>
+            Fitted
+          </label>
+
+          <label>
+            <input type="checkbox"
+                   name="hardware_adjusted"
+                   {{ 'checked' if item.hardware_adjusted }}>
+            Hardware adjusted
+          </label>
+
+          <label>
+            <input type="checkbox"
+                   name="joints_sealed"
+                   {{ 'checked' if item.joints_sealed }}>
+            Joints sealed
+          </label>
+
+          <label>
+            <input type="checkbox"
+                   name="site_cleaned"
+                   {{ 'checked' if item.site_cleaned }}>
+            Site cleaned
+          </label>
         </div>
 
         <div class="inst-grid">
+
           <div class="form-group">
-            <label class="form-label" for="installed_by_{{ item.id }}">Installed by *</label>
-            <input type="text" class="form-control" id="installed_by_{{ item.id }}" name="installed_by"
-                   value="{{ item.installed_by or installation.team_lead_name or '' }}" required>
+            <label class="form-label"
+                   for="installed_by_{{ item.id }}">
+              Installed by *
+            </label>
+
+            <input type="text"
+                   class="form-control"
+                   id="installed_by_{{ item.id }}"
+                   name="installed_by"
+                   value="{{ item.installed_by or installation.installer_name or installation.team_lead_name or '' }}"
+                   required>
           </div>
+
           <div class="form-group">
-            <label class="form-label" for="result_{{ item.id }}">Functional test (open / close / lock / weather seal) *</label>
-            <select class="form-control" id="result_{{ item.id }}" name="functional_test_result" required>
+            <label class="form-label"
+                   for="result_{{ item.id }}">
+              Functional test (open / close / lock / weather seal) *
+            </label>
+
+            <select class="form-control"
+                    id="result_{{ item.id }}"
+                    name="functional_test_result"
+                    required>
               <option value="{{ TestResult.PASS }}">Pass</option>
               <option value="{{ TestResult.SNAG }}">Snag</option>
             </select>
           </div>
+
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="snag_{{ item.id }}">Snag list (required if result is Snag)</label>
-          <textarea class="form-control" id="snag_{{ item.id }}" name="snag_list" rows="2"></textarea>
+          <label class="form-label"
+                 for="snag_{{ item.id }}">
+            Snag list (required if result is Snag)
+          </label>
+
+          <textarea class="form-control"
+                    id="snag_{{ item.id }}"
+                    name="snag_list"
+                    rows="2"></textarea>
         </div>
-        <button type="submit" class="btn btn-primary btn-sm">Record Opening →</button>
+
+        <button type="submit"
+                class="btn btn-primary btn-sm">
+          Record Opening →
+        </button>
       </form>
+
       {% endif %}
     </div>
     {% endfor %}
@@ -246,97 +485,264 @@
     {# =================== 7. ACTION CARDS =================== #}
 
     {% if installation.status == InstallationStatus.SCHEDULED %}
+
     <div class="action-grid">
-      <form method="POST" class="ui-card action-panel"
-            action="{{ url_for('installation.start', installation_id=installation.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="ui-card-title" style="margin-bottom:6px;">Start Installation</div>
+
+      <form method="POST"
+            class="ui-card action-panel"
+            action="{{ url_for(
+              'installation.start',
+              installation_id=installation.id
+            ) }}">
+
+        <input type="hidden"
+               name="csrf_token"
+               value="{{ csrf_token() }}">
+
+        <div class="ui-card-title"
+             style="margin-bottom:6px;">
+          Start Installation
+        </div>
+
         <div class="form-group">
-          <label class="form-label" for="team_lead_name_start">Team lead</label>
-          <input type="text" class="form-control" id="team_lead_name_start" name="team_lead_name"
+          <label class="form-label"
+                 for="team_lead_name_start">
+            Team lead
+          </label>
+
+          <input type="text"
+                 class="form-control"
+                 id="team_lead_name_start"
+                 name="team_lead_name"
                  value="{{ installation.team_lead_name or '' }}">
         </div>
-        <button type="submit" class="btn btn-primary btn-sm">Start →</button>
+
+        <button type="submit"
+                class="btn btn-primary btn-sm">
+          Start →
+        </button>
       </form>
 
-      <form method="POST" class="ui-card action-panel"
-            action="{{ url_for('installation.reschedule', installation_id=installation.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="ui-card-title" style="margin-bottom:6px;">Reschedule</div>
-        <div class="form-group">
-          <label class="form-label" for="scheduled_date_resched">New date *</label>
-          <input type="date" class="form-control" id="scheduled_date_resched" name="scheduled_date"
-                 value="{{ installation.scheduled_date.strftime('%Y-%m-%d') if installation.scheduled_date else '' }}" required>
+      <form method="POST"
+            class="ui-card action-panel"
+            action="{{ url_for(
+              'installation.reschedule',
+              installation_id=installation.id
+            ) }}">
+
+        <input type="hidden"
+               name="csrf_token"
+               value="{{ csrf_token() }}">
+
+        <div class="ui-card-title"
+             style="margin-bottom:6px;">
+          Reschedule
         </div>
+
         <div class="form-group">
-          <label class="form-label" for="team_lead_name_resched">Team lead</label>
-          <input type="text" class="form-control" id="team_lead_name_resched" name="team_lead_name"
+          <label class="form-label"
+                 for="scheduled_date_resched">
+            New date *
+          </label>
+
+          <input type="date"
+                 class="form-control"
+                 id="scheduled_date_resched"
+                 name="scheduled_date"
+                 value="{{ installation.scheduled_date.strftime('%Y-%m-%d') if installation.scheduled_date else '' }}"
+                 required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label"
+                 for="team_lead_name_resched">
+            Team lead
+          </label>
+
+          <input type="text"
+                 class="form-control"
+                 id="team_lead_name_resched"
+                 name="team_lead_name"
                  value="{{ installation.team_lead_name or '' }}">
         </div>
-        <button type="submit" class="btn btn-secondary btn-sm">Reschedule</button>
+
+        <button type="submit"
+                class="btn btn-secondary btn-sm">
+          Reschedule
+        </button>
       </form>
+
     </div>
     {% endif %}
 
     {% if installation.status == InstallationStatus.SNAG %}
-    <form method="POST" class="ui-card action-panel action-panel-warning" style="max-width:600px;"
-          action="{{ url_for('installation.resolve_all', installation_id=installation.id) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="ui-card-title" style="margin-bottom:6px;">Snags Found</div>
-      <p class="action-note">Resolve each snag above, or resolve all at once. Each opening must then be re-tested before handover.</p>
-      <div class="form-group">
-        <label class="form-label" for="resolution_notes_all">Resolution notes</label>
-        <textarea class="form-control" id="resolution_notes_all" name="resolution_notes" rows="2"></textarea>
+
+    <form method="POST"
+          class="ui-card action-panel action-panel-warning"
+          style="max-width:600px;"
+          action="{{ url_for(
+            'installation.resolve_all',
+            installation_id=installation.id
+          ) }}">
+
+      <input type="hidden"
+             name="csrf_token"
+             value="{{ csrf_token() }}">
+
+      <div class="ui-card-title"
+           style="margin-bottom:6px;">
+        Snags Found
       </div>
-      <button type="submit" class="btn btn-primary btn-sm">Resolve All Snags</button>
+
+      <p class="action-note">
+        Resolve each snag above, or resolve all at once.
+        Each opening must then be re-tested before handover.
+      </p>
+
+      <div class="form-group">
+        <label class="form-label"
+               for="resolution_notes_all">
+          Resolution notes
+        </label>
+
+        <textarea class="form-control"
+                  id="resolution_notes_all"
+                  name="resolution_notes"
+                  rows="2"></textarea>
+      </div>
+
+      <button type="submit"
+              class="btn btn-primary btn-sm">
+        Resolve All Snags
+      </button>
     </form>
+
     {% endif %}
 
     {% if installation.status == InstallationStatus.IN_PROGRESS %}
+
     {% if installation.all_passed %}
-    <form method="POST" class="ui-card action-panel" style="max-width:600px;" enctype="multipart/form-data"
-          action="{{ url_for('installation.signoff', installation_id=installation.id) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="ui-card-title" style="margin-bottom:6px;">Customer Sign-off &amp; Handover</div>
-      <div class="form-group">
-        <label class="form-label" for="signed_by">Signed by (customer) *</label>
-        <input type="text" class="form-control" id="signed_by" name="signed_by"
-               value="{{ installation.order.project.customer_name }}" readonly
-               style="background:#F5F1E8;cursor:not-allowed;" title="Locked — registered at Lead creation">
+
+    <form method="POST"
+          class="ui-card action-panel"
+          style="max-width:600px;"
+          enctype="multipart/form-data"
+          action="{{ url_for(
+            'installation.signoff',
+            installation_id=installation.id
+          ) }}">
+
+      <input type="hidden"
+             name="csrf_token"
+             value="{{ csrf_token() }}">
+
+      <div class="ui-card-title"
+           style="margin-bottom:6px;">
+        Customer Sign-off &amp; Handover
       </div>
+
       <div class="form-group">
-        <label class="form-label" for="handover_notes">Handover notes</label>
-        <textarea class="form-control" id="handover_notes" name="handover_notes" rows="2"></textarea>
+        <label class="form-label"
+               for="signed_by">
+          Signed by (customer) *
+        </label>
+
+        <input type="text"
+               class="form-control"
+               id="signed_by"
+               name="signed_by"
+               value="{{ installation.order.project.customer_name }}"
+               readonly
+               style="background:#F5F1E8;cursor:not-allowed;"
+               title="Locked — registered at Lead creation">
       </div>
+
       <div class="form-group">
-        <label class="form-label" for="handover_file">Signed handover certificate (JPG / PNG / PDF)</label>
-        <input type="file" class="form-control" id="handover_file" name="handover_file" accept=".jpg,.jpeg,.png,.pdf">
+        <label class="form-label"
+               for="handover_notes">
+          Handover notes
+        </label>
+
+        <textarea class="form-control"
+                  id="handover_notes"
+                  name="handover_notes"
+                  rows="2"></textarea>
       </div>
-      <button type="submit" class="btn btn-primary btn-sm">Complete Handover →</button>
+
+      <div class="form-group">
+        <label class="form-label"
+               for="handover_file">
+          Signed handover certificate (JPG / PNG / PDF)
+        </label>
+
+        <input type="file"
+               class="form-control"
+               id="handover_file"
+               name="handover_file"
+               accept=".jpg,.jpeg,.png,.pdf">
+      </div>
+
+      <button type="submit"
+              class="btn btn-primary btn-sm">
+        Complete Handover →
+      </button>
     </form>
+
     {% else %}
-    <div class="ui-card" style="max-width:600px;">
-      <div class="ui-card-title" style="margin-bottom:6px;">Awaiting Openings</div>
-      <p class="action-note" style="margin-bottom:0;">
-        Record a passing functional test for every opening ({{ installation.passed_count }} of {{ installation.items|length }} done) to unlock customer sign-off.
+
+    <div class="ui-card"
+         style="max-width:600px;">
+
+      <div class="ui-card-title"
+           style="margin-bottom:6px;">
+        Awaiting Openings
+      </div>
+
+      <p class="action-note"
+         style="margin-bottom:0;">
+        Record a passing functional test for every opening
+        ({{ installation.passed_count }} of {{ installation.items|length }} done)
+        to unlock customer sign-off.
       </p>
     </div>
+
     {% endif %}
     {% endif %}
 
     {% if installation.status == InstallationStatus.COMPLETED %}
-    <div class="ui-card action-panel-success" style="max-width:600px;">
-      <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Installation Completed</div>
-      <p class="action-note" style="margin-bottom:0;">
+
+    <div class="ui-card action-panel-success"
+         style="max-width:600px;">
+
+      <div class="ui-card-title"
+           style="margin-bottom:6px; color:var(--success);">
+        ✓ Installation Completed
+      </div>
+
+      <p class="action-note"
+         style="margin-bottom:0;">
         {% if _sum.pending %}
-          {{ _sum.installed }} of {{ _sum.total }} openings installed · {{ _sum.pending }} still pending.
+          {{ _sum.installed }} of {{ _sum.total }} openings installed ·
+          {{ _sum.pending }} still pending.
           Schedule the remaining delivered openings from Installations.
         {% else %}
-          All openings installed and signed off. Proceed to <strong>Section 14 — AMC</strong> once the final payment is closed.
+          All openings installed and signed off.
+          Proceed to <strong>Section 14 — AMC</strong>
+          once the final payment is closed.
         {% endif %}
       </p>
-      <a href="{{ url_for('installation.certificate', installation_id=installation.id) }}" target="_blank" class="btn btn-secondary btn-sm" style="margin-top:12px;">Handover Certificate →</a>
+
+      <a href="{{ url_for(
+        'installation.certificate',
+        installation_id=installation.id
+      ) }}"
+         target="_blank"
+         class="btn btn-secondary btn-sm"
+         style="margin-top:12px;">
+        Handover Certificate →
+      </a>
     </div>
+
     {% endif %}
 
   </div>

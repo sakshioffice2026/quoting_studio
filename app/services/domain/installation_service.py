@@ -107,8 +107,11 @@ def is_order_fully_installed(tenant_id: int, order_id: int) -> bool:
 
 def on_installation_payments(tenant_id: int, order_id: int) -> list[Payment]:
     return (Payment.query
-            .filter_by(tenant_id=tenant_id, order_id=order_id,
-                       payment_stage=PaymentStage.ON_INSTALLATION)
+            .filter_by(
+                tenant_id=tenant_id,
+                order_id=order_id,
+                payment_stage=PaymentStage.ON_INSTALLATION,
+            )
             .order_by(Payment.created_at)
             .all())
 
@@ -152,14 +155,20 @@ def flow_snapshot(tenant_id: int, project_id: int | None) -> dict | None:
     if not project_id:
         return None
 
-    orders = Order.query.filter_by(tenant_id=tenant_id, project_id=project_id).all()
+    orders = Order.query.filter_by(
+        tenant_id=tenant_id,
+        project_id=project_id,
+    ).all()
     if not orders:
         return None
+
     order_ids = [o.id for o in orders]
 
     installations = (Installation.query
-                     .filter(Installation.tenant_id == tenant_id,
-                             Installation.order_id.in_(order_ids))
+                     .filter(
+                         Installation.tenant_id == tenant_id,
+                         Installation.order_id.in_(order_ids),
+                     )
                      .order_by(Installation.created_at)
                      .all())
 
@@ -186,8 +195,10 @@ def flow_snapshot(tenant_id: int, project_id: int | None) -> dict | None:
             ManufacturingJob.order_id.in_(order_ids),
         ).all()
     }
+
     fully = bool(job_order_ids) and all(
-        is_order_fully_installed(tenant_id, oid) for oid in job_order_ids
+        is_order_fully_installed(tenant_id, oid)
+        for oid in job_order_ids
     )
 
     if InstallationStatus.SNAG in statuses:
@@ -224,7 +235,11 @@ def _require_order(tenant_id: int, order_id: int) -> Order:
 
 
 def _require_no_payment_hold(tenant_id: int, order_id: int) -> None:
-    payments = Payment.query.filter_by(tenant_id=tenant_id, order_id=order_id).all()
+    payments = Payment.query.filter_by(
+        tenant_id=tenant_id,
+        order_id=order_id,
+    ).all()
+
     for p in payments:
         if p.hold_flag or p.status == PaymentStatus.HOLD_APPLIED:
             raise ValueError(
@@ -250,6 +265,7 @@ def _refresh_status(installation: Installation) -> None:
     """IN_PROGRESS ↔ SNAG depending on whether any opening has an open snag."""
     if installation.status not in InstallationStatus.ACTIVE:
         return
+
     if installation.open_snag_count:
         installation.status = InstallationStatus.SNAG
     else:
@@ -261,15 +277,16 @@ def _refresh_status(installation: Installation) -> None:
 # ------------------------------------------------------------------ #
 
 def create_installation(
-    tenant_id:          int,
-    order_id:           int,
-    created_by:         int,
-    opening_ids:        list[int] | None = None,
-    scheduled_date:     date | None = None,
-    team_lead_name:     str | None = None,
-    installation_address: str | None = None,
-    site_contact_name:  str | None = None,
-    site_contact_phone: str | None = None,
+    tenant_id:             int,
+    order_id:              int,
+    created_by:             int,
+    opening_ids:            list[int] | None = None,
+    scheduled_date:         date | None = None,
+    team_lead_name:         str | None = None,
+    installer_name:         str | None = None,
+    installation_address:   str | None = None,
+    site_contact_name:      str | None = None,
+    site_contact_phone:     str | None = None,
 ) -> Installation:
     order = _require_order(tenant_id, order_id)
 
@@ -278,6 +295,7 @@ def create_installation(
         raise ValueError('No delivered openings are pending installation for this order.')
 
     available_map = {i.opening_id: i for i in available}
+
     if opening_ids:
         invalid = [oid for oid in opening_ids if oid not in available_map]
         if invalid:
@@ -291,15 +309,20 @@ def create_installation(
     # Default site details from the latest delivery on this order
     if not installation_address or not site_contact_name or not site_contact_phone:
         last_delivery = (Delivery.query
-                         .filter_by(tenant_id=tenant_id, order_id=order_id)
+                         .filter_by(
+                             tenant_id=tenant_id,
+                             order_id=order_id,
+                         )
                          .order_by(Delivery.created_at.desc())
                          .first())
+
         if last_delivery:
             installation_address = installation_address or last_delivery.delivery_address
-            site_contact_name    = site_contact_name    or last_delivery.site_contact_name
-            site_contact_phone   = site_contact_phone   or last_delivery.site_contact_phone
+            site_contact_name = site_contact_name or last_delivery.site_contact_name
+            site_contact_phone = site_contact_phone or last_delivery.site_contact_phone
 
     now = datetime.utcnow()
+
     installation = Installation(
         tenant_id            = tenant_id,
         order_id             = order.id,
@@ -309,12 +332,14 @@ def create_installation(
         site_contact_name    = site_contact_name,
         site_contact_phone   = site_contact_phone,
         team_lead_name       = team_lead_name,
+        installer_name       = installer_name,
         scheduled_date       = scheduled_date,
         assigned_to          = created_by,
         created_by           = created_by,
         created_at           = now,
         updated_at           = now,
     )
+
     db.session.add(installation)
     db.session.flush()
 
@@ -340,18 +365,23 @@ def reschedule_installation(
     team_lead_name:  str | None = None,
 ) -> Installation:
     installation = _get_or_raise(tenant_id, installation_id)
+
     if installation.status != InstallationStatus.SCHEDULED:
         raise ValueError(
             f'Installation must be INSTALL-SCHEDULED to reschedule; status={installation.status}'
         )
+
     if not scheduled_date:
         raise ValueError('A valid scheduled date is required.')
 
     installation.scheduled_date = scheduled_date
+
     if team_lead_name:
         installation.team_lead_name = team_lead_name
+
     installation.updated_at = datetime.utcnow()
     db.session.commit()
+
     return installation
 
 
@@ -365,22 +395,28 @@ def start_installation(
     team_lead_name:  str | None = None,
 ) -> Installation:
     installation = _get_or_raise(tenant_id, installation_id)
+
     if installation.status != InstallationStatus.SCHEDULED:
         raise ValueError(
             f'Installation must be INSTALL-SCHEDULED to start; status={installation.status}'
         )
+
     if not installation.items:
         raise ValueError('Installation has no items.')
 
     _require_no_payment_hold(tenant_id, installation.order_id)
 
     now = datetime.utcnow()
-    installation.status     = InstallationStatus.IN_PROGRESS
+
+    installation.status = InstallationStatus.IN_PROGRESS
     installation.started_at = now
+
     if team_lead_name:
         installation.team_lead_name = team_lead_name
+
     installation.updated_at = now
     db.session.commit()
+
     return installation
 
 
@@ -401,13 +437,16 @@ def record_opening(
     snag_list:         str | None = None,
 ) -> Installation:
     installation = _get_or_raise(tenant_id, installation_id)
+
     if installation.status not in InstallationStatus.ACTIVE:
         raise ValueError(
             'Installation must be INSTALL-IN_PROGRESS or INSTALL-SNAG to record results; '
             f'status={installation.status}'
         )
+
     if result not in (TestResult.PASS, TestResult.SNAG):
         raise ValueError('Functional test result must be Pass or Snag.')
+
     if not installed_by:
         raise ValueError('Installed-by name is required.')
 
@@ -415,28 +454,37 @@ def record_opening(
 
     if result == TestResult.PASS:
         if not (fitted and hardware_adjusted and joints_sealed and site_cleaned):
-            raise ValueError('Every checklist step must be ticked before an opening can pass.')
+            raise ValueError(
+                'Every checklist step must be ticked before an opening can pass.'
+            )
         snag_list = None
     else:
         if not snag_list:
-            raise ValueError('Describe the snag when the functional test result is Snag.')
+            raise ValueError(
+                'Describe the snag when the functional test result is Snag.'
+            )
 
     now = datetime.utcnow()
-    item.installed_by            = installed_by
-    item.install_date            = now
-    item.fitted                  = bool(fitted)
-    item.hardware_adjusted       = bool(hardware_adjusted)
-    item.joints_sealed           = bool(joints_sealed)
-    item.site_cleaned            = bool(site_cleaned)
-    item.functional_test_result  = result
+
+    item.installed_by = installed_by
+    item.install_date = now
+    item.fitted = bool(fitted)
+    item.hardware_adjusted = bool(hardware_adjusted)
+    item.joints_sealed = bool(joints_sealed)
+    item.site_cleaned = bool(site_cleaned)
+    item.functional_test_result = result
+
     if result == TestResult.SNAG:
-        item.snag_list     = snag_list
+        item.snag_list = snag_list
         item.snag_resolved = False
+
     item.updated_at = now
 
     _refresh_status(installation)
+
     installation.updated_at = now
     db.session.commit()
+
     return installation
 
 
@@ -451,25 +499,32 @@ def resolve_snag(
     resolution_notes: str | None = None,
 ) -> Installation:
     installation = _get_or_raise(tenant_id, installation_id)
+
     if installation.status != InstallationStatus.SNAG:
         raise ValueError(
             f'Installation must be INSTALL-SNAG to resolve snags; status={installation.status}'
         )
 
     item = _get_item(installation, item_id)
+
     if not item.has_open_snag:
         raise ValueError('Item has no open snag.')
 
     now = datetime.utcnow()
-    item.snag_resolved          = True
-    item.functional_test_result = TestResult.PENDING   # must be re-tested
+
+    item.snag_resolved = True
+    item.functional_test_result = TestResult.PENDING
+
     if resolution_notes:
         item.snag_list = f'{item.snag_list or ""}\nResolved: {resolution_notes}'.strip()
+
     item.updated_at = now
 
     _refresh_status(installation)
+
     installation.updated_at = now
     db.session.commit()
+
     return installation
 
 
@@ -479,23 +534,29 @@ def resolve_all_snags(
     resolution_notes: str | None = None,
 ) -> Installation:
     installation = _get_or_raise(tenant_id, installation_id)
+
     if installation.status != InstallationStatus.SNAG:
         raise ValueError(
             f'Installation must be INSTALL-SNAG to resolve snags; status={installation.status}'
         )
 
     now = datetime.utcnow()
+
     for item in installation.items:
         if item.has_open_snag:
-            item.snag_resolved          = True
+            item.snag_resolved = True
             item.functional_test_result = TestResult.PENDING
+
             if resolution_notes:
                 item.snag_list = f'{item.snag_list or ""}\nResolved: {resolution_notes}'.strip()
+
             item.updated_at = now
 
     _refresh_status(installation)
+
     installation.updated_at = now
     db.session.commit()
+
     return installation
 
 
@@ -511,24 +572,33 @@ def sign_off(
     handover_file_path: str | None = None,
 ) -> Installation:
     installation = _get_or_raise(tenant_id, installation_id)
+
     if installation.status != InstallationStatus.IN_PROGRESS:
         raise ValueError(
             f'Installation must be INSTALL-IN_PROGRESS (no open snags) to sign off; '
             f'status={installation.status}'
         )
+
     if not signed_by:
         raise ValueError('Customer signatory name is required.')
+
     if not installation.all_passed:
-        raise ValueError('Every opening must pass its functional test before customer sign-off.')
+        raise ValueError(
+            'Every opening must pass its functional test before customer sign-off.'
+        )
 
     now = datetime.utcnow()
-    installation.status              = InstallationStatus.COMPLETED
-    installation.signed_by           = signed_by
+
+    installation.status = InstallationStatus.COMPLETED
+    installation.signed_by = signed_by
     installation.customer_signoff_at = now
-    installation.completed_at        = now
-    installation.handover_notes      = handover_notes
+    installation.completed_at = now
+    installation.handover_notes = handover_notes
+
     if handover_file_path:
         installation.handover_file_path = handover_file_path
-    installation.updated_at          = now
+
+    installation.updated_at = now
     db.session.commit()
+
     return installation
