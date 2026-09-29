@@ -33,6 +33,7 @@ from .project_type import ProjectType
 from .template_question import TemplateQuestion, InputType
 from .template_response import TemplateResponse
 from .template_upload import TemplateUpload
+from .share_link import ShareLink, ShareLinkType
 
 __all__ = [
     'Tenant',
@@ -68,4 +69,5 @@ __all__ = [
     'TemplateQuestion', 'InputType',
     'TemplateResponse',
     'TemplateUpload',
+    'ShareLink', 'ShareLinkType',
 ]
