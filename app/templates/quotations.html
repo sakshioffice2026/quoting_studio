@@ -18,6 +18,9 @@
         <h1>Quotations</h1>
         <div class="sub mono">{{ quotations|length }} record{{ 's' if quotations|length != 1 }}</div>
       </div>
+      <div>
+        <button type="button" class="btn btn-primary" data-open-create-quote>+ Create Quote</button>
+      </div>
     </div>
 
     <style>
@@ -105,4 +108,6 @@
 
   </div>
 </div>
+
+{% include 'quotation_flow/_select_customer_modal.html' %}
 {% endblock %}

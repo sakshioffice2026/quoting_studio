@@ -1,0 +1,173 @@
+{% extends 'base.html' %}
+{% block title %}Pick from Gallery — {{ quotation.quotation_number }} — FenestraOne{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    <div class="page-header">
+      <div>
+        <h1>Pick from Gallery</h1>
+        <div class="sub mono">{{ quotation.quotation_number }} · {{ quotation.project.customer_name }}</div>
+      </div>
+      <div>
+        <a href="{{ url_for('quotation_flow.builder', quotation_id=quotation.id) }}" class="btn btn-secondary">← Back to Builder</a>
+      </div>
+    </div>
+
+    <style>
+      .gl-series { margin-bottom:24px; }
+      .gl-series-head { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; }
+      .gl-series-head h3 { margin:0; color:var(--navy); }
+      .gl-series-head .m { font-size:12px; color:#6B7280; }
+      .gl-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:14px; }
+      .gl-card { display:block; width:100%; text-align:left; padding:0; font:inherit; border:1px solid #E5E7EB; border-radius:10px; background:#fff; overflow:hidden; cursor:pointer; color:inherit; transition:box-shadow .15s, border-color .15s; }
+      .gl-card:hover { border-color:var(--copper); box-shadow:0 6px 18px rgba(0,0,0,.08); }
+      .gl-img { height:130px; background:#F3F4F6; display:flex; align-items:center; justify-content:center; font-size:34px; }
+      .gl-img img { width:100%; height:100%; object-fit:contain; }
+      .gl-body { padding:10px 12px; }
+      .gl-name { font-weight:600; color:var(--navy); font-size:14px; }
+      .gl-meta { font-size:12px; color:#6B7280; margin-top:2px; }
+
+      .pv-overlay { position:fixed; inset:0; background:rgba(15,23,42,.6); display:none; align-items:center; justify-content:center; z-index:1100; padding:16px; }
+      .pv-overlay.open { display:flex; }
+      .pv-modal { background:#fff; width:100%; max-width:1000px; height:90vh; border-radius:12px; display:flex; flex-direction:column; box-shadow:0 20px 50px rgba(0,0,0,.4); overflow:hidden; }
+      .pv-head { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid #E5E7EB; }
+      .pv-head h3 { margin:0; font-size:17px; color:var(--navy); }
+      .pv-x { background:none; border:0; font-size:26px; line-height:1; cursor:pointer; color:#6B7280; }
+      .pv-x:hover { color:#111827; }
+      .pv-body { flex:1; min-height:0; background:#F3F4F6; position:relative; }
+      .pv-frame { width:100%; height:100%; border:0; display:block; background:#fff; }
+      .pv-nopdf { position:absolute; inset:0; display:none; align-items:center; justify-content:center; text-align:center; padding:24px; color:#6B7280; font-size:14px; }
+      .pv-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 20px; border-top:1px solid #E5E7EB; flex-wrap:wrap; }
+      .pv-fallback { font-size:13px; color:#6B7280; }
+      .pv-fallback a { color:var(--copper); text-decoration:underline; }
+      .pv-btns { display:flex; gap:8px; }
+    </style>
+
+    {% if gallery %}
+      {% for entry in gallery %}
+      <div class="gl-series ui-card">
+        <div class="gl-series-head">
+          <h3>{{ entry.series.name }}</h3>
+          <span class="m">{{ entry.series.material }}{% if entry.series.description %} · {{ entry.series.description }}{% endif %}</span>
+        </div>
+
+        {% if entry.styles %}
+        <div class="gl-grid">
+          {% for s in entry.styles %}
+          <button type="button" class="gl-card"
+                  data-preview
+                  data-name="{{ s.name }}"
+                  data-pdf="{{ s.pdf_url or '' }}"
+                  data-select="{{ url_for('quotation_flow.review', quotation_id=quotation.id, style_id=s.id) }}">
+            <div class="gl-img">
+              {% if s.image %}
+                <img src="{{ s.image }}" alt="{{ s.name }}" loading="lazy">
+              {% else %}
+                🪟
+              {% endif %}
+            </div>
+            <div class="gl-body">
+              <div class="gl-name">{{ s.name }}</div>
+              <div class="gl-meta">{{ s.panels }} panel{{ 's' if s.panels != 1 }}</div>
+            </div>
+          </button>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No styles in this series.</p></div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="ui-card">
+        <div class="empty-state">
+          <div class="icon">🖼️</div>
+          <p>The product gallery is empty. Use the configurator instead.</p>
+          <a href="{{ url_for('quotation_flow.configurator', quotation_id=quotation.id) }}" class="btn btn-primary">Open Configurator</a>
+        </div>
+      </div>
+    {% endif %}
+
+  </div>
+</div>
+
+<div class="pv-overlay" id="pvOverlay" aria-hidden="true">
+  <div class="pv-modal" role="dialog" aria-modal="true" aria-labelledby="pvTitle">
+    <div class="pv-head">
+      <h3 id="pvTitle"></h3>
+      <button type="button" class="pv-x" id="pvX" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="pv-body">
+      <iframe class="pv-frame" id="pvFrame" title="Product brochure" src="about:blank"></iframe>
+      <div class="pv-nopdf" id="pvNoPdf">No brochure is available for this product. You can still select it to continue.</div>
+    </div>
+
+    <div class="pv-foot">
+      <div class="pv-fallback" id="pvFallback">
+        If the PDF doesn't load, please <a href="#" id="pvNewTab" target="_blank" rel="noopener">click here</a> to open in a new tab.
+      </div>
+      <div class="pv-btns">
+        <button type="button" class="btn btn-secondary" id="pvClose">Close</button>
+        <a href="#" class="btn btn-primary" id="pvSelect">Select Product</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var overlay  = document.getElementById('pvOverlay');
+  var title    = document.getElementById('pvTitle');
+  var frame    = document.getElementById('pvFrame');
+  var noPdf    = document.getElementById('pvNoPdf');
+  var fallback = document.getElementById('pvFallback');
+  var newTab   = document.getElementById('pvNewTab');
+  var select   = document.getElementById('pvSelect');
+
+  function open(card) {
+    var name = card.dataset.name;
+    var pdf  = card.dataset.pdf;
+
+    title.textContent = name;
+    select.href = card.dataset.select;
+
+    if (pdf) {
+      frame.style.display = 'block';
+      noPdf.style.display = 'none';
+      fallback.style.display = 'block';
+      newTab.href = pdf;
+      frame.src = pdf + '#navpanes=1&toolbar=1&view=FitH';
+    } else {
+      frame.src = 'about:blank';
+      frame.style.display = 'none';
+      noPdf.style.display = 'flex';
+      fallback.style.display = 'none';
+    }
+
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function close() {
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+    frame.src = 'about:blank';
+    document.body.style.overflow = '';
+  }
+
+  document.querySelectorAll('[data-preview]').forEach(function (card) {
+    card.addEventListener('click', function () { open(card); });
+  });
+
+  document.getElementById('pvX').addEventListener('click', close);
+  document.getElementById('pvClose').addEventListener('click', close);
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && overlay.classList.contains('open')) close(); });
+})();
+</script>
+{% endblock %}

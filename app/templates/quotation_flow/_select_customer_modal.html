@@ -1,0 +1,175 @@
+<style>
+  .qf-overlay { position:fixed; inset:0; background:rgba(15,23,42,.55); display:none; align-items:center; justify-content:center; z-index:1000; padding:16px; }
+  .qf-overlay.open { display:flex; }
+  .qf-modal { background:#fff; width:100%; max-width:560px; max-height:90vh; overflow:auto; border-radius:12px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
+  .qf-head { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #E5E7EB; }
+  .qf-head h3 { margin:0; font-size:16px; color:var(--navy); }
+  .qf-close { background:none; border:0; font-size:22px; line-height:1; cursor:pointer; color:#6B7280; }
+  .qf-body { padding:18px 20px; }
+  .qf-tabs { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+  .qf-tab { padding:7px 14px; border-radius:999px; border:1px solid #D1D5DB; background:#fff; cursor:pointer; font-size:13px; }
+  .qf-tab.active { background:var(--navy); color:#fff; border-color:var(--navy); }
+  .qf-pane { display:none; }
+  .qf-pane.active { display:block; }
+  .qf-list { border:1px solid #E5E7EB; border-radius:8px; max-height:220px; overflow:auto; margin-top:10px; }
+  .qf-row { display:flex; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid #F3F4F6; cursor:pointer; }
+  .qf-row:last-child { border-bottom:0; }
+  .qf-row:hover { background:#F9FAFB; }
+  .qf-row.selected { background:#FFF7ED; }
+  .qf-row .n { font-weight:600; color:var(--navy); font-size:14px; }
+  .qf-row .m { font-size:12px; color:#6B7280; }
+  .qf-empty { padding:16px; text-align:center; color:#6B7280; font-size:13px; }
+  .qf-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .qf-grid .full { grid-column:1 / -1; }
+  .qf-foot { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid #E5E7EB; }
+  .qf-walk { padding:14px; border:1px dashed #D1D5DB; border-radius:8px; font-size:13px; color:#374151; }
+</style>
+
+<div class="qf-overlay" id="qfOverlay" aria-hidden="true">
+  <div class="qf-modal" role="dialog" aria-modal="true" aria-labelledby="qfTitle">
+    <div class="qf-head">
+      <h3 id="qfTitle">Select Customer</h3>
+      <button type="button" class="qf-close" id="qfClose" aria-label="Close">&times;</button>
+    </div>
+
+    <form method="post" action="{{ url_for('quotation_flow.start') }}" id="qfForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="mode" id="qfMode" value="existing">
+      <input type="hidden" name="customer_id" id="qfCustomerId" value="">
+
+      <div class="qf-body">
+        <div class="qf-tabs">
+          <button type="button" class="qf-tab active" data-mode="existing">Existing Customer</button>
+          <button type="button" class="qf-tab" data-mode="new">New Customer</button>
+          <button type="button" class="qf-tab" data-mode="walk_in">Walk-In Customer</button>
+        </div>
+
+        <div class="qf-pane active" data-pane="existing">
+          <input type="text" class="form-control" id="qfSearch" placeholder="Search by name, phone or email" autocomplete="off">
+          <div class="qf-list" id="qfList">
+            <div class="qf-empty">Loading…</div>
+          </div>
+        </div>
+
+        <div class="qf-pane" data-pane="new">
+          <div class="qf-grid">
+            <div class="form-group full">
+              <label>Name *</label>
+              <input type="text" class="form-control" name="name" id="qfName">
+            </div>
+            <div class="form-group">
+              <label>Phone</label>
+              <input type="text" class="form-control" name="phone">
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" class="form-control" name="email">
+            </div>
+            <div class="form-group">
+              <label>City</label>
+              <input type="text" class="form-control" name="city">
+            </div>
+            <div class="form-group">
+              <label>Address</label>
+              <input type="text" class="form-control" name="address">
+            </div>
+          </div>
+        </div>
+
+        <div class="qf-pane" data-pane="walk_in">
+          <div class="qf-walk">
+            Continue without saving a customer record. A draft quotation is created for a Walk-In Customer.
+          </div>
+        </div>
+      </div>
+
+      <div class="qf-foot">
+        <button type="button" class="btn btn-secondary" id="qfCancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="qfSubmit">Continue</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  var overlay  = document.getElementById('qfOverlay');
+  var form     = document.getElementById('qfForm');
+  var modeInp  = document.getElementById('qfMode');
+  var custInp  = document.getElementById('qfCustomerId');
+  var list     = document.getElementById('qfList');
+  var search   = document.getElementById('qfSearch');
+  var nameInp  = document.getElementById('qfName');
+  var tabs     = overlay.querySelectorAll('.qf-tab');
+  var panes    = overlay.querySelectorAll('.qf-pane');
+  var timer    = null;
+  var loaded   = false;
+
+  function open()  { overlay.classList.add('open'); overlay.setAttribute('aria-hidden', 'false'); if (!loaded) { load(''); loaded = true; } }
+  function close() { overlay.classList.remove('open'); overlay.setAttribute('aria-hidden', 'true'); }
+
+  function setMode(mode) {
+    modeInp.value = mode;
+    tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.mode === mode); });
+    panes.forEach(function (p) { p.classList.toggle('active', p.dataset.pane === mode); });
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function render(rows) {
+    if (!rows.length) { list.innerHTML = '<div class="qf-empty">No customers found.</div>'; return; }
+    list.innerHTML = rows.map(function (c) {
+      var meta = [c.phone, c.email, c.city].filter(Boolean).join(' · ');
+      return '<div class="qf-row" data-id="' + c.id + '"><div><div class="n">' + esc(c.name) +
+             '</div><div class="m">' + esc(meta) + '</div></div></div>';
+    }).join('');
+  }
+
+  function load(term) {
+    fetch({{ url_for('quotation_flow.customers')|tojson }} + '?q=' + encodeURIComponent(term), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function () { list.innerHTML = '<div class="qf-empty">Could not load customers.</div>'; });
+  }
+
+  document.addEventListener('click', function (e) {
+    var trigger = e.target.closest('[data-open-create-quote]');
+    if (trigger) { e.preventDefault(); open(); }
+  });
+
+  document.getElementById('qfClose').addEventListener('click', close);
+  document.getElementById('qfCancel').addEventListener('click', close);
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+
+  tabs.forEach(function (t) { t.addEventListener('click', function () { setMode(t.dataset.mode); }); });
+
+  search.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () { load(search.value.trim()); }, 250);
+  });
+
+  list.addEventListener('click', function (e) {
+    var row = e.target.closest('.qf-row');
+    if (!row) return;
+    list.querySelectorAll('.qf-row').forEach(function (r) { r.classList.remove('selected'); });
+    row.classList.add('selected');
+    custInp.value = row.dataset.id;
+  });
+
+  form.addEventListener('submit', function (e) {
+    if (modeInp.value === 'existing' && !custInp.value) {
+      e.preventDefault();
+      alert('Please select a customer, or choose New / Walk-In.');
+    }
+    if (modeInp.value === 'new' && !nameInp.value.trim()) {
+      e.preventDefault();
+      nameInp.focus();
+    }
+  });
+})();
+</script>
