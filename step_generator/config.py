@@ -21,3 +21,35 @@ VOLUME_REL_TOLERANCE = 2e-3
 BBOX_TOLERANCE = 5e-3
 
 DEFAULT_LENGTH = 1000.0
+
+# ---------------------------------------------------------------------------
+# Stage 2: mitred frame (Head, Sill, Jamb_Left, Jamb_Right)
+# ---------------------------------------------------------------------------
+
+# Outer frame size in mm (X = width, Y = height, Z = wall depth).
+DEFAULT_FRAME_WIDTH = 1000.0
+DEFAULT_FRAME_HEIGHT = 1200.0
+
+# Section DXF used for each part. Both jambs share jamb.dxf.
+FRAME_SECTION_FILES = {
+    "Head": "head.dxf",
+    "Sill": "sill.dxf",
+    "Jamb_Left": "jamb.dxf",
+    "Jamb_Right": "jamb.dxf",
+}
+
+# Profile convention for every section (after origin normalisation):
+#   profile X = across (visible face width, measured inward from the outer edge)
+#   profile Y = depth  (through the wall, along frame Z)
+# Flip flags reverse a direction if a member looks mirrored when opened in CAD.
+ACROSS_FLIP = {"Head": False, "Sill": False, "Jamb_Left": False, "Jamb_Right": False}
+DEPTH_FLIP = {"Head": False, "Sill": False, "Jamb_Left": False, "Jamb_Right": False}
+
+# Extra length (mm) added to each member before the mitre cut trims it back.
+MITRE_OVERSIZE = 500.0
+
+# Tolerance for the frame checks (volume of member vs. its mitre envelope).
+FRAME_VOLUME_REL_TOLERANCE = 5e-3
+FRAME_BBOX_TOLERANCE = 5e-3
+
+FRAME_OUTPUT_NAME = "frame_{w}x{h}mm.step"

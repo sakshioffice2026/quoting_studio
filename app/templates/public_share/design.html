@@ -1,105 +1,149 @@
-{% extends 'public_share/base.html' %}
-{% block title %}Design Approval — {{ tenant.name if tenant else 'FenestraOne' }}{% endblock %}
-{% block subtitle %}Design approval · Revision {{ approval.revision_number }}{% endblock %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Design Approval{% if tenant and tenant.name %} — {{ tenant.name }}{% endif %}</title>
+  <style>
+    :root { --bg:#f1f5f9; --card:#ffffff; --text:#0f172a; --muted:#64748b; --line:#e2e8f0;
+            --primary:#1d4ed8; --ok:#15803d; --warn:#b45309; --danger:#b91c1c; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+           font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; line-height:1.5; }
+    .wrap { max-width:720px; margin:0 auto; padding:24px 16px 48px; }
+    .brand { font-size:14px; color:var(--muted); margin-bottom:12px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:16px; }
+    h1 { font-size:22px; margin:0 0 4px; }
+    h2 { font-size:16px; margin:0 0 12px; }
+    .muted { color:var(--muted); font-size:14px; }
+    .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600;
+            background:#e0e7ff; color:#3730a3; }
+    .pill.ok { background:#dcfce7; color:var(--ok); }
+    .pill.warn { background:#fef3c7; color:var(--warn); }
+    .pill.danger { background:#fee2e2; color:var(--danger); }
+    .flash { padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:14px; }
+    .flash.success { background:#dcfce7; color:var(--ok); }
+    .flash.error { background:#fee2e2; color:var(--danger); }
+    .flash.info { background:#e0e7ff; color:#3730a3; }
+    label { display:block; font-size:14px; font-weight:600; margin:12px 0 4px; }
+    input[type=text], textarea { width:100%; padding:10px 12px; border:1px solid var(--line);
+            border-radius:8px; font:inherit; background:#fff; }
+    textarea { min-height:96px; resize:vertical; }
+    .btn { display:inline-block; border:0; border-radius:8px; padding:10px 18px; font:inherit;
+           font-weight:600; cursor:pointer; margin-top:14px; }
+    .btn-primary { background:var(--primary); color:#fff; }
+    .btn-secondary { background:#fff; color:var(--text); border:1px solid var(--line); }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .row-label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .row-value { font-size:15px; font-weight:600; }
+    @media (max-width:560px) { .grid { grid-template-columns:1fr; } }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0b1220; --card:#111a2e; --text:#e5e7eb; --muted:#94a3b8; --line:#23304a; }
+      input[type=text], textarea, .btn-secondary { background:#0b1220; color:var(--text); }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
 
-{% block content %}
+  <div class="brand">{{ tenant.name if tenant and tenant.name else 'FenestraOne' }}</div>
 
-{% set can_respond = approval.status == DesignApprovalStatus.APPROVAL_SENT and not approval.is_expired %}
-{% set windows = project.windows.all() %}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="flash {{ 'success' if category == 'success' else ('error' if category == 'error' else 'info') }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
 
-{% if approval.status == DesignApprovalStatus.APPROVED %}
-  <div class="pub-banner ok">
-    ✓ Design approved{% if approval.approved_at %} on {{ approval.approved_at.strftime('%d %b %Y') }}{% endif %}.
+  {% set status = approval.status %}
+  {% set tone = 'ok' if status == DesignApprovalStatus.APPROVED
+       else ('warn' if status == DesignApprovalStatus.REVISION_REQUESTED
+       else ('danger' if status == DesignApprovalStatus.APPROVAL_EXPIRED else '')) %}
+
+  <div class="card">
+    <h1>{{ project.display_name if project and project.display_name else 'Design Approval' }}</h1>
+    <div class="muted">Design revision {{ approval.revision_number }}</div>
+    <div style="margin-top:10px;">
+      <span class="pill {{ tone }}">{{ approval.status_label }}</span>
+    </div>
+
+    <div class="grid" style="margin-top:16px;">
+      <div>
+        <div class="row-label">Sent on</div>
+        <div class="row-value">{{ approval.sent_at.strftime('%d %b %Y') if approval.sent_at else '—' }}</div>
+      </div>
+      <div>
+        <div class="row-label">Respond by</div>
+        <div class="row-value">{{ approval.expires_at.strftime('%d %b %Y') if approval.expires_at else '—' }}</div>
+      </div>
+    </div>
   </div>
-{% elif approval.status == DesignApprovalStatus.REVISION_REQUESTED %}
-  <div class="pub-banner warn">Changes have been requested. We will send you an updated design shortly.</div>
-{% elif approval.status == DesignApprovalStatus.APPROVAL_EXPIRED or approval.is_expired %}
-  <div class="pub-banner warn">This approval request has expired. Please contact us for a fresh link.</div>
-{% endif %}
 
-<div class="pub-card">
-  <h2>Project</h2>
-  <div style="font-size:16px;font-weight:600;color:var(--navy);">{{ project.customer_name }}</div>
-  {% if project.address %}<div class="pub-muted">{{ project.address }}</div>{% endif %}
-  {% if approval.expires_at and can_respond %}
-    <div class="pub-muted" style="margin-top:6px;">Please respond by {{ approval.expires_at.strftime('%d %b %Y') }}</div>
-  {% endif %}
-</div>
+  {% if status == DesignApprovalStatus.APPROVAL_SENT %}
 
-<div class="pub-card">
-  <h2>Windows &amp; Doors ({{ windows|length }})</h2>
-  {% if windows %}
-  <div class="pub-table-wrap">
-    <table class="pub-table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Item</th>
-          <th>Size (mm)</th>
-          <th>Material</th>
-          <th>Colour</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for w in windows %}
-        <tr>
-          <td class="pub-muted">{{ loop.index }}</td>
-          <td style="font-weight:600;color:var(--navy);">{{ w.label }}</td>
-          <td>{{ w.width_mm }} × {{ w.height_mm }}</td>
-          <td>{{ w.material }}</td>
-          <td>
-            <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ w.frame_colour_hex }};border:1px solid #D1D5DB;vertical-align:middle;margin-right:6px;"></span>{{ w.frame_colour_name }}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+    <div class="card">
+      <h2>Approve this design</h2>
+      <p class="muted">Please review the design shared with you. Type your full name to confirm your approval.</p>
+      <form method="post" action="{{ url_for('public_share.design_approve', token=link.token) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="signoff_name">Full name</label>
+        <input type="text" id="signoff_name" name="signoff_name" required maxlength="120" autocomplete="name">
+        <label for="notes">Notes (optional)</label>
+        <textarea id="notes" name="notes" maxlength="1000"></textarea>
+        <button type="submit" class="btn btn-primary">Approve design</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Request changes</h2>
+      <p class="muted">Tell us what you would like changed and we will send a revised design.</p>
+      <form method="post" action="{{ url_for('public_share.design_request_changes', token=link.token) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="reason">Requested changes</label>
+        <textarea id="reason" name="reason" required maxlength="2000"></textarea>
+        <button type="submit" class="btn btn-secondary">Send change request</button>
+      </form>
+    </div>
+
+  {% elif status == DesignApprovalStatus.APPROVED %}
+
+    <div class="card">
+      <h2>Design approved</h2>
+      <p class="muted">
+        Approved{% if approval.approved_at %} on {{ approval.approved_at.strftime('%d %b %Y, %H:%M') }}{% endif %}.
+        Thank you.
+      </p>
+      {% if approval.customer_signoff_notes %}
+        <p class="muted">{{ approval.customer_signoff_notes }}</p>
+      {% endif %}
+    </div>
+
+  {% elif status == DesignApprovalStatus.REVISION_REQUESTED %}
+
+    <div class="card">
+      <h2>Changes requested</h2>
+      <p class="muted">Your change request has been received. We will share a revised design shortly.</p>
+      {% if approval.revision_requested_reason %}
+        <p class="muted">{{ approval.revision_requested_reason }}</p>
+      {% endif %}
+    </div>
+
+  {% elif status == DesignApprovalStatus.APPROVAL_EXPIRED %}
+
+    <div class="card">
+      <h2>Approval window closed</h2>
+      <p class="muted">The time to respond to this design has passed. Please contact us for a fresh link.</p>
+    </div>
+
   {% else %}
-    <p class="pub-muted">No items listed.</p>
+
+    <div class="card">
+      <h2>No action needed</h2>
+      <p class="muted">This design is not awaiting your response.</p>
+    </div>
+
   {% endif %}
+
 </div>
-
-{% if approval.status == DesignApprovalStatus.REVISION_REQUESTED and approval.revision_requested_reason %}
-<div class="pub-card">
-  <h2>Requested changes</h2>
-  <p style="margin:0;font-size:14px;">{{ approval.revision_requested_reason }}</p>
-</div>
-{% endif %}
-
-{% if can_respond %}
-<div class="pub-card">
-  <h2>Your response</h2>
-  <div class="pub-split">
-
-    <form method="post" action="{{ url_for('public_share.design_approve', token=link.token) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="pub-form-row">
-        <label for="signoffName">Your full name *</label>
-        <input type="text" id="signoffName" name="signoff_name" value="{{ project.customer_name }}" maxlength="120" required>
-      </div>
-      <div class="pub-form-row">
-        <label for="apprNotes">Notes (optional)</label>
-        <textarea id="apprNotes" name="notes" rows="2" maxlength="500"></textarea>
-      </div>
-      <button type="submit" class="btn btn-primary"
-              onclick="return confirm('Approve this design? It will be locked for manufacturing.');">
-        Approve Design
-      </button>
-    </form>
-
-    <form method="post" action="{{ url_for('public_share.design_request_changes', token=link.token) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="pub-form-row">
-        <label for="revReason">Request changes *</label>
-        <textarea id="revReason" name="reason" rows="4" maxlength="800" required
-                  placeholder="Tell us what you would like changed"></textarea>
-      </div>
-      <button type="submit" class="btn btn-secondary">Request Changes</button>
-    </form>
-
-  </div>
-</div>
-{% endif %}
-
-{% endblock %}
+</body>
+</html>

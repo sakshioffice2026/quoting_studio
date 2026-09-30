@@ -1,4 +1,3 @@
-
 {% extends 'base.html' %}
 {% from '_ui_macros.html' import pill, avatar %}
 {% block title %}Design Approvals — FenestraOne{% endblock %}
@@ -14,6 +13,7 @@
       'APPROVAL-EXPIRED': 'danger', 'DESIGN-SUPERSEDED': 'neutral'
     } %}
 
+    {# =================== 1. HEADER =================== #}
     <div class="page-header">
       <div>
         <h1>Design Approvals</h1>
@@ -22,128 +22,59 @@
     </div>
 
     <style>
-      .da-filters {
-        display:flex;
-        gap:6px;
-        flex-wrap:wrap;
-        margin-bottom:16px;
-      }
-
-      .da-name {
-        font-weight:600;
-        color:var(--navy);
-      }
-
-      .da-name:hover {
-        color:var(--copper);
-      }
-
-      .da-actions {
-        display:flex;
-        justify-content:flex-end;
-        gap:6px;
-        flex-wrap:wrap;
-      }
+      .da-filters { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+      .da-name { font-weight:600; color:var(--navy); }
+      .da-name:hover { color:var(--copper); }
     </style>
 
+    {# =================== 2. FILTERS + TABLE =================== #}
     <div class="ui-card">
       <div class="da-filters">
-        <a href="{{ url_for('design_approval.index') }}"
-           class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">
-          All
-        </a>
-
+        <a href="{{ url_for('design_approval.index') }}" class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-secondary' }}">All</a>
         {% for code in DesignApprovalStatus.ALL %}
         <a href="{{ url_for('design_approval.index', status=code) }}"
-           class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">
-          {{ DesignApprovalStatus.LABELS[code] }}
-        </a>
+           class="btn btn-sm {{ 'btn-primary' if status_filter == code else 'btn-secondary' }}">{{ DesignApprovalStatus.LABELS[code] }}</a>
         {% endfor %}
       </div>
 
       {% if approvals %}
       <div style="overflow-x:auto;">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Project</th>
-              <th>Revision</th>
-              <th>Status</th>
-              <th>Submitted</th>
-              <th>Sent</th>
-              <th>Deadline</th>
-              <th></th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {% for a in approvals %}
-            <tr>
-              <td>
-                {% if a.project %}
-                <a href="{{ url_for('design_approval.detail', approval_id=a.id) }}"
-                   class="da-name">
-                  {{ a.project.display_name }}
-                </a>
-                {% else %}
-                —
-                {% endif %}
-              </td>
-
-              <td class="mono" style="font-size:12px;">
-                Rev {{ a.revision_number }}
-              </td>
-
-              <td>
-                {{ pill(a.status_label, tone_map.get(a.status, 'neutral')) }}
-
-                {% if a.status == DesignApprovalStatus.APPROVAL_SENT
-                      and a.days_until_expiry is not none
-                      and a.days_until_expiry <= 2 %}
-                <span style="color:var(--red,#c0392b);font-size:11px;margin-left:4px;">
-                  ⚠ {{ a.days_until_expiry }}d left
-                </span>
-                {% endif %}
-              </td>
-
-              <td class="muted" style="font-size:12px;">
-                {{ a.submitted_at.strftime('%d %b %Y') if a.submitted_at else '—' }}
-              </td>
-
-              <td class="muted" style="font-size:12px;">
-                {{ a.sent_at.strftime('%d %b %Y') if a.sent_at else '—' }}
-              </td>
-
-              <td class="muted" style="font-size:12px;">
-                {% if a.expires_at %}
+      <table class="data-table">
+        <thead>
+          <tr><th>Project</th><th>Revision</th><th>Status</th><th>Submitted</th><th>Sent</th><th>Deadline</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for a in approvals %}
+          <tr>
+            <td>
+              {% if a.project %}
+              <a href="{{ url_for('design_approval.detail', approval_id=a.id) }}" class="da-name">{{ a.project.display_name }}</a>
+              {% else %}—{% endif %}
+            </td>
+            <td class="mono" style="font-size:12px;">Rev {{ a.revision_number }}</td>
+            <td>
+              {{ pill(a.status_label, tone_map.get(a.status, 'neutral')) }}
+              {% if a.status == DesignApprovalStatus.APPROVAL_SENT and a.days_until_expiry is not none and a.days_until_expiry <= 2 %}
+                <span style="color:var(--red,#c0392b); font-size:11px; margin-left:4px;">⚠ {{ a.days_until_expiry }}d left</span>
+              {% endif %}
+            </td>
+            <td class="muted" style="font-size:12px;">{{ a.submitted_at.strftime('%d %b %Y') if a.submitted_at else '—' }}</td>
+            <td class="muted" style="font-size:12px;">{{ a.sent_at.strftime('%d %b %Y') if a.sent_at else '—' }}</td>
+            <td class="muted" style="font-size:12px;">
+              {% if a.expires_at %}
                 <span style="{{ 'color:var(--red,#c0392b);' if a.is_expired else '' }}">
                   {{ a.expires_at.strftime('%d %b %Y') }}
                 </span>
-                {% else %}
-                —
-                {% endif %}
-              </td>
-
-              <td>
-                <div class="da-actions">
-                  <a href="{{ url_for('design_approval.detail', approval_id=a.id) }}"
-                     class="btn btn-secondary btn-sm">
-                    View →
-                  </a>
-
-                  <button type="button"
-                          class="btn btn-secondary btn-sm copy-design-link"
-                          data-link="{{ url_for('design_approval.detail', approval_id=a.id, _external=True) }}">
-                    🔗 Copy link
-                  </button>
-                </div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+              {% else %}—{% endif %}
+            </td>
+            <td style="text-align:right;">
+              <a href="{{ url_for('design_approval.detail', approval_id=a.id) }}" class="btn btn-secondary btn-sm">View →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
       </div>
-
       {% else %}
       <div class="empty-state">
         <div class="icon">◱</div>
@@ -154,47 +85,4 @@
 
   </div>
 </div>
-
-<script>
-(function () {
-  document.querySelectorAll('.copy-design-link').forEach(function (button) {
-    button.addEventListener('click', async function () {
-      var link = button.getAttribute('data-link');
-      if (!link) return;
-
-      var originalText = button.innerHTML;
-
-      try {
-        await navigator.clipboard.writeText(link);
-        button.innerHTML = '✓ Link copied';
-      } catch (error) {
-        var textarea = document.createElement('textarea');
-        textarea.value = link;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        textarea.style.pointerEvents = 'none';
-
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-
-        try {
-          document.execCommand('copy');
-          button.innerHTML = '✓ Link copied';
-        } catch (copyError) {
-          button.innerHTML = 'Copy failed';
-        }
-
-        document.body.removeChild(textarea);
-      }
-
-      setTimeout(function () {
-        button.innerHTML = originalText;
-      }, 1800);
-    });
-  });
-})();
-</script>
-
 {% endblock %}
-

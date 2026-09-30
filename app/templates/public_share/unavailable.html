@@ -1,9 +1,32 @@
-{% extends 'public_share/base.html' %}
-{% block title %}Link unavailable — FenestraOne{% endblock %}
-{% block content %}
-<div class="pub-card" style="text-align:center;padding:40px 22px;">
-  <div style="font-size:40px;margin-bottom:8px;">🔒</div>
-  <h2 style="font-size:18px;">This link is unavailable</h2>
-  <p class="pub-muted">{{ reason or 'This link is no longer active. Please ask the sender for a new one.' }}</p>
-</div>
-{% endblock %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Link unavailable</title>
+  <style>
+    :root { --bg:#f1f5f9; --card:#ffffff; --text:#0f172a; --muted:#64748b; --line:#e2e8f0; --danger:#b91c1c; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+           background:var(--bg); color:var(--text);
+           font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; line-height:1.5; }
+    .card { max-width:480px; width:100%; margin:16px; background:var(--card); border:1px solid var(--line);
+            border-radius:12px; padding:32px 24px; text-align:center; }
+    .icon { width:48px; height:48px; border-radius:50%; background:#fee2e2; color:var(--danger);
+            display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:700; margin:0 auto 16px; }
+    h1 { font-size:20px; margin:0 0 8px; }
+    p { margin:0; color:var(--muted); font-size:15px; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0b1220; --card:#111a2e; --text:#e5e7eb; --muted:#94a3b8; --line:#23304a; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">!</div>
+    <h1>This link is unavailable</h1>
+    <p>{{ reason or 'This link is no longer active. Please ask for a new one.' }}</p>
+  </div>
+</body>
+</html>

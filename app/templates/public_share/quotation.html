@@ -1,115 +1,224 @@
-{% extends 'public_share/base.html' %}
-{% block title %}Quotation {{ quotation.quotation_number }} — {{ tenant.name if tenant else 'FenestraOne' }}{% endblock %}
-{% block subtitle %}Quotation {{ quotation.quotation_number }} · v{{ quotation.quotation_version }}{% endblock %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Quotation {{ quotation.quotation_number }}{% if tenant and tenant.name %} — {{ tenant.name }}{% endif %}</title>
+  <style>
+    :root { --bg:#f1f5f9; --card:#ffffff; --text:#0f172a; --muted:#64748b; --line:#e2e8f0;
+            --primary:#1d4ed8; --ok:#15803d; --warn:#b45309; --danger:#b91c1c; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+           font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; line-height:1.5; }
+    .wrap { max-width:860px; margin:0 auto; padding:24px 16px 48px; }
+    .brand { font-size:14px; color:var(--muted); margin-bottom:12px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:16px; }
+    h1 { font-size:22px; margin:0 0 4px; }
+    h2 { font-size:16px; margin:0 0 12px; }
+    .muted { color:var(--muted); font-size:14px; }
+    .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600;
+            background:#e0e7ff; color:#3730a3; }
+    .pill.ok { background:#dcfce7; color:var(--ok); }
+    .pill.warn { background:#fef3c7; color:var(--warn); }
+    .pill.danger { background:#fee2e2; color:var(--danger); }
+    .flash { padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:14px; }
+    .flash.success { background:#dcfce7; color:var(--ok); }
+    .flash.error { background:#fee2e2; color:var(--danger); }
+    .flash.info { background:#e0e7ff; color:#3730a3; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:16px; }
+    .row-label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .row-value { font-size:15px; font-weight:600; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { padding:10px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .num { text-align:right; white-space:nowrap; }
+    .totals { margin-top:12px; margin-left:auto; max-width:320px; }
+    .totals div { display:flex; justify-content:space-between; padding:4px 0; font-size:14px; }
+    .totals .grand { font-size:18px; font-weight:700; border-top:2px solid var(--line); margin-top:6px; padding-top:8px; }
+    label { display:block; font-size:14px; font-weight:600; margin:12px 0 4px; }
+    input[type=text], textarea { width:100%; padding:10px 12px; border:1px solid var(--line);
+            border-radius:8px; font:inherit; background:#fff; }
+    textarea { min-height:96px; resize:vertical; }
+    .btn { display:inline-block; border:0; border-radius:8px; padding:10px 18px; font:inherit;
+           font-weight:600; cursor:pointer; margin-top:14px; text-decoration:none; }
+    .btn-primary { background:var(--primary); color:#fff; }
+    .btn-secondary { background:#fff; color:var(--text); border:1px solid var(--line); }
+    .head-row { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+    @media (max-width:640px) { .grid { grid-template-columns:1fr; } }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0b1220; --card:#111a2e; --text:#e5e7eb; --muted:#94a3b8; --line:#23304a; }
+      input[type=text], textarea, .btn-secondary { background:#0b1220; color:var(--text); }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
 
-{% block content %}
+  <div class="brand">{{ tenant.name if tenant and tenant.name else 'FenestraOne' }}</div>
 
-{% set can_respond = quotation.status in [QuotationStatus.SENT, QuotationStatus.NEGOTIATION] and not quotation.is_expired %}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="flash {{ 'success' if category == 'success' else ('error' if category == 'error' else 'info') }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
 
-{% if quotation.status == QuotationStatus.ACCEPTED %}
-  <div class="pub-banner ok">
-    ✓ Accepted{% if quotation.accepted_by_name %} by {{ quotation.accepted_by_name }}{% endif %}{% if quotation.accepted_at %} on {{ quotation.accepted_at.strftime('%d %b %Y') }}{% endif %}.
-  </div>
-{% elif quotation.status == QuotationStatus.LOST %}
-  <div class="pub-banner bad">This quotation was declined.</div>
-{% elif quotation.status == QuotationStatus.EXPIRED or quotation.is_expired %}
-  <div class="pub-banner warn">This quotation has expired. Please contact us for an updated quote.</div>
-{% endif %}
+  {% set status = quotation.status %}
+  {% set tone = 'ok' if status == QuotationStatus.ACCEPTED
+       else ('danger' if status in (QuotationStatus.LOST, QuotationStatus.EXPIRED)
+       else ('warn' if status == QuotationStatus.NEGOTIATION else '')) %}
+  {% set can_respond = status in (QuotationStatus.SENT, QuotationStatus.NEGOTIATION) and not quotation.is_expired %}
 
-<div class="pub-card">
-  <h2>Prepared for</h2>
-  <div style="font-size:16px;font-weight:600;color:var(--navy);">{{ project.customer_name }}</div>
-  {% if project.address %}<div class="pub-muted">{{ project.address }}</div>{% endif %}
-  {% if quotation.validity_date %}
-    <div class="pub-muted" style="margin-top:6px;">Valid until {{ quotation.validity_date.strftime('%d %b %Y') }}</div>
-  {% endif %}
-</div>
+  <div class="card">
+    <div class="head-row">
+      <div>
+        <h1>Quotation {{ quotation.quotation_number }}</h1>
+        <div class="muted">
+          {{ project.display_name if project and project.display_name else '' }}
+          {% if quotation.quotation_version and quotation.quotation_version > 1 %}· Version {{ quotation.quotation_version }}{% endif %}
+        </div>
+      </div>
+      <div><span class="pill {{ tone }}">{{ quotation.status_label }}</span></div>
+    </div>
 
-<div class="pub-card">
-  <h2>Items</h2>
-  {% set items = quotation.line_items %}
-  {% if items %}
-  <div class="pub-table-wrap">
-    <table class="pub-table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Item</th>
-          <th>Size (mm)</th>
-          <th class="num">Qty</th>
-          <th class="num">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in items %}
-        <tr>
-          <td class="pub-muted">{{ loop.index }}</td>
-          <td>
-            <div style="font-weight:600;color:var(--navy);">{{ item.label or '—' }}</div>
-            {% set sub = [item.series, item.style, item.material]|select|join(' · ') %}
-            {% if sub %}<div class="pub-muted">{{ sub }}</div>{% endif %}
-            {% if item.notes %}<div class="pub-muted">{{ item.notes }}</div>{% endif %}
-          </td>
-          <td>{{ item.width_mm }} × {{ item.height_mm }}</td>
-          <td class="num">{{ item.qty or 1 }}</td>
-          <td class="num" style="font-weight:600;">₹{{ '{:,.2f}'.format((item.amount or 0)|float) }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-    <p class="pub-muted">No items.</p>
-  {% endif %}
-</div>
+    <div class="grid">
+      <div>
+        <div class="row-label">Sent on</div>
+        <div class="row-value">{{ quotation.sent_at.strftime('%d %b %Y') if quotation.sent_at else '—' }}</div>
+      </div>
+      <div>
+        <div class="row-label">Valid until</div>
+        <div class="row-value">{{ quotation.validity_date.strftime('%d %b %Y') if quotation.validity_date else '—' }}</div>
+      </div>
+      <div>
+        <div class="row-label">Total</div>
+        <div class="row-value">{{ '${:,.2f}'.format(quotation.grand_total|float) if quotation.grand_total is not none else '—' }}</div>
+      </div>
+    </div>
 
-<div class="pub-card">
-  <h2>Summary</h2>
-  <div class="pub-row"><span>Subtotal</span><span>₹{{ '{:,.2f}'.format((quotation.subtotal or 0)|float) }}</span></div>
-  {% if quotation.discount_amount and quotation.discount_amount|float > 0 %}
-  <div class="pub-row"><span>Discount</span><span>− ₹{{ '{:,.2f}'.format(quotation.discount_amount|float) }}</span></div>
-  {% endif %}
-  {% if quotation.installation_charge and quotation.installation_charge|float > 0 %}
-  <div class="pub-row"><span>Installation</span><span>₹{{ '{:,.2f}'.format(quotation.installation_charge|float) }}</span></div>
-  {% endif %}
-  {% if quotation.transport_charge and quotation.transport_charge|float > 0 %}
-  <div class="pub-row"><span>Transport</span><span>₹{{ '{:,.2f}'.format(quotation.transport_charge|float) }}</span></div>
-  {% endif %}
-  <div class="pub-row"><span>Tax ({{ ((quotation.tax_rate or 0)|float * 100)|round(0)|int }}%)</span><span>₹{{ '{:,.2f}'.format((quotation.tax_amount or 0)|float) }}</span></div>
-  <div class="pub-row total"><span>Grand Total</span><span>₹{{ '{:,.2f}'.format((quotation.grand_total or 0)|float) }}</span></div>
-</div>
-
-<div class="pub-card">
-  <h2>Your response</h2>
-  <div class="pub-actions">
     <a class="btn btn-secondary" href="{{ url_for('public_share.quotation_pdf', token=link.token) }}">Download PDF</a>
   </div>
 
-  {% if can_respond %}
-  <div class="pub-split" style="margin-top:20px;">
-    <form method="post" action="{{ url_for('public_share.quotation_accept', token=link.token) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="pub-form-row">
-        <label for="acceptName">Your full name *</label>
-        <input type="text" id="acceptName" name="accepted_by_name" value="{{ project.customer_name }}" maxlength="120" required>
+  {% set items = quotation.line_items %}
+  <div class="card">
+    <h2>Items</h2>
+    {% if items %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Details</th>
+              <th class="num">Qty</th>
+              <th class="num">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+              <tr>
+                <td><strong>{{ item.label or '—' }}</strong></td>
+                <td class="muted">
+                  {{ item.material or item.note or '' }}
+                  {% if item.width_mm and item.height_mm %}{{ ' · ' if (item.material or item.note) else '' }}{{ item.width_mm }}×{{ item.height_mm }} mm{% endif %}
+                </td>
+                <td class="num">{{ item.qty or 1 }}</td>
+                <td class="num">{{ '${:,.2f}'.format(item.amount|float) if item.amount else '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-      <button type="submit" class="btn btn-primary"
-              onclick="return confirm('Accept this quotation?');">Accept Quotation</button>
-    </form>
+    {% else %}
+      <p class="muted">No line items available.</p>
+    {% endif %}
 
-    <form method="post" action="{{ url_for('public_share.quotation_reject', token=link.token) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="pub-form-row">
-        <label for="rejectReason">Reason for declining *</label>
-        <textarea id="rejectReason" name="reason" rows="3" maxlength="500" required></textarea>
-      </div>
-      <button type="submit" class="btn btn-secondary"
-              onclick="return confirm('Decline this quotation?');">Decline Quotation</button>
-    </form>
+    <div class="totals">
+      <div><span>Subtotal</span><span>{{ '${:,.2f}'.format(quotation.subtotal|float) if quotation.subtotal is not none else '—' }}</span></div>
+      {% if quotation.discount_amount and quotation.discount_amount|float > 0 %}
+        <div><span>Discount</span><span>−{{ '${:,.2f}'.format(quotation.discount_amount|float) }}</span></div>
+      {% endif %}
+      {% if quotation.installation_charge and quotation.installation_charge|float > 0 %}
+        <div><span>Installation</span><span>{{ '${:,.2f}'.format(quotation.installation_charge|float) }}</span></div>
+      {% endif %}
+      {% if quotation.transport_charge and quotation.transport_charge|float > 0 %}
+        <div><span>Transport</span><span>{{ '${:,.2f}'.format(quotation.transport_charge|float) }}</span></div>
+      {% endif %}
+      {% for charge in quotation.other_charges %}
+        <div><span>{{ charge.label }}</span><span>{{ '${:,.2f}'.format(charge.amount|float) if charge.amount else '—' }}</span></div>
+      {% endfor %}
+      {% if quotation.tax_amount is not none %}
+        <div><span>Tax</span><span>{{ '${:,.2f}'.format(quotation.tax_amount|float) }}</span></div>
+      {% endif %}
+      <div class="grand"><span>Total</span><span>{{ '${:,.2f}'.format(quotation.grand_total|float) if quotation.grand_total is not none else '—' }}</span></div>
+    </div>
   </div>
-  {% elif quotation.status not in [QuotationStatus.ACCEPTED, QuotationStatus.LOST] %}
-    <p class="pub-muted" style="margin-top:14px;">This quotation cannot be accepted online right now.</p>
-  {% endif %}
-</div>
 
-{% endblock %}
+  {% if quotation.payment_terms_template or quotation.warranty_months or quotation.warranty_terms_text %}
+    <div class="card">
+      <h2>Terms</h2>
+      {% if quotation.payment_terms_template %}
+        <p class="muted"><strong>Payment terms:</strong> {{ quotation.payment_terms_template }}</p>
+      {% endif %}
+      {% if quotation.warranty_months %}
+        <p class="muted"><strong>Warranty:</strong> {{ quotation.warranty_months }} months</p>
+      {% endif %}
+      {% if quotation.warranty_terms_text %}
+        <p class="muted">{{ quotation.warranty_terms_text }}</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if can_respond %}
+
+    <div class="card">
+      <h2>Accept this quotation</h2>
+      <p class="muted">Type your full name to confirm your acceptance.</p>
+      <form method="post" action="{{ url_for('public_share.quotation_accept', token=link.token) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="accepted_by_name">Full name</label>
+        <input type="text" id="accepted_by_name" name="accepted_by_name" required maxlength="200" autocomplete="name">
+        <button type="submit" class="btn btn-primary">Accept quotation</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Decline this quotation</h2>
+      <p class="muted">Let us know briefly why you are declining.</p>
+      <form method="post" action="{{ url_for('public_share.quotation_reject', token=link.token) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="reason">Reason</label>
+        <textarea id="reason" name="reason" required maxlength="1000"></textarea>
+        <button type="submit" class="btn btn-secondary">Decline quotation</button>
+      </form>
+    </div>
+
+  {% elif status == QuotationStatus.ACCEPTED %}
+
+    <div class="card">
+      <h2>Quotation accepted</h2>
+      <p class="muted">
+        Accepted{% if quotation.accepted_by_name %} by {{ quotation.accepted_by_name }}{% endif %}{% if quotation.accepted_at %} on {{ quotation.accepted_at.strftime('%d %b %Y, %H:%M') }}{% endif %}.
+        Thank you.
+      </p>
+    </div>
+
+  {% elif status == QuotationStatus.LOST %}
+
+    <div class="card">
+      <h2>Response recorded</h2>
+      <p class="muted">This quotation has been declined. Contact us if you would like an updated offer.</p>
+    </div>
+
+  {% else %}
+
+    <div class="card">
+      <h2>Quotation expired</h2>
+      <p class="muted">This quotation is no longer valid. Please contact us for an updated one.</p>
+    </div>
+
+  {% endif %}
+
+</div>
+</body>
+</html>

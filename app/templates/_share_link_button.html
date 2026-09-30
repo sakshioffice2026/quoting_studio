@@ -1,105 +1,124 @@
-{% macro share_link_button(resource_type, resource_id) %}
-<div class="share-link-box" data-share
-     data-create="{{ url_for('share.create_link', resource_type=resource_type, resource_id=resource_id) }}"
-     data-regenerate="{{ url_for('share.regenerate_link', resource_type=resource_type, resource_id=resource_id) }}"
-     data-revoke="{{ url_for('share.revoke_link', resource_type=resource_type, resource_id=resource_id) }}"
-     data-csrf="{{ csrf_token() }}"
-     style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-  <button type="button" class="btn btn-secondary btn-sm" data-share-copy>Copy link to send to customer</button>
-  <button type="button" class="btn btn-secondary btn-sm" data-share-regen title="Invalidate the old link and create a new one">Regenerate</button>
-  <button type="button" class="btn btn-secondary btn-sm" data-share-revoke title="Disable the current link">Revoke</button>
-  <span class="muted" data-share-status style="font-size:12px;"></span>
-</div>
-{% endmacro %}
+{#
+  Share-link button + script.
+  Usage:
+    {% from '_share_link_button.html' import share_link_button, share_link_script %}
+    {{ share_link_button('quotation', quotation.id) }}
+    {{ share_link_button('design_approval', approval.id) }}
+    {{ share_link_script() }}
+  Endpoints used (blueprint "share_link"): generate, status
+#}
 
-{% macro share_link_script() %}
-<script>
-(function () {
-  if (window.__shareLinkInit) return;
-  window.__shareLinkInit = true;
+{% macro share_link_button(resource_type, resource_id) -%}
+  {%- set slug = 'design-approval' if resource_type in ('design_approval', 'design-approval', 'DESIGN_APPROVAL') else 'quotation' -%}
+  <span class="share-link-wrap" style="display:inline-flex;align-items:center;gap:8px;">
+    <button type="button"
+            class="btn btn-secondary btn-sm js-share-link"
+            data-create="{{ url_for('share_link.generate', slug=slug, resource_id=resource_id) }}"
+            data-status="{{ url_for('share_link.status', slug=slug, resource_id=resource_id) }}"
+            data-csrf="{{ csrf_token() }}">
+      Copy customer link
+    </button>
+    <small class="js-share-link-msg" style="color:#64748b;"></small>
+  </span>
+{%- endmacro %}
 
-  function copyText(text) {
-    if (navigator.clipboard && window.isSecureContext) {
-      return navigator.clipboard.writeText(text);
+{% macro share_link_script() -%}
+  {%- set _va = varargs -%}
+  {%- set _kw = kwargs -%}
+  <script>
+  (function () {
+    if (window.__shareLinkInit) return;
+    window.__shareLinkInit = true;
+
+    function csrfToken() {
+      var m = document.querySelector('meta[name="csrf-token"]');
+      if (m) return m.getAttribute('content');
+      var i = document.querySelector('input[name="csrf_token"]');
+      return i ? i.value : '';
     }
-    return new Promise(function (resolve, reject) {
-      var ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy') ? resolve() : reject(); }
-      catch (e) { reject(e); }
-      document.body.removeChild(ta);
-    });
-  }
 
-  function post(box, url) {
-    return fetch(url, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'X-CSRFToken': box.dataset.csrf, 'Accept': 'application/json' }
-    }).then(function (r) {
-      return r.json().then(function (j) {
-        if (!r.ok) throw new Error(j.error || 'Request failed');
-        return j;
+    function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise(function (resolve, reject) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand('copy') ? resolve() : reject(new Error('copy failed'));
+        } catch (e) {
+          reject(e);
+        } finally {
+          document.body.removeChild(ta);
+        }
       });
-    });
-  }
+    }
 
-  function setStatus(box, text, isError) {
-    var el = box.querySelector('[data-share-status]');
-    el.textContent = text || '';
-    el.style.color = isError ? '#A1372B' : '';
-  }
+    function setMsg(btn, text, isError) {
+      var wrap = btn.closest('.share-link-wrap');
+      var msg = wrap ? wrap.querySelector('.js-share-link-msg') : null;
+      if (!msg) return;
+      msg.textContent = text || '';
+      msg.style.color = isError ? '#b91c1c' : '#64748b';
+    }
 
-  function describe(j) {
-    var parts = [j.state];
-    if (j.views) parts.push(j.views + ' view' + (j.views === 1 ? '' : 's'));
-    if (j.expires_at) parts.push('expires ' + j.expires_at);
-    return parts.join(' · ');
-  }
+    function loadStatus(btn) {
+      fetch(btn.dataset.status, { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.ok && d.link) {
+            setMsg(btn, d.link.status_label + (d.link.open_count ? ' · opened ' + d.link.open_count + '×' : ''), false);
+          }
+        })
+        .catch(function () {});
+    }
 
-  function issue(box, url, btn, label) {
-    var original = btn.textContent;
-    btn.disabled = true;
-    post(box, url)
-      .then(function (j) {
-        return copyText(j.url).then(function () {
-          btn.textContent = 'Link copied!';
-          setStatus(box, describe(j), false);
-        }, function () {
-          window.prompt('Copy this link:', j.url);
-          setStatus(box, describe(j), false);
-        });
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest('.js-share-link');
+      if (!btn) return;
+      ev.preventDefault();
+      btn.disabled = true;
+      setMsg(btn, 'Generating…', false);
+
+      fetch(btn.dataset.create, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': btn.dataset.csrf || csrfToken()
+        },
+        body: JSON.stringify({})
       })
-      .catch(function (e) { setStatus(box, e.message, true); })
-      .then(function () {
-        setTimeout(function () { btn.textContent = original; btn.disabled = false; }, 1500);
-      });
-  }
+        .then(function (r) {
+          return r.json().then(function (d) { return { status: r.status, data: d }; });
+        })
+        .then(function (res) {
+          if (!res.data || !res.data.ok) {
+            setMsg(btn, (res.data && res.data.error) || 'Could not create link.', true);
+            return;
+          }
+          return copyText(res.data.url).then(function () {
+            setMsg(btn, 'Link copied · ' + res.data.link.status_label, false);
+          }).catch(function () {
+            window.prompt('Copy this link:', res.data.url);
+            setMsg(btn, res.data.link.status_label, false);
+          });
+        })
+        .catch(function () {
+          setMsg(btn, 'Network error.', true);
+        })
+        .finally(function () {
+          btn.disabled = false;
+        });
+    });
 
-  document.addEventListener('click', function (e) {
-    var copyBtn   = e.target.closest('[data-share-copy]');
-    var regenBtn  = e.target.closest('[data-share-regen]');
-    var revokeBtn = e.target.closest('[data-share-revoke]');
-    var btn = copyBtn || regenBtn || revokeBtn;
-    if (!btn) return;
-    var box = btn.closest('[data-share]');
-
-    if (copyBtn) {
-      issue(box, box.dataset.create, copyBtn);
-    } else if (regenBtn) {
-      if (!confirm('The previous link will stop working. Create a new one?')) return;
-      issue(box, box.dataset.regenerate, regenBtn);
-    } else if (revokeBtn) {
-      if (!confirm('Disable the current link? The customer will no longer be able to open it.')) return;
-      post(box, box.dataset.revoke)
-        .then(function () { setStatus(box, 'Link revoked', false); })
-        .catch(function (err) { setStatus(box, err.message, true); });
-    }
-  });
-})();
-</script>
-{% endmacro %}
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('.js-share-link').forEach(loadStatus);
+    });
+  })();
+  </script>
+{%- endmacro %}
