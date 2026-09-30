@@ -59,6 +59,26 @@ FRAME_SECTION_FILES = {
 ACROSS_FLIP = {"Head": False, "Sill": False, "Jamb_Left": False, "Jamb_Right": False}
 DEPTH_FLIP = {"Head": False, "Sill": False, "Jamb_Left": False, "Jamb_Right": False}
 
+# How each section DXF is drawn, so every member ends up on one convention:
+#   profile X = across (0 = outer edge of the frame)
+#   profile Y = depth  (0 = front / exterior face, z = 0; grows toward the interior)
+# Measured from the DXFs (width x height as drawn):
+#   jamb.dxf          67 x 90   across on X, depth on Y   -> "as_drawn"
+#   head.dxf          90 x 35   depth on X, across on Y   -> "swap"
+#   sill.dxf         165 x 60   depth on X, across on Y   -> "swap"
+#                              (slope falls toward z = 0, so water sheds outward)
+#   meeting_stile.dxf 85 x 27   depth on X, across on Y   -> "swap"
+# Modes: as_drawn, swap, rot90, rot180, rot270 (see profile_transform.orient_profile).
+SECTION_ORIENTATION = {
+    "Head": "swap",
+    "Sill": "swap",
+    "Jamb_Left": "as_drawn",
+    "Jamb_Right": "as_drawn",
+    "Mullion": "swap",
+    "Transom": "as_drawn",
+    "Bead": "as_drawn",
+}
+
 # Extra length (mm) added to each member before the mitre cut trims it back.
 MITRE_OVERSIZE = 500.0
 

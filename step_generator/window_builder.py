@@ -17,6 +17,7 @@ import cadquery as cq
 from . import config
 from .dxf_profile import ProfileError, load_profile
 from .frame_builder import FrameBuildError, _single_solid, build_frame
+from .profile_transform import orient_profile
 from .solid_builder import SolidBuildError, build_solid
 
 
@@ -33,8 +34,9 @@ def _load(group, sections_dir, report):
     if not path.is_file():
         raise WindowBuildError(f"Section DXF not found: {path}", report)
     try:
-        return load_profile(path, normalize_origin=True)
-    except ProfileError as exc:
+        profile = load_profile(path, normalize_origin=True)
+        return orient_profile(profile, config.SECTION_ORIENTATION.get(group, "as_drawn"))
+    except (ProfileError, ValueError) as exc:
         raise WindowBuildError(f"{fname}: {exc}", report)
 
 

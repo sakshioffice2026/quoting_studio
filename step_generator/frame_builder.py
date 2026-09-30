@@ -15,6 +15,7 @@ import cadquery as cq
 
 from . import config
 from .dxf_profile import ProfileError, load_profile
+from .profile_transform import orient_profile
 from .solid_builder import SolidBuildError, build_solid
 
 
@@ -115,7 +116,11 @@ def build_frame(width=config.DEFAULT_FRAME_WIDTH, height=config.DEFAULT_FRAME_HE
                 raise FrameBuildError(f"{fname}: {exc}", report)
             for warning in cache[fname].warnings:
                 report["warnings"].append(f"{fname}: {warning}")
-        profiles[name] = cache[fname]
+        try:
+            profiles[name] = orient_profile(
+                cache[fname], config.SECTION_ORIENTATION.get(name, "as_drawn"))
+        except ValueError as exc:
+            raise FrameBuildError(f"{name}: {exc}", report)
 
     across = {n: profiles[n].width for n in PART_ORDER}
     depth = {n: profiles[n].height for n in PART_ORDER}

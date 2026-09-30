@@ -53,3 +53,52 @@ def rotate_profile(profile, degrees):
         skipped=profile.skipped,
         warnings=profile.warnings,
     )
+
+
+def swap_axes(profile):
+    """Return a new Profile with (x, y) -> (y, x).
+
+    Drawn Y becomes across (0 = outer edge), drawn X becomes depth (0 = front
+    face, z = 0). Used for sections drawn with depth along X.
+    """
+    def fn(p):
+        return (p[1], p[0])
+
+    return Profile(
+        outer=_map_loop(profile.outer, fn),
+        holes=[_map_loop(hole, fn) for hole in profile.holes],
+        width=profile.height,
+        height=profile.width,
+        normalized=profile.normalized,
+        skipped=profile.skipped,
+        warnings=profile.warnings,
+    )
+
+
+ORIENTATIONS = ("as_drawn", "swap", "rot90", "rot180", "rot270")
+
+
+def orient_profile(profile, mode="as_drawn"):
+    """Bring a drawn section onto the shared convention.
+
+    Shared convention: profile X = across (0 = outer edge of the frame),
+    profile Y = depth (0 = front / exterior face at z = 0).
+
+    as_drawn : X is already across, Y is already depth
+    swap     : across = drawn Y, depth = drawn X
+    rot90    : across = height - drawn Y, depth = drawn X
+    rot180   : across = width - drawn X, depth = height - drawn Y
+    rot270   : across = drawn Y, depth = width - drawn X
+    """
+    mode = (mode or "as_drawn").lower()
+    if mode == "as_drawn":
+        return profile
+    if mode == "swap":
+        return swap_axes(profile)
+    if mode == "rot90":
+        return rotate_profile(profile, 90)
+    if mode == "rot180":
+        return rotate_profile(profile, 180)
+    if mode == "rot270":
+        return rotate_profile(profile, 270)
+    raise ValueError(f"Unknown section orientation '{mode}'; use one of {ORIENTATIONS}")
