@@ -1,4 +1,7 @@
-"""Stage 2: build the four mitred frame members from section DXFs.
+"""Stage 2: build the four frame members (butt or mitre joints) from section DXFs.
+
+Joint type is FRAME_JOINT below: "butt" = Head and Sill full width with the jambs
+running between them; "mitre" = diagonal corners.
 
 Frame coordinates (mm):
     X = frame width, Y = frame height, Z = wall depth (0 = front face).
@@ -26,6 +29,23 @@ class FrameBuildError(Exception):
 
 
 PART_ORDER = ("Head", "Sill", "Jamb_Left", "Jamb_Right")
+
+# Corner joint: "butt" (jambs between head and sill, as in the app) or "mitre".
+FRAME_JOINT = getattr(config, "FRAME_JOINT", "butt")
+
+# Orientation chosen by section FILE NAME (overrides SECTION_ORIENTATION per part).
+# sill.dxf: rot270 = a true rotation (never mirrored). Depth = drawn width - drawn X,
+# so the sloped nosing points to +Z and the frame-fitting part lines up with the
+# head/jambs at z 0..90. Other section files (e.g. the door sill) are not affected.
+_DEFAULT_ORIENTATION_BY_FILE = {"sill.dxf": "rot270"}
+
+
+def _orientation_for(name, fname):
+    by_file = getattr(config, "SECTION_ORIENTATION_BY_FILE", _DEFAULT_ORIENTATION_BY_FILE)
+    key = Path(str(fname)).name.lower()
+    if key in by_file:
+        return by_file[key]
+    return config.SECTION_ORIENTATION.get(name, "as_drawn")
 
 
 def _member_layout(width, height):
@@ -61,10 +81,23 @@ def _member_layout(width, height):
     }
 
 
-def _envelopes(width, height, a):
-    """Mitre envelope polygons (X-Y plane) that tile the frame ring."""
+def _envelopes(width, height, a, joint=None):
+    """Envelope polygons (X-Y plane) that tile the frame ring.
+
+    butt  : Head and Sill run the full width; the jambs run between the top of the
+            sill and the underside of the head (square cuts).
+    mitre : diagonal corner lines from the outer corner to the inner corner.
+    """
+    joint = joint or FRAME_JOINT
     aj_l, aj_r = a["Jamb_Left"], a["Jamb_Right"]
     a_h, a_s = a["Head"], a["Sill"]
+    if joint == "butt":
+        return {
+            "Sill": [(0.0, 0.0), (width, 0.0), (width, a_s), (0.0, a_s)],
+            "Head": [(0.0, height - a_h), (width, height - a_h), (width, height), (0.0, height)],
+            "Jamb_Left": [(0.0, a_s), (aj_l, a_s), (aj_l, height - a_h), (0.0, height - a_h)],
+            "Jamb_Right": [(width - aj_r, a_s), (width, a_s), (width, height - a_h), (width - aj_r, height - a_h)],
+        }
     return {
         "Sill": [(0.0, 0.0), (width, 0.0), (width - aj_r, a_s), (aj_l, a_s)],
         "Head": [(0.0, height), (width, height), (width - aj_r, height - a_h), (aj_l, height - a_h)],
@@ -117,8 +150,7 @@ def build_frame(width=config.DEFAULT_FRAME_WIDTH, height=config.DEFAULT_FRAME_HE
             for warning in cache[fname].warnings:
                 report["warnings"].append(f"{fname}: {warning}")
         try:
-            profiles[name] = orient_profile(
-                cache[fname], config.SECTION_ORIENTATION.get(name, "as_drawn"))
+            profiles[name] = orient_profile(cache[fname], _orientation_for(name, fname))
         except ValueError as exc:
             raise FrameBuildError(f"{name}: {exc}", report)
 
@@ -182,9 +214,12 @@ def build_frame(width=config.DEFAULT_FRAME_WIDTH, height=config.DEFAULT_FRAME_HE
                 f"(x {bb.xmin:.2f}..{bb.xmax:.2f}, y {bb.ymin:.2f}..{bb.ymax:.2f})", report)
 
         span = bb.xlen if name in ("Head", "Sill") else bb.ylen
-        if abs(span - spec["outer_length"]) > 0.05:
+        expected_span = spec["outer_length"]
+        if FRAME_JOINT == "butt" and name in ("Jamb_Left", "Jamb_Right"):
+            expected_span = height - across["Head"] - across["Sill"]
+        if abs(span - expected_span) > 0.05:
             report["warnings"].append(
-                f"{name}: outer length {span:.3f} differs from {spec['outer_length']:.3f} "
+                f"{name}: length {span:.3f} differs from {expected_span:.3f} "
                 f"(profile may not touch its outer edge)")
 
         if bb.zmin < -tol:

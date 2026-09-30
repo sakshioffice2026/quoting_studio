@@ -11,9 +11,9 @@ from pathlib import Path
 import cadquery as cq
 
 from . import config, door_config
+from .assembly_validator import validate_before_export, validate_step_file
 from .door_builder import build_door
 from .frame_builder import FrameBuildError
-from .generate_window import _check_interference, _validate_step
 
 
 class DoorGenerationError(Exception):
@@ -43,22 +43,46 @@ def _orient(parts):
 
 
 def _validate_oriented_step(path, parts, width, height):
-    """Re-import the STEP and check the overall size in the exported orientation."""
-    if door_config.EXPORT_ORIENTATION != "Z_UP":
-        return _validate_step(path, parts, width, height)
+    """Re-import the STEP and validate it in the exported orientation.
 
+    Z_UP export: X = width, Z = height, and the door depth runs toward -Y with the
+    front face at Y = 0. The shared validator expects the frame origin at (0, 0) in
+    X-Y, so its origin check is replaced here by the checks that fit Z_UP.
+    """
+    if door_config.EXPORT_ORIENTATION != "Z_UP":
+        return validate_step_file(path, parts, width, height)
+
+    tol = config.FRAME_BBOX_TOLERANCE
     boxes = [p.BoundingBox() for p in parts.values()]
     depth = max(b.ymax for b in boxes) - min(b.ymin for b in boxes)
-    report = _validate_step(path, parts, width, depth)
+
+    report = validate_step_file(path, parts, width, depth)
+    report["errors"] = [e for e in report["errors"]
+                        if not e.startswith("Frame origin not at outer corner")]
+    report["checks"]["orientation"] = "Z_UP"
+    if report["errors"]:
+        report["ok"] = False
+        return report
 
     solids = cq.importers.importStep(str(path)).solids().vals()
     imported = [s.BoundingBox() for s in solids]
-    z_len = max(b.zmax for b in imported) - min(b.zmin for b in imported)
+    x_min = min(b.xmin for b in imported)
+    y_max = max(b.ymax for b in imported)
+    z_min = min(b.zmin for b in imported)
+    z_len = max(b.zmax for b in imported) - z_min
     report["checks"]["overall_z"] = z_len
-    report["checks"]["orientation"] = "Z_UP"
-    if abs(z_len - height) > config.FRAME_BBOX_TOLERANCE:
+    report["checks"]["origin_xz"] = (x_min, z_min)
+    report["checks"]["front_face_y"] = y_max
+
+    if abs(z_len - height) > tol:
         report["errors"].append(f"Overall height (Z) {z_len:.3f} vs {height}")
-        report["ok"] = False
+    if abs(x_min) > tol or abs(z_min) > tol:
+        report["errors"].append(
+            f"Door origin not at outer bottom-left corner (xmin = {x_min:.3f}, zmin = {z_min:.3f})")
+    if y_max > tol:
+        report["errors"].append(f"Door extends in front of the front face (ymax = {y_max:.3f})")
+
+    report["ok"] = not report["errors"]
     return report
 
 
@@ -76,11 +100,13 @@ def generate_door_step(width=door_config.DEFAULT_DOOR_WIDTH, height=door_config.
     report["step"] = str(out_path)
     report["part_count"] = len(parts)
 
-    overlaps, errors, checked = _check_interference(parts, report)
-    report["overlaps"] = overlaps
-    report["interference_pairs_checked"] = checked
-    if errors:
-        raise DoorGenerationError("Door fit check failed: " + "; ".join(errors), report)
+    pre = validate_before_export(parts, width, height)
+    report["pre_export_validation"] = pre
+    report["overlaps"] = pre["overlaps"]
+    report["interference_pairs_checked"] = pre["pairs_checked"]
+    report.setdefault("warnings", []).extend(pre["warnings"])
+    if not pre["ok"]:
+        raise DoorGenerationError("Pre-export validation failed: " + "; ".join(pre["errors"]), report)
 
     export_parts = _orient(parts)
     report["orientation"] = door_config.EXPORT_ORIENTATION

@@ -63,13 +63,22 @@ def test_head_and_sill_across_is_narrow_side():
     assert a["Jamb_Left"] < d["Jamb_Left"]
 
 
-def test_sill_falls_toward_front_face():
+def test_sill_nosing_points_to_plus_z():
+    """Sloped nosing is at +Z (thin, low); the tall chamber/upstand is at z = 0."""
     parts, report = build_frame(W, H)
     sill = parts["Sill"]
     depth = report["depth"]["Sill"]
-    front = _slab(sill, 0.0, 10.0)
-    back = _slab(sill, depth - 30.0, depth)
-    assert front.ymax < back.ymax
+    chamber = _slab(sill, 0.0, 30.0)
+    nosing = _slab(sill, depth - 30.0, depth)
+    assert nosing.ymax < chamber.ymax
+
+
+def test_sill_frame_part_lines_up_with_head_and_jambs():
+    parts, report = build_frame(W, H)
+    d = report["depth"]
+    assert d["Sill"] > d["Jamb_Left"]
+    assert abs(parts["Sill"].BoundingBox().zmin) <= TOL
+    assert abs(parts["Jamb_Left"].BoundingBox().zmin) <= TOL
 
 
 def test_mullion_across_is_narrow_side():
