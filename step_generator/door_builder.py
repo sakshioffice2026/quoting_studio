@@ -30,6 +30,9 @@ class DoorBuildError(WindowBuildError):
     pass
 
 
+_MISSING = object()
+
+
 def _load(path, report, role=None):
     path = Path(path)
     if not path.is_file():
@@ -55,6 +58,11 @@ def _build_frame_from(files, width, height):
         profile = original_loader(path, *args, **kwargs)
         return rotate_profile(profile, rotations.get(str(path), 0))
 
+    # The door sill is already turned into place by rotating_loader, so the
+    # window sill "swap" orientation must not be applied to it a second time.
+    sill_key = Path(str(files["Sill"])).name.lower()
+    saved_by_file = getattr(config, "SECTION_ORIENTATION_BY_FILE", _MISSING)
+
     saved = dict(config.FRAME_SECTION_FILES)
     try:
         config.FRAME_SECTION_FILES.update({
@@ -63,12 +71,17 @@ def _build_frame_from(files, width, height):
             "Jamb_Left": str(files["Jamb"]),
             "Jamb_Right": str(files["Jamb"]),
         })
+        config.SECTION_ORIENTATION_BY_FILE = {sill_key: "as_drawn"}
         frame_builder.load_profile = rotating_loader
         return build_frame(width, height)
     finally:
         frame_builder.load_profile = original_loader
         config.FRAME_SECTION_FILES.clear()
         config.FRAME_SECTION_FILES.update(saved)
+        if saved_by_file is _MISSING:
+            del config.SECTION_ORIENTATION_BY_FILE
+        else:
+            config.SECTION_ORIENTATION_BY_FILE = saved_by_file
 
 
 def build_door(width=door_config.DEFAULT_DOOR_WIDTH, height=door_config.DEFAULT_DOOR_HEIGHT,

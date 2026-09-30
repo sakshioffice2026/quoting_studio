@@ -13,6 +13,7 @@ from .generate_window import WindowGenerationError, generate_window_step
 WIDTH = 1200.0
 HEIGHT = 1400.0
 EXPECTED_PARTS = 4 + 1 + 2 + 16  # frame + mullion + transoms + 4 beads x 4 openings
+TOL = 0.05
 
 
 class WindowTests(unittest.TestCase):
@@ -57,27 +58,39 @@ class WindowTests(unittest.TestCase):
         self.assertAlmostEqual(dims[1], HEIGHT, delta=config.FRAME_BBOX_TOLERANCE)
 
     def test_mullion_is_centred_and_spans_opening(self):
+        # The mullion may reach into a stepped head / sill face to close the gap,
+        # so its ends may extend past the inner faces but never past the frame.
         bb = self.report["parts"]["Mullion"]["bbox"]
         centre = (bb["x"][0] + bb["x"][1]) / 2.0
-        self.assertAlmostEqual(centre, WIDTH * config.MULLION_X_FRACTION, delta=0.05)
+        self.assertAlmostEqual(centre, WIDTH * config.MULLION_X_FRACTION, delta=TOL)
         across = self.report["across"]
-        self.assertAlmostEqual(bb["y"][0], across["Sill"], delta=0.05)
-        self.assertAlmostEqual(bb["y"][1], HEIGHT - across["Head"], delta=0.05)
+        self.assertLessEqual(bb["y"][0], across["Sill"] + TOL)
+        self.assertGreaterEqual(bb["y"][0], -TOL)
+        self.assertGreaterEqual(bb["y"][1], HEIGHT - across["Head"] - TOL)
+        self.assertLessEqual(bb["y"][1], HEIGHT + TOL)
 
     def test_transom_height(self):
         bb = self.report["parts"]["Transom_Left"]["bbox"]
         centre = (bb["y"][0] + bb["y"][1]) / 2.0
-        self.assertAlmostEqual(centre, HEIGHT * config.TRANSOM_Y_FRACTION, delta=0.05)
+        self.assertAlmostEqual(centre, HEIGHT * config.TRANSOM_Y_FRACTION, delta=TOL)
 
     def test_transoms_meet_jambs_and_mullion(self):
+        # Each transom must reach its neighbour's face (no gap). It may extend
+        # into a stepped neighbour, but never past that neighbour's far side.
         across = self.report["across"]
         mull = self.report["parts"]["Mullion"]["bbox"]["x"]
         left = self.report["parts"]["Transom_Left"]["bbox"]["x"]
         right = self.report["parts"]["Transom_Right"]["bbox"]["x"]
-        self.assertAlmostEqual(left[0], across["Jamb_Left"], delta=0.05)
-        self.assertAlmostEqual(left[1], mull[0], delta=0.05)
-        self.assertAlmostEqual(right[0], mull[1], delta=0.05)
-        self.assertAlmostEqual(right[1], WIDTH - across["Jamb_Right"], delta=0.05)
+
+        self.assertLessEqual(left[0], across["Jamb_Left"] + TOL)
+        self.assertGreaterEqual(left[0], -TOL)
+        self.assertGreaterEqual(left[1], mull[0] - TOL)
+        self.assertLessEqual(left[1], mull[1] + TOL)
+
+        self.assertLessEqual(right[0], mull[1] + TOL)
+        self.assertGreaterEqual(right[0], mull[0] - TOL)
+        self.assertGreaterEqual(right[1], WIDTH - across["Jamb_Right"] - TOL)
+        self.assertLessEqual(right[1], WIDTH + TOL)
 
 
 class WindowRejectionTests(unittest.TestCase):

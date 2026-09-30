@@ -11,13 +11,19 @@ Each section profile (after origin normalisation) uses
 Every member is extruded long, then trimmed by its mitre envelope: a
 trapezoid in the X-Y plane whose corner lines run from the outer corner to
 the inner corner, so members with different widths still meet exactly.
+
+Butt joint gap fill: when the inner face of the Head or Sill is stepped (its
+across is smaller than the full section width at some depths), the jambs would
+end square and leave a gap. Each jamb is therefore extended into the Head and
+Sill zone and the solid outline of the Head / Sill is cut away from it, so the
+jamb meets the stepped face exactly and never overlaps the Head or Sill.
 """
 from pathlib import Path
 
 import cadquery as cq
 
 from . import config
-from .dxf_profile import ProfileError, load_profile
+from .dxf_profile import Profile, ProfileError, load_profile
 from .profile_transform import orient_profile
 from .solid_builder import SolidBuildError, build_solid
 
@@ -29,9 +35,17 @@ class FrameBuildError(Exception):
 
 
 PART_ORDER = ("Head", "Sill", "Jamb_Left", "Jamb_Right")
+JAMBS = ("Jamb_Left", "Jamb_Right")
 
 # Corner joint: "butt" (jambs between head and sill, as in the app) or "mitre".
 FRAME_JOINT = getattr(config, "FRAME_JOINT", "butt")
+
+# Jamb gap fill (butt joint only).
+FILL_MIN_GAP = 0.05      # mm: smaller gaps are ignored
+FILL_MARGIN = 1.0        # mm: extra reach into the Head / Sill (removed by the cut)
+FILL_DEPTH_SAMPLES = 100
+FILL_DEPTH_EPS = 0.01    # mm: samples stay this far inside the depth range (float safety)
+FILL_FRAGMENT_REL = 0.02  # loose fragments above this share of the jamb volume skip the fill
 
 # Orientation chosen by section FILE NAME (overrides SECTION_ORIENTATION per part).
 # sill.dxf: rot270 = a true rotation (never mirrored). Depth = drawn width - drawn X,
@@ -129,6 +143,118 @@ def _single_solid(shape, what):
     return solids[0]
 
 
+def _prism(polygon, z_top):
+    """Prism over an X-Y polygon, spanning z = -1 .. z_top."""
+    return (
+        cq.Workplane("XY", origin=(0, 0, -1.0))
+        .polyline(polygon).close()
+        .extrude(z_top + 1.0)
+        .val()
+    )
+
+
+def _outline_only(profile):
+    """Same profile with its holes filled in (solid outline)."""
+    return Profile(
+        outer=profile.outer,
+        holes=[],
+        width=profile.width,
+        height=profile.height,
+        normalized=profile.normalized,
+        skipped=profile.skipped,
+        warnings=profile.warnings,
+    )
+
+
+def _min_reach(profile, depth_limit):
+    """Smallest inner reach of the outline over depth 0..depth_limit.
+
+    At every depth the reach is the largest across the outline has there; the
+    result is the smallest of those values. A value below the section width
+    means the inner face is stepped and a square-ended jamb would leave a gap.
+    """
+    pts = profile.outer.points()
+    n = len(pts)
+    if n < 3:
+        return None
+    edges = [(pts[i], pts[(i + 1) % n]) for i in range(n)]
+
+    lo = FILL_DEPTH_EPS
+    hi = depth_limit - FILL_DEPTH_EPS
+    if hi <= lo:
+        return None
+
+    def clamp(z):
+        return min(max(z, lo), hi)
+
+    depths = {lo + (hi - lo) * i / FILL_DEPTH_SAMPLES for i in range(FILL_DEPTH_SAMPLES + 1)}
+    for p in pts:
+        if -FILL_DEPTH_EPS <= p[1] <= depth_limit + FILL_DEPTH_EPS:
+            depths.add(clamp(p[1] - FILL_DEPTH_EPS))
+            depths.add(clamp(p[1] + FILL_DEPTH_EPS))
+
+    lowest = None
+    for z in sorted(depths):
+        top = None
+        for (x0, y0), (x1, y1) in edges:
+            if (y0 - z) * (y1 - z) > 0.0:
+                continue
+            if y0 == y1:
+                candidates = (x0, x1)
+            else:
+                t = (z - y0) / (y1 - y0)
+                candidates = (x0 + t * (x1 - x0),)
+            for x in candidates:
+                top = x if top is None else max(top, x)
+        if top is None:
+            continue
+        lowest = top if lowest is None else min(lowest, top)
+    return lowest
+
+
+def _keep_main_solid(shape, name, report):
+    """Return the main solid of a cut result; drop tiny loose fragments."""
+    solids = shape.Solids()
+    if not solids:
+        raise FrameBuildError(f"{name}: gap fill produced no solid")
+    if len(solids) == 1:
+        return solids[0]
+    solids = sorted(solids, key=lambda s: s.Volume(), reverse=True)
+    main = solids[0]
+    loose = sum(s.Volume() for s in solids[1:])
+    if loose > main.Volume() * FILL_FRAGMENT_REL:
+        raise FrameBuildError(
+            f"{name}: gap fill left {len(solids) - 1} loose pieces ({loose:.1f} mm3)")
+    report["warnings"].append(
+        f"{name}: dropped {len(solids) - 1} tiny loose fragment(s) from the gap fill")
+    return main
+
+
+def _fill_lengths(profiles, across):
+    """How far each jamb must reach into the Sill / Head zone to close stepped faces."""
+    depth_limit = min(profiles[name].height for name in JAMBS)
+    lengths = {"Sill": 0.0, "Head": 0.0}
+    for name in lengths:
+        reach = _min_reach(profiles[name], depth_limit)
+        if reach is None:
+            continue
+        gap = across[name] - reach
+        if gap > FILL_MIN_GAP:
+            lengths[name] = min(across[name], gap + FILL_MARGIN)
+    return lengths
+
+
+def _jamb_fill_polygon(name, width, height, a, fill):
+    aj_l, aj_r = a["Jamb_Left"], a["Jamb_Right"]
+    lo = a["Sill"] - fill["Sill"]
+    hi = height - a["Head"] + fill["Head"]
+    if name == "Jamb_Left":
+        x0, x1 = 0.0, aj_l
+    else:
+        x0, x1 = width - aj_r, width
+    return [(x0, lo), (x1, lo), (x1, hi), (x0, hi)]
+
+
 def build_frame(width=config.DEFAULT_FRAME_WIDTH, height=config.DEFAULT_FRAME_HEIGHT,
                 sections_dir=None):
     """Return (parts, report). parts maps part name -> cadquery Solid."""
@@ -172,6 +298,16 @@ def build_frame(width=config.DEFAULT_FRAME_WIDTH, height=config.DEFAULT_FRAME_HE
     envelopes = _envelopes(width, height, across)
     z_top = max(depth.values()) + 2.0
 
+    fill = {"Sill": 0.0, "Head": 0.0}
+    if FRAME_JOINT == "butt":
+        try:
+            fill = _fill_lengths(profiles, across)
+        except Exception as exc:
+            report["warnings"].append(f"Jamb gap fill skipped: {exc}")
+    report["jamb_fill"] = dict(fill)
+
+    outlines = {}   # solid outlines of Head / Sill in frame coordinates (cut tools)
+
     parts = {}
     for name in PART_ORDER:
         spec = layout[name]
@@ -186,15 +322,28 @@ def build_frame(width=config.DEFAULT_FRAME_WIDTH, height=config.DEFAULT_FRAME_HE
         placed = _place(raw, profile, name, spec, length)
 
         try:
-            envelope = (
-                cq.Workplane("XY", origin=(0, 0, -1.0))
-                .polyline(envelopes[name]).close()
-                .extrude(z_top + 1.0)
-                .val()
-            )
+            envelope = _prism(envelopes[name], z_top)
             cut = placed.intersect(envelope)
         except Exception as exc:
             raise FrameBuildError(f"{name}: mitre cut failed: {exc}", report)
+
+        if name in fill and fill[name] > 0.0:
+            try:
+                outline = _outline_only(profile)
+                placed_outline = _place(build_solid(outline, length), outline, name, spec, length)
+                outlines[name] = placed_outline.intersect(envelope)
+            except Exception as exc:
+                report["warnings"].append(f"{name}: outline for jamb gap fill failed: {exc}")
+
+        if name in JAMBS and outlines:
+            try:
+                fill_envelope = _prism(_jamb_fill_polygon(name, width, height, across, fill), z_top)
+                candidate = placed.intersect(fill_envelope)
+                for tool in outlines.values():
+                    candidate = candidate.cut(tool)
+                cut = _keep_main_solid(candidate, name, report)
+            except Exception as exc:
+                report["warnings"].append(f"{name}: jamb gap fill skipped: {exc}")
 
         solid = _single_solid(cut, name)
         if not solid.isValid():
@@ -215,9 +364,11 @@ def build_frame(width=config.DEFAULT_FRAME_WIDTH, height=config.DEFAULT_FRAME_HE
 
         span = bb.xlen if name in ("Head", "Sill") else bb.ylen
         expected_span = spec["outer_length"]
-        if FRAME_JOINT == "butt" and name in ("Jamb_Left", "Jamb_Right"):
+        max_span = expected_span
+        if FRAME_JOINT == "butt" and name in JAMBS:
             expected_span = height - across["Head"] - across["Sill"]
-        if abs(span - expected_span) > 0.05:
+            max_span = expected_span + fill["Sill"] + fill["Head"]
+        if span < expected_span - 0.05 or span > max_span + 0.05:
             report["warnings"].append(
                 f"{name}: length {span:.3f} differs from {expected_span:.3f} "
                 f"(profile may not touch its outer edge)")
