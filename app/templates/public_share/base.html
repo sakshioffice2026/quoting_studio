@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}FenestraOne{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quoting-studio.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+  <style>
+    body.pub-shell { background:#F7F3EE; margin:0; min-height:100vh; }
+    .pub-top { background:var(--navy); color:#fff; padding:16px 20px; }
+    .pub-top-in { max-width:920px; margin:0 auto; }
+    .pub-brand { font-size:18px; font-weight:700; letter-spacing:.2px; }
+    .pub-sub { font-size:12px; opacity:.75; margin-top:2px; }
+    .pub-wrap { max-width:920px; margin:0 auto; padding:24px 16px 48px; }
+    .pub-card { background:#fff; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:22px; margin-bottom:16px; }
+    .pub-card h2 { margin:0 0 12px; font-size:16px; color:var(--navy); }
+    .pub-row { display:flex; justify-content:space-between; gap:12px; padding:6px 0; font-size:14px; }
+    .pub-row.total { border-top:1px solid #E5E7EB; margin-top:6px; padding-top:10px; font-weight:700; color:var(--copper); font-size:17px; }
+    .pub-muted { color:#6B7280; font-size:13px; }
+    .pub-actions { display:flex; gap:10px; flex-wrap:wrap; }
+    .pub-banner { padding:12px 14px; border-radius:8px; font-size:14px; margin-bottom:16px; }
+    .pub-banner.ok   { background:#E7F4EC; color:#1F6B3A; }
+    .pub-banner.warn { background:#FDF3E1; color:#8A5A12; }
+    .pub-banner.bad  { background:#FBE9E7; color:#A1372B; }
+    .pub-foot { text-align:center; font-size:12px; color:#9CA3AF; padding:16px; }
+    .pub-table-wrap { overflow-x:auto; }
+    .pub-table { width:100%; border-collapse:collapse; font-size:14px; }
+    .pub-table th { text-align:left; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:#6B7280; padding:8px 10px; border-bottom:1px solid #E5E7EB; }
+    .pub-table td { padding:10px; border-bottom:1px solid #F3F4F6; vertical-align:top; }
+    .pub-table td.num, .pub-table th.num { text-align:right; }
+    .pub-form-row { margin-bottom:12px; }
+    .pub-form-row label { display:block; font-size:13px; margin-bottom:4px; color:#374151; }
+    .pub-form-row input, .pub-form-row textarea { width:100%; box-sizing:border-box; padding:9px 10px; border:1px solid #D1D5DB; border-radius:8px; font:inherit; }
+    .pub-split { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    @media (max-width: 720px) { .pub-split { grid-template-columns:1fr; } }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="pub-shell">
+
+  <div class="pub-top">
+    <div class="pub-top-in">
+      <div class="pub-brand">{{ tenant.name if tenant else 'FenestraOne' }}</div>
+      <div class="pub-sub">{% block subtitle %}{% endblock %}</div>
+    </div>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-stack">
+        {% for cat, msg in messages %}
+          <div class="flash flash-{{ cat }}"><span>{{ msg }}</span></div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <div class="pub-wrap">
+    {% block content %}{% endblock %}
+  </div>
+
+  <div class="pub-foot">Secure link · Powered by FenestraOne</div>
+
+</body>
+</html>

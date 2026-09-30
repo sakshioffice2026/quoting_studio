@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from '_ui_macros.html' import pill, stage_tracker %}
+{% from '_share_link_button.html' import share_link_button, share_link_script %}
 {% block title %}Design Approval — FenestraOne{% endblock %}
 
 {% block body %}
@@ -22,7 +23,10 @@
           <h1>{{ approval.project.display_name if approval.project else 'Design Approval' }}</h1>
           <span class="customer-chip">Revision {{ approval.revision_number }}</span>
         </div>
-        <div class="lead-header-actions">
+        <div class="lead-header-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+          {% if approval.status != DesignApprovalStatus.DRAFT and approval.status != DesignApprovalStatus.SUPERSEDED %}
+          {{ share_link_button('design_approval', approval.id) }}
+          {% endif %}
           <a href="{{ url_for('design_approval.index') }}" class="btn btn-secondary btn-sm">← All Approvals</a>
         </div>
       </div>
@@ -251,4 +255,5 @@
 
   </div>
 </div>
+{{ share_link_script() }}
 {% endblock %}

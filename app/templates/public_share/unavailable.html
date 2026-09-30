@@ -1,0 +1,9 @@
+{% extends 'public_share/base.html' %}
+{% block title %}Link unavailable — FenestraOne{% endblock %}
+{% block content %}
+<div class="pub-card" style="text-align:center;padding:40px 22px;">
+  <div style="font-size:40px;margin-bottom:8px;">🔒</div>
+  <h2 style="font-size:18px;">This link is unavailable</h2>
+  <p class="pub-muted">{{ reason or 'This link is no longer active. Please ask the sender for a new one.' }}</p>
+</div>
+{% endblock %}

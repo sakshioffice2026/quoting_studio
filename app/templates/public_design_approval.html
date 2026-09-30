@@ -1,0 +1,99 @@
+{% extends 'public_base.html' %}
+{% block title %}Design Approval — {{ tenant.name if tenant else 'FenestraOne' }}{% endblock %}
+{% block subtitle %}Design approval · Revision {{ approval.revision_number }}{% endblock %}
+
+{% block content %}
+
+{% if approval.status == DesignApprovalStatus.APPROVED %}
+  <div class="pub-banner ok">
+    ✓ Design approved{% if approval.approved_at %} on {{ approval.approved_at.strftime('%d %b %Y') }}{% endif %}.
+  </div>
+{% elif approval.status == DesignApprovalStatus.REVISION_REQUESTED %}
+  <div class="pub-banner warn">Changes have been requested. We will send you an updated design shortly.</div>
+{% elif approval.status == DesignApprovalStatus.APPROVAL_EXPIRED or approval.is_expired %}
+  <div class="pub-banner warn">This approval request has expired. Please contact us for a fresh link.</div>
+{% endif %}
+
+<div class="pub-card">
+  <h2>Project</h2>
+  <div style="font-size:16px;font-weight:600;color:var(--navy);">{{ project.customer_name }}</div>
+  {% if project.address %}<div class="pub-muted">{{ project.address }}</div>{% endif %}
+  {% if approval.expires_at and can_respond %}
+    <div class="pub-muted" style="margin-top:6px;">Please respond by {{ approval.expires_at.strftime('%d %b %Y') }}</div>
+  {% endif %}
+</div>
+
+<div class="pub-card">
+  <h2>Windows &amp; Doors ({{ windows|length }})</h2>
+  {% if windows %}
+  <div class="pub-table-wrap">
+    <table class="pub-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Item</th>
+          <th>Size (mm)</th>
+          <th>Material</th>
+          <th>Colour</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for w in windows %}
+        <tr>
+          <td class="pub-muted">{{ loop.index }}</td>
+          <td style="font-weight:600;color:var(--navy);">{{ w.label }}</td>
+          <td>{{ w.width_mm }} × {{ w.height_mm }}</td>
+          <td>{{ w.material }}</td>
+          <td>
+            <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ w.frame_colour_hex }};border:1px solid #D1D5DB;vertical-align:middle;margin-right:6px;"></span>{{ w.frame_colour_name }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="pub-muted">No items listed.</p>
+  {% endif %}
+</div>
+
+{% if approval.status == DesignApprovalStatus.REVISION_REQUESTED and approval.revision_requested_reason %}
+<div class="pub-card">
+  <h2>Your requested changes</h2>
+  <p style="margin:0;font-size:14px;">{{ approval.revision_requested_reason }}</p>
+</div>
+{% endif %}
+
+{% if can_respond %}
+<div class="pub-card">
+  <h2>Your response</h2>
+
+  <form method="post" action="{{ url_for('share.public_approve', token=token) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="pub-form-row">
+      <label for="apprName">Your name</label>
+      <input type="text" id="apprName" name="name" value="{{ project.customer_name }}" maxlength="120">
+    </div>
+    <div class="pub-form-row">
+      <label for="apprNotes">Notes (optional)</label>
+      <textarea id="apprNotes" name="notes" rows="2" maxlength="500"></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary"
+            onclick="return confirm('Approve this design? It will be locked for manufacturing.');">
+      Approve Design
+    </button>
+  </form>
+
+  <form method="post" action="{{ url_for('share.public_request_revision', token=token) }}" style="margin-top:20px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="pub-form-row">
+      <label for="revReason">Request changes</label>
+      <textarea id="revReason" name="reason" rows="3" maxlength="800" required
+                placeholder="Tell us what you would like changed"></textarea>
+    </div>
+    <button type="submit" class="btn btn-secondary">Request Changes</button>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}
