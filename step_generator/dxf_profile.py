@@ -168,23 +168,38 @@ class Profile:
 
 # ---------------------------------------------------------------- reading
 
-def _check_extrusion(e):
-    if e.dxf.hasattr("extrusion"):
-        z = e.dxf.extrusion.z
-        if abs(z - 1.0) > 1e-9:
-            raise ProfileError(
-                f"{e.dxftype()} uses a flipped/tilted extrusion vector; not supported"
-            )
+def _extrusion_flip(e):
+    """Return True when the entity's OCS is mirrored (extrusion = -Z).
+
+    For extrusion (0, 0, -1) the arbitrary-axis rule gives OCS X = -WCS X and
+    OCS Y = WCS Y, so the entity is mirrored in X. Tilted vectors are rejected.
+    """
+    if not e.dxf.hasattr("extrusion"):
+        return False
+    ext = e.dxf.extrusion
+    if abs(ext.x) > 1e-9 or abs(ext.y) > 1e-9:
+        raise ProfileError(
+            f"{e.dxftype()} uses a tilted extrusion vector; not supported"
+        )
+    if abs(ext.z - 1.0) <= 1e-9:
+        return False
+    if abs(ext.z + 1.0) <= 1e-9:
+        return True
+    raise ProfileError(
+        f"{e.dxftype()} uses an unsupported extrusion vector; not supported"
+    )
 
 
-def _polyline_segments(e, s, tol):
+def _polyline_segments(e, s, tol, flip=False):
+    fx = -1.0 if flip else 1.0
+    fb = -1.0 if flip else 1.0
     if e.dxftype() == "LWPOLYLINE":
-        verts = [(x * s, y * s, b) for x, y, b in e.get_points("xyb")]
+        verts = [(x * s * fx, y * s, b * fb) for x, y, b in e.get_points("xyb")]
         closed = bool(e.closed)
     else:
         if not e.is_2d_polyline:
             raise ProfileError("3D POLYLINE is not supported")
-        verts = [(v.dxf.location.x * s, v.dxf.location.y * s, v.dxf.bulge)
+        verts = [(v.dxf.location.x * s * fx, v.dxf.location.y * s, v.dxf.bulge * fb)
                  for v in e.vertices]
         closed = bool(e.is_closed)
 
@@ -212,9 +227,10 @@ def _polyline_segments(e, s, tol):
     return segs, closed
 
 
-def _arc_segment(e, s):
+def _arc_segment(e, s, flip=False):
+    fx = -1.0 if flip else 1.0
     c = e.dxf.center
-    cx, cy, r = c.x * s, c.y * s, e.dxf.radius * s
+    cx, cy, r = c.x * s * fx, c.y * s, e.dxf.radius * s
     sa = math.radians(e.dxf.start_angle)
     ea = math.radians(e.dxf.end_angle)
     if ea <= sa:
@@ -222,9 +238,9 @@ def _arc_segment(e, s):
     ma = (sa + ea) / 2.0
     return Segment(
         kind="arc",
-        start=(cx + r * math.cos(sa), cy + r * math.sin(sa)),
-        end=(cx + r * math.cos(ea), cy + r * math.sin(ea)),
-        mid=(cx + r * math.cos(ma), cy + r * math.sin(ma)),
+        start=(cx + fx * r * math.cos(sa), cy + r * math.sin(sa)),
+        end=(cx + fx * r * math.cos(ea), cy + r * math.sin(ea)),
+        mid=(cx + fx * r * math.cos(ma), cy + r * math.sin(ma)),
     )
 
 
@@ -240,7 +256,11 @@ def _snap(loop, tol):
         cur.start = prev.end
 
 
-def _chain(open_segments, tol):
+def _chain_length(chain):
+    return sum(_dist(s.start, s.end) for s in chain)
+
+
+def _chain(open_segments, tol, stray_limit=None, warnings=None):
     remaining = list(open_segments)
     loops = []
     while remaining:
@@ -264,6 +284,15 @@ def _chain(open_segments, tol):
                 progressed = True
                 break
         if not _close(chain[0].start, chain[-1].end, tol):
+            if (stray_limit is not None and len(chain) <= 3
+                    and _chain_length(chain) <= stray_limit):
+                if warnings is not None:
+                    warnings.append(
+                        f"Ignored stray open edge chain near "
+                        f"({chain[0].start[0]:.3f}, {chain[0].start[1]:.3f}), "
+                        f"{_chain_length(chain):.3f} mm long; clean the DXF at source"
+                    )
+                continue
             raise ProfileError(
                 "Open outline: edges starting near "
                 f"({chain[0].start[0]:.3f}, {chain[0].start[1]:.3f}) do not form a closed loop"
@@ -328,10 +357,14 @@ def read_loops(dxf_path, layers=None):
             key = f"{t}_construction_linetype"
             skipped[key] = skipped.get(key, 0) + 1
             continue
-        _check_extrusion(e)
+        if e.dxf.layer.upper() in config.IGNORED_LAYERS:
+            key = f"{t}_ignored_layer"
+            skipped[key] = skipped.get(key, 0) + 1
+            continue
+        flip = _extrusion_flip(e) if t in ("LWPOLYLINE", "POLYLINE", "ARC", "CIRCLE") else False
 
         if t in ("LWPOLYLINE", "POLYLINE"):
-            segs, closed = _polyline_segments(e, s, tol)
+            segs, closed = _polyline_segments(e, s, tol, flip)
             if closed and segs:
                 loops.append(Loop(segments=segs))
             elif segs:
@@ -344,10 +377,11 @@ def read_loops(dxf_path, layers=None):
                 open_segments.append(Segment(kind="line", start=p1, end=p2))
         elif t == "ARC":
             has_loose_entities = True
-            open_segments.append(_arc_segment(e, s))
+            open_segments.append(_arc_segment(e, s, flip))
         elif t == "CIRCLE":
             c = e.dxf.center
-            loops.append(Loop(circle=(c.x * s, c.y * s, e.dxf.radius * s)))
+            cx = -c.x * s if flip else c.x * s
+            loops.append(Loop(circle=(cx, c.y * s, e.dxf.radius * s)))
         else:
             raise ProfileError(f"Unsupported entity type in profile: {t}")
 
@@ -368,7 +402,12 @@ def read_loops(dxf_path, layers=None):
                 )
             loops.append(Loop(segments=segs))
 
-    loops.extend(_chain(open_segments, tol))
+    stray_limit = None
+    if config.DROP_STRAY_OPEN_CHAINS and loops:
+        big = max(loops, key=lambda l: l.area())
+        x0, y0, x1, y1 = big.bbox()
+        stray_limit = 0.1 * math.hypot(x1 - x0, y1 - y0)
+    loops.extend(_chain(open_segments, tol, stray_limit, warnings))
     for loop in loops:
         if loop.circle is None:
             _snap(loop, tol)

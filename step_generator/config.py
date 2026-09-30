@@ -22,6 +22,13 @@ BBOX_TOLERANCE = 5e-3
 
 DEFAULT_LENGTH = 1000.0
 
+# Layers that hold drilling / annotation marks, never section outline.
+IGNORED_LAYERS = {"DRILLS"}
+
+# Loose open edge chains that cannot form a closed loop are dropped (with a
+# warning) when the DXF already holds at least one closed outline.
+DROP_STRAY_OPEN_CHAINS = True
+
 # Block references (INSERT) are exploded up to this nesting depth.
 MAX_BLOCK_DEPTH = 8
 
