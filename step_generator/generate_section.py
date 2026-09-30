@@ -1,5 +1,8 @@
 """Stage 1: one section DXF -> one validated STEP solid.
 
+A DXF that holds several separate shapes is exported as one STEP per shape
+(generate_section_steps); every shape follows the same origin convention.
+
 Run from the project root:
     python -m step_generator.generate_section app/cad_sections/cad_sections/jamb.dxf --length 1000
 """
@@ -10,7 +13,7 @@ import sys
 from pathlib import Path
 
 from . import config
-from .dxf_profile import ProfileError, load_profile
+from .dxf_profile import ProfileError, load_profile, load_profiles
 from .exporter import export_step
 from .solid_builder import SolidBuildError, build_solid
 from .validator import validate_solid, validate_step_file
@@ -26,22 +29,8 @@ def _safe_name(text):
     return re.sub(r"[^A-Za-z0-9_-]+", "_", text).strip("_") or "Section"
 
 
-def generate_section_step(dxf_path, length=config.DEFAULT_LENGTH, out_path=None,
-                          part_name=None, normalize_origin=True, layers=None):
-    dxf_path = Path(dxf_path)
-    part_name = part_name or _safe_name(dxf_path.stem)
-    if out_path is None:
-        out_path = config.OUTPUT_DIR / f"{_safe_name(dxf_path.stem)}_{int(length)}mm.step"
-    out_path = Path(out_path)
-
-    report = {"dxf": str(dxf_path), "part": part_name, "length": length, "step": str(out_path)}
-
-    try:
-        profile = load_profile(dxf_path, normalize_origin=normalize_origin, layers=layers)
-    except ProfileError as exc:
-        raise StepGenerationError(f"Profile error: {exc}", report)
-
-    report["profile"] = {
+def _profile_report(profile):
+    return {
         "width": profile.width,
         "height": profile.height,
         "area": profile.area,
@@ -49,6 +38,11 @@ def generate_section_step(dxf_path, length=config.DEFAULT_LENGTH, out_path=None,
         "skipped_entities": profile.skipped,
         "warnings": profile.warnings,
     }
+
+
+def _export_profile(profile, length, out_path, part_name, report):
+    """Build, validate and export one profile. Fills and returns `report`."""
+    report["profile"] = _profile_report(profile)
 
     try:
         solid = build_solid(profile, length)
@@ -69,11 +63,54 @@ def generate_section_step(dxf_path, length=config.DEFAULT_LENGTH, out_path=None,
     )
     report["step_validation"] = file_report
     if not file_report["ok"]:
-        out_path.unlink(missing_ok=True)
+        Path(out_path).unlink(missing_ok=True)
         raise StepGenerationError("STEP re-import check failed: " + "; ".join(file_report["errors"]), report)
 
     report["ok"] = True
     return report
+
+
+def generate_section_step(dxf_path, length=config.DEFAULT_LENGTH, out_path=None,
+                          part_name=None, normalize_origin=True, layers=None):
+    dxf_path = Path(dxf_path)
+    part_name = part_name or _safe_name(dxf_path.stem)
+    if out_path is None:
+        out_path = config.OUTPUT_DIR / f"{_safe_name(dxf_path.stem)}_{int(length)}mm.step"
+    out_path = Path(out_path)
+
+    report = {"dxf": str(dxf_path), "part": part_name, "length": length, "step": str(out_path)}
+
+    try:
+        profile = load_profile(dxf_path, normalize_origin=normalize_origin, layers=layers)
+    except ProfileError as exc:
+        raise StepGenerationError(f"Profile error: {exc}", report)
+
+    return _export_profile(profile, length, out_path, part_name, report)
+
+
+def generate_section_steps(dxf_path, length=config.DEFAULT_LENGTH, out_dir=None,
+                           part_name=None, normalize_origin=True, layers=None, file_stem=None):
+    """Export every separate shape in the DXF. Returns a list of reports (one per shape)."""
+    dxf_path = Path(dxf_path)
+    stem = file_stem or _safe_name(dxf_path.stem)
+    part_name = part_name or stem
+    out_dir = Path(out_dir) if out_dir else config.OUTPUT_DIR
+
+    base = {"dxf": str(dxf_path), "length": length}
+    try:
+        profiles = load_profiles(dxf_path, normalize_origin=normalize_origin, layers=layers)
+    except ProfileError as exc:
+        raise StepGenerationError(f"Profile error: {exc}", base)
+
+    reports = []
+    many = len(profiles) > 1
+    for index, profile in enumerate(profiles, start=1):
+        suffix = f"_Shape_{index}" if many else ""
+        name = f"{part_name}{suffix}"
+        out_path = out_dir / f"{stem}{suffix}_{int(length)}mm.step"
+        report = dict(base, part=name, step=str(out_path), shape_index=index, shape_count=len(profiles))
+        reports.append(_export_profile(profile, length, out_path, name, report))
+    return reports
 
 
 def main(argv=None):

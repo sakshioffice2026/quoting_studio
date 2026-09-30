@@ -15,7 +15,7 @@ class ProfileError(Exception):
 # Entities that carry no geometry for the profile and are safely ignored.
 _IGNORED_TYPES = {
     "TEXT", "MTEXT", "DIMENSION", "HATCH", "POINT", "LEADER", "MLEADER",
-    "VIEWPORT", "IMAGE", "ATTRIB", "ATTDEF", "TOLERANCE", "WIPEOUT",
+    "VIEWPORT", "IMAGE", "ATTRIB", "ATTDEF", "TOLERANCE", "WIPEOUT", "REGION",
 }
 
 
@@ -272,6 +272,33 @@ def _chain(open_segments, tol):
     return loops
 
 
+def _effective_linetype(doc, e):
+    lt = e.dxf.linetype if e.dxf.hasattr("linetype") else "BYLAYER"
+    if lt.upper() in ("BYLAYER", "BYBLOCK", ""):
+        try:
+            lt = doc.layers.get(e.dxf.layer).dxf.linetype
+        except Exception:
+            lt = "CONTINUOUS"
+    return lt.upper()
+
+
+def _iter_entities(entities, skipped, depth=0):
+    """Yield modelspace entities, exploding block references (INSERT) recursively."""
+    for e in entities:
+        if e.dxftype() != "INSERT":
+            yield e
+            continue
+        if depth >= config.MAX_BLOCK_DEPTH:
+            raise ProfileError(
+                f"Block references are nested deeper than {config.MAX_BLOCK_DEPTH} levels")
+        skipped["INSERT_exploded"] = skipped.get("INSERT_exploded", 0) + 1
+        try:
+            children = list(e.virtual_entities())
+        except Exception as exc:
+            raise ProfileError(f"Could not explode block reference '{e.dxf.name}': {exc}")
+        yield from _iter_entities(children, skipped, depth + 1)
+
+
 def read_loops(dxf_path, layers=None):
     path = Path(dxf_path)
     if not path.is_file():
@@ -290,15 +317,17 @@ def read_loops(dxf_path, layers=None):
     skipped = {}
     warnings = []
 
-    for e in doc.modelspace():
+    for e in _iter_entities(doc.modelspace(), skipped):
         t = e.dxftype()
         if layers and e.dxf.layer not in layers:
             continue
         if t in _IGNORED_TYPES:
             skipped[t] = skipped.get(t, 0) + 1
             continue
-        if t == "INSERT":
-            raise ProfileError("Block reference (INSERT) found; explode blocks in the DXF first")
+        if _effective_linetype(doc, e) in config.IGNORED_LINETYPES:
+            key = f"{t}_construction_linetype"
+            skipped[key] = skipped.get(key, 0) + 1
+            continue
         _check_extrusion(e)
 
         if t in ("LWPOLYLINE", "POLYLINE"):
@@ -389,3 +418,64 @@ def load_profile(dxf_path, normalize_origin=True, layers=None):
         skipped=skipped,
         warnings=warnings,
     )
+
+
+def classify_shapes(loops):
+    """Group loops into separate shapes: each outer boundary with the holes inside it."""
+    ordered = sorted(loops, key=lambda l: l.area(), reverse=True)
+    polys = [l.points() for l in ordered]
+    n = len(ordered)
+    depth = [0] * n
+    parent = [None] * n
+
+    for i in range(n):
+        probe = polys[i][0]
+        containers = [j for j in range(i) if point_in_polygon(probe, polys[j])]
+        depth[i] = len(containers)
+        if depth[i] >= 2:
+            raise ProfileError("Nested loops (shape inside a hole) are not supported")
+        if containers:
+            parent[i] = containers[0]
+
+    shapes = []
+    for i in range(n):
+        if depth[i] == 0:
+            holes = [ordered[k] for k in range(n) if parent[k] == i]
+            shapes.append((ordered[i], holes))
+    return shapes
+
+
+def load_profiles(dxf_path, normalize_origin=True, layers=None):
+    """Return a list of Profile objects, one per separate shape in the DXF.
+
+    Every shape is normalised on its own, so each one follows the same origin
+    convention (bounding-box corner at 0, 0). Shapes are ordered left to right.
+    """
+    loops, skipped, warnings = read_loops(dxf_path, layers=layers)
+    shapes = classify_shapes(loops)
+    shapes.sort(key=lambda s: (round(s[0].bbox()[0], 3), round(s[0].bbox()[1], 3)))
+
+    profiles = []
+    for outer, holes in shapes:
+        min_x, min_y, max_x, max_y = outer.bbox()
+        if normalize_origin:
+            dx, dy = -min_x, -min_y
+            outer = outer.translated(dx, dy)
+            holes = [h.translated(dx, dy) for h in holes]
+            min_x, min_y, max_x, max_y = outer.bbox()
+        profiles.append(Profile(
+            outer=outer,
+            holes=holes,
+            width=max_x - min_x,
+            height=max_y - min_y,
+            normalized=normalize_origin,
+            skipped=dict(skipped),
+            warnings=list(warnings),
+        ))
+
+    if len(profiles) > 1:
+        note = (f"DXF holds {len(profiles)} separate shapes; exported as "
+                f"{len(profiles)} separate solids (Shape_1..Shape_{len(profiles)}, left to right)")
+        for p in profiles:
+            p.warnings.append(note)
+    return profiles

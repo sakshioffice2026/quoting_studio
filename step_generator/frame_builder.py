@@ -113,6 +113,8 @@ def build_frame(width=config.DEFAULT_FRAME_WIDTH, height=config.DEFAULT_FRAME_HE
                 cache[fname] = load_profile(path, normalize_origin=True)
             except ProfileError as exc:
                 raise FrameBuildError(f"{fname}: {exc}", report)
+            for warning in cache[fname].warnings:
+                report["warnings"].append(f"{fname}: {warning}")
         profiles[name] = cache[fname]
 
     across = {n: profiles[n].width for n in PART_ORDER}

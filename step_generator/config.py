@@ -22,6 +22,13 @@ BBOX_TOLERANCE = 5e-3
 
 DEFAULT_LENGTH = 1000.0
 
+# Block references (INSERT) are exploded up to this nesting depth.
+MAX_BLOCK_DEPTH = 8
+
+# Entities drawn in these linetypes are construction / break lines, not outline.
+IGNORED_LINETYPES = {"DASHED", "DASHED2", "DASHEDX2", "HIDDEN", "HIDDEN2", "CENTER",
+                     "CENTER2", "PHANTOM", "PHANTOM2", "DASHDOT", "DASHDOT2", "DOT", "DOT2"}
+
 # ---------------------------------------------------------------------------
 # Stage 2: mitred frame (Head, Sill, Jamb_Left, Jamb_Right)
 # ---------------------------------------------------------------------------
@@ -53,3 +60,46 @@ FRAME_VOLUME_REL_TOLERANCE = 5e-3
 FRAME_BBOX_TOLERANCE = 5e-3
 
 FRAME_OUTPUT_NAME = "frame_{w}x{h}mm.step"
+
+# ---------------------------------------------------------------------------
+# Stage 3: full window (frame + mullion + transom + beads)
+# ---------------------------------------------------------------------------
+
+# Same origin convention as Stage 2 for every section:
+#   profile X = across, profile Y = depth (frame +Z), extrusion = member length.
+STAGE3_SECTION_FILES = {
+    "Mullion": "meeting_stile.dxf",   # vertical, butt-jointed to head and sill
+    "Transom": "glazing_bar.dxf",     # horizontal, butt-jointed to jambs and mullion
+    "Bead": "bead.dxf",               # mitred ring inside every glazed opening
+}
+
+# Centre line of the mullion as a fraction of the outer frame width.
+MULLION_X_FRACTION = 0.5
+# Centre line of the transom as a fraction of the outer frame height.
+TRANSOM_Y_FRACTION = 0.6
+
+# Per-group flips and depth offset (mm, along frame +Z) for Stage 3 sections.
+GROUP_ACROSS_FLIP = {"Mullion": False, "Transom": False, "Bead": False}
+GROUP_DEPTH_FLIP = {"Mullion": False, "Transom": False, "Bead": False}
+GROUP_Z_OFFSET = {"Mullion": 0.0, "Transom": 0.0, "Bead": 0.0}
+
+# Allowed overlap between two members, relative to the smaller member volume.
+WINDOW_OVERLAP_REL_TOLERANCE = 1e-3
+
+WINDOW_OUTPUT_NAME = "window_{w}x{h}mm.step"
+
+# ---------------------------------------------------------------------------
+# Stage 3 (batch): every section DXF in the repo, one origin convention
+# ---------------------------------------------------------------------------
+
+IMPORT_SECTIONS_DIR = PACKAGE_DIR.parent / "import_data" / "Sections"
+
+# Folders scanned (recursively) by generate_all_sections.
+ALL_SECTION_DIRS = (SECTIONS_DIR, IMPORT_SECTIONS_DIR)
+
+# Backup and temporary DXFs are never processed.
+SECTION_SKIP_SUFFIXES = (".bak.dxf",)
+
+SECTION_EXPORT_LENGTH = 1000.0
+SECTIONS_OUTPUT_SUBDIR = "sections"
+SECTIONS_REPORT_NAME = "sections_report.json"
