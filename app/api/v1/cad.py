@@ -328,3 +328,33 @@ def export_3d(window_id, fmt):
     except Exception as exc:
         current_app.logger.exception('export_3d error window=%d fmt=%s: %s', window_id, fmt, exc)
         return jsonify({'error': '3D export failed'}), 500
+
+
+# GET /api/v1/windows/<id>/step-generator
+# STEP built from the section DXFs by the standalone step_generator package.
+@cad_bp.route('/windows/<int:window_id>/step-generator', methods=['GET'])
+@login_required
+def export_step_generator(window_id):
+    from werkzeug.exceptions import HTTPException
+    from ...services.cad import step_generator_service as sgs
+
+    try:
+        window = _own_window(window_id)
+        gate = _require_design_approved(window)
+        if gate:
+            return gate
+
+        data, fname = sgs.generate_step(window)
+        current_app.logger.info('step-generator export: window=%d bytes=%d', window_id, len(data))
+        return Response(data, mimetype='application/step',
+                        headers={'Content-Disposition': f'attachment; filename={fname}'})
+    except HTTPException:
+        raise
+    except sgs.StepUnsupportedError as exc:
+        return jsonify({'error': 'Not supported', 'message': str(exc)}), 400
+    except sgs.StepGeneratorError as exc:
+        current_app.logger.error('step-generator failed window=%d: %s', window_id, exc)
+        return jsonify({'error': 'STEP generation failed', 'message': str(exc)}), 500
+    except Exception as exc:
+        current_app.logger.exception('step-generator error window=%d: %s', window_id, exc)
+        return jsonify({'error': 'STEP generation failed'}), 500

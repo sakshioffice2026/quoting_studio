@@ -37,6 +37,13 @@
     .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     .row-label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
     .row-value { font-size:15px; font-weight:600; }
+    .drawing-head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .drawing-art { background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; text-align:center; }
+    .drawing-art svg { display:block; margin:0 auto; max-width:520px; height:auto; }
+    .spec { width:100%; border-collapse:collapse; margin-top:12px; font-size:14px; }
+    .spec td { padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:top; }
+    .spec td.k { width:34%; color:var(--muted); }
+    .btn-link { text-decoration:none; margin-top:0; }
     @media (max-width:560px) { .grid { grid-template-columns:1fr; } }
     @media (prefers-color-scheme: dark) {
       :root { --bg:#0b1220; --card:#111a2e; --text:#e5e7eb; --muted:#94a3b8; --line:#23304a; }
@@ -78,6 +85,31 @@
       </div>
     </div>
   </div>
+
+  {% if drawings %}
+    <div class="card">
+      <div class="drawing-head">
+        <h2 style="margin:0;">Your design{{ 's' if drawings|length > 1 else '' }}</h2>
+        <a class="btn btn-secondary btn-link"
+           href="{{ url_for('public_share.design_pdf', token=link.token) }}">⬇ Download PDF</a>
+      </div>
+      <p class="muted" style="margin-top:8px;">
+        Dashed lines show how each opening swings or slides. Sizes are in millimetres.
+      </p>
+    </div>
+
+    {% for d in drawings %}
+      <div class="card">
+        <h2>{{ d.index }}. {{ d.label }}</h2>
+        <div class="drawing-art">{{ d.svg }}</div>
+        <table class="spec">
+          {% for k, v in d.details %}
+          <tr><td class="k">{{ k }}</td><td>{{ v }}</td></tr>
+          {% endfor %}
+        </table>
+      </div>
+    {% endfor %}
+  {% endif %}
 
   {% if status == DesignApprovalStatus.APPROVAL_SENT %}
 

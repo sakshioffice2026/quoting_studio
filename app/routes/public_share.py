@@ -15,6 +15,7 @@ from ..services.domain import (
     design_approval_service,
 )
 from ..services.domain.pdf_quotation import generate_quotation_pdf
+from ..services.domain import design_render_service
 
 public_share_bp = Blueprint('public_share', __name__, url_prefix='/s')
 
@@ -75,9 +76,11 @@ def view(token):
             design_approval_service.expire_approval(link.tenant_id, approval.id)
             approval = design_approval_service.get_approval(link.tenant_id, link.resource_id)
         share_link_service.record_open(link)
+        drawings = design_render_service.build_drawings(approval)
         return render_template(
             'public_share/design.html',
             link=link, approval=approval, project=approval.project, tenant=tenant,
+            drawings=drawings,
             DesignApprovalStatus=DesignApprovalStatus,
         )
 
@@ -194,6 +197,38 @@ def quotation_pdf(token):
 # ------------------------------------------------------------------ #
 #  Design approval actions
 # ------------------------------------------------------------------ #
+@public_share_bp.route('/<token>/design/pdf')
+def design_pdf(token):
+    link, err = _resolve(token)
+    if err:
+        return err
+    if link.resource_type != ShareLinkType.DESIGN_APPROVAL:
+        abort(404)
+
+    approval = design_approval_service.get_approval(link.tenant_id, link.resource_id)
+    if not approval or approval.status in (
+        DesignApprovalStatus.DRAFT, DesignApprovalStatus.SUBMITTED
+    ):
+        abort(404)
+
+    try:
+        tenant = Tenant.query.get(link.tenant_id)
+        pdf_bytes = design_render_service.build_design_pdf(
+            approval=approval, project=approval.project, tenant=tenant,
+        )
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'design-approval-rev{approval.revision_number}.pdf',
+        )
+    except Exception as exc:
+        current_app.logger.exception('public design_pdf error link=%s: %s', link.id, exc)
+        flash('The PDF could not be generated. Please try again shortly.', 'error')
+        return redirect(url_for('public_share.view', token=token))
+
+
+
 @public_share_bp.route('/<token>/design/approve', methods=['POST'])
 def design_approve(token):
     link, err = _resolve(token)

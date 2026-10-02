@@ -352,6 +352,49 @@
     </div>
     {% endif %}
 
+    {# =================== PROPOSAL HISTORY =================== #}
+    {% set proposal_rows = quotation.proposals.order_by(None).all()|sort(attribute='revision_no', reverse=True) %}
+    <div class="ui-card" style="margin-top:16px;">
+      <div class="ui-card-title" style="margin-bottom:10px;">Proposal History</div>
+      {% if proposal_rows %}
+      <div style="overflow-x:auto;">
+        <table class="table" style="width:100%;">
+          <thead>
+            <tr>
+              <th>Revision</th>
+              <th>Quotation Version</th>
+              <th>Template</th>
+              <th>Total</th>
+              <th>Created</th>
+              <th>Files</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in proposal_rows %}
+            <tr>
+              <td>r{{ p.revision_no }}</td>
+              <td>v{{ p.quotation_version or '—' }}</td>
+              <td>{{ p.template_name or '—' }}</td>
+              <td>{{ '₹{:,.2f}'.format(p.grand_total|float) if p.grand_total else '—' }}</td>
+              <td>{{ p.created_at.strftime('%d %b %Y %H:%M') if p.created_at else '—' }}</td>
+              <td style="display:flex; gap:6px; flex-wrap:wrap;">
+                {% if p.docx_path %}
+                <a href="{{ url_for('proposal.history_docx', quotation_id=quotation.id, proposal_id=p.id) }}" class="btn btn-secondary btn-sm">DOCX</a>
+                {% endif %}
+                {% if p.pdf_path %}
+                <a href="{{ url_for('proposal.history_pdf', quotation_id=quotation.id, proposal_id=p.id) }}" class="btn btn-secondary btn-sm">PDF</a>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="action-note">No proposals generated yet. Use “Proposal (DOCX)” above to create the first one.</p>
+      {% endif %}
+    </div>
+
   </div>
 </div>
 {% endblock %}

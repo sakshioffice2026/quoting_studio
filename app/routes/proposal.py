@@ -10,9 +10,9 @@ from werkzeug.utils import secure_filename
 from ..services.domain import quotation_service
 from ..services.domain import proposal_template_store as tpl_store
 from ..services.domain.proposal_service import (
-    generate_proposal_docx,
-    generate_proposal_pdf,
-    save_proposal_file,
+    create_proposal,
+    get_proposal,
+    proposal_full_path,
 )
 
 proposal_bp = Blueprint("proposal", __name__)
@@ -54,20 +54,22 @@ def _load_quotation(quotation_id: int):
 def download_docx(quotation_id):
     q = _load_quotation(quotation_id)
     try:
-        result = generate_proposal_docx(
+        result = create_proposal(
             quotation=q,
             project=q.project,
             tenant=current_user.tenant,
+            user_id=current_user.id,
+            with_pdf=False,
             use_llm=_use_llm(),
             template_filename=_template_name(),
         )
-        save_proposal_file(q.tenant_id, result["filename"], result["bytes"])
+        proposal = result["proposal"]
 
         return send_file(
-            io.BytesIO(result["bytes"]),
+            io.BytesIO(result["docx_bytes"]),
             mimetype=DOCX_MIME,
             as_attachment=True,
-            download_name=result["filename"],
+            download_name=os.path.basename(proposal.docx_path),
         )
     except Exception as exc:
         current_app.logger.exception("proposal docx error quotation=%s: %s", quotation_id, exc)
@@ -83,26 +85,62 @@ def download_docx(quotation_id):
 def download_pdf(quotation_id):
     q = _load_quotation(quotation_id)
     try:
-        result = generate_proposal_pdf(
+        result = create_proposal(
             quotation=q,
             project=q.project,
             tenant=current_user.tenant,
+            user_id=current_user.id,
+            with_pdf=True,
             use_llm=_use_llm(),
             template_filename=_template_name(),
         )
-        save_proposal_file(q.tenant_id, result["docx_filename"], result["docx_bytes"])
-        save_proposal_file(q.tenant_id, result["filename"], result["bytes"])
+        proposal = result["proposal"]
 
         return send_file(
-            io.BytesIO(result["bytes"]),
+            io.BytesIO(result["pdf_bytes"]),
             mimetype=PDF_MIME,
             as_attachment=True,
-            download_name=result["filename"],
+            download_name=os.path.basename(proposal.pdf_path),
         )
     except Exception as exc:
         current_app.logger.exception("proposal pdf error quotation=%s: %s", quotation_id, exc)
         flash("Proposal (PDF) generation failed. Check that LibreOffice is installed.", "error")
         return redirect(url_for("quotation.detail", quotation_id=quotation_id))
+
+
+# ------------------------------------------------------------------ #
+#  GET /quotations/<id>/proposals/<proposal_id>/docx|pdf  (history)
+# ------------------------------------------------------------------ #
+def _send_saved(quotation_id: int, proposal_id: int, kind: str):
+    _load_quotation(quotation_id)
+    proposal = get_proposal(current_user.tenant_id, proposal_id)
+    if not proposal or proposal.quotation_id != quotation_id:
+        abort(404)
+
+    relative = proposal.docx_path if kind == "docx" else proposal.pdf_path
+    full = proposal_full_path(relative)
+    if not full:
+        flash("Saved proposal file was not found on the server.", "error")
+        return redirect(url_for("quotation.detail", quotation_id=quotation_id))
+
+    return send_file(
+        full,
+        mimetype=DOCX_MIME if kind == "docx" else PDF_MIME,
+        as_attachment=True,
+        download_name=os.path.basename(full),
+    )
+
+
+@proposal_bp.route("/quotations/<int:quotation_id>/proposals/<int:proposal_id>/docx")
+@login_required
+def history_docx(quotation_id, proposal_id):
+    return _send_saved(quotation_id, proposal_id, "docx")
+
+
+@proposal_bp.route("/quotations/<int:quotation_id>/proposals/<int:proposal_id>/pdf")
+@login_required
+def history_pdf(quotation_id, proposal_id):
+    return _send_saved(quotation_id, proposal_id, "pdf")
 
 
 # ================================================================== #
