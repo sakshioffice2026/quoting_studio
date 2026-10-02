@@ -32,6 +32,7 @@ from .template_question import TemplateQuestion, InputType
 from .template_response import TemplateResponse
 from .template_upload import TemplateUpload
 from .share_link import ShareLink, ShareResource
+from .proposal import Proposal
 __all__ = [
     'Tenant',
     'User', 'UserRole',
@@ -65,4 +66,5 @@ __all__ = [
     'TemplateResponse',
     'TemplateUpload',
     'ShareLink', 'ShareResource',
+    'Proposal',
 ]

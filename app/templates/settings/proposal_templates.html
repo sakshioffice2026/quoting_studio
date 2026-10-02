@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+{% block title %}Proposal Templates — FenestraOne{% endblock %}
+{% block body %}
+<div style="display:flex;min-height:calc(100vh - 52px);">
+
+  {% include 'settings/_sidebar.html' %}
+
+  <div style="flex:1;padding:32px;max-width:860px;">
+    <div class="page-header">
+      <div><h1>Proposal Templates</h1><div class="sub mono">Word (.docx) templates used for proposals</div></div>
+    </div>
+
+    <!-- Upload -->
+    <div style="background:white;border:1px solid var(--line);border-radius:6px;padding:24px;margin-bottom:20px;">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);
+                  font-weight:600;margin-bottom:16px;">Upload template</div>
+      <form method="POST" action="{{ url_for('proposal.templates_upload') }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="file" name="template_file" accept=".docx" class="form-control"
+                 style="max-width:320px;font-size:12px;" required>
+          <label style="font-size:12px;color:var(--steel);display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" name="make_default" value="1"> Use as default
+          </label>
+          <button type="submit" class="btn btn-primary">Upload</button>
+        </div>
+        <div style="font-size:12px;color:var(--steel);margin-top:10px;">
+          .docx only · Max 5 MB · Must contain <span class="mono">{{ '{{item_label}}' }}</span>
+          and <span class="mono">{{ '{{grand_total}}' }}</span>
+        </div>
+      </form>
+    </div>
+
+    <!-- Template list -->
+    <div style="background:white;border:1px solid var(--line);border-radius:6px;padding:24px;margin-bottom:20px;">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);
+                  font-weight:600;margin-bottom:16px;">Your templates</div>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Template</th>
+            <th>Size</th>
+            <th>Uploaded</th>
+            <th>Status</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Built-in default</strong></td>
+            <td>—</td>
+            <td>—</td>
+            <td>
+              {% if using_builtin %}<span class="mono" style="color:var(--copper);">Default</span>{% endif %}
+            </td>
+            <td style="text-align:right;">
+              <div style="display:inline-flex;gap:6px;">
+                <a href="{{ url_for('proposal.templates_download_builtin') }}"
+                   class="btn btn-secondary btn-sm">Download</a>
+                {% if not using_builtin %}
+                <form method="POST" action="{{ url_for('proposal.templates_set_default') }}" style="margin:0;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="filename" value="">
+                  <button type="submit" class="btn btn-secondary btn-sm">Set default</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+
+          {% for t in templates %}
+          <tr>
+            <td><strong>{{ t.filename }}</strong></td>
+            <td class="mono">{{ t.size_kb }} KB</td>
+            <td class="mono">{{ t.modified.strftime('%d %b %Y') }}</td>
+            <td>
+              {% if t.is_default %}<span class="mono" style="color:var(--copper);">Default</span>{% endif %}
+            </td>
+            <td style="text-align:right;">
+              <div style="display:inline-flex;gap:6px;">
+                <a href="{{ url_for('proposal.templates_download', filename=t.filename) }}"
+                   class="btn btn-secondary btn-sm">Download</a>
+                {% if not t.is_default %}
+                <form method="POST" action="{{ url_for('proposal.templates_set_default') }}" style="margin:0;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="filename" value="{{ t.filename }}">
+                  <button type="submit" class="btn btn-secondary btn-sm">Set default</button>
+                </form>
+                {% endif %}
+                <form method="POST" action="{{ url_for('proposal.templates_delete') }}" style="margin:0;"
+                      onsubmit="return confirm('Delete this template?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="filename" value="{{ t.filename }}">
+                  <button type="submit" class="btn btn-secondary btn-sm">Delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Token reference -->
+    <div style="background:white;border:1px solid var(--line);border-radius:6px;padding:24px;">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel);
+                  font-weight:600;margin-bottom:16px;">Available tokens</div>
+
+      <div style="font-size:12px;color:var(--steel);margin-bottom:6px;">General</div>
+      <div class="mono" style="font-size:12px;line-height:1.9;margin-bottom:14px;">
+        {{ '{{company_name}}' }} {{ '{{company_email}}' }} {{ '{{customer_name}}' }} {{ '{{project_address}}' }}
+        {{ '{{quotation_number}}' }} {{ '{{quotation_version}}' }} {{ '{{quotation_date}}' }} {{ '{{validity_date}}' }}
+        {{ '{{payment_terms}}' }} {{ '{{subtotal}}' }} {{ '{{discount_pct}}' }} {{ '{{discount_amount}}' }}
+        {{ '{{tax_rate}}' }} {{ '{{tax_amount}}' }} {{ '{{grand_total}}' }} {{ '{{installation_charge}}' }}
+        {{ '{{transport_charge}}' }} {{ '{{amc_tier}}' }} {{ '{{amc_price}}' }} {{ '{{warranty_months}}' }}
+        {{ '{{warranty_terms}}' }}
+      </div>
+
+      <div style="font-size:12px;color:var(--steel);margin-bottom:6px;">Written text</div>
+      <div class="mono" style="font-size:12px;line-height:1.9;margin-bottom:14px;">
+        {{ '{{executive_summary}}' }} {{ '{{scope_of_work}}' }} {{ '{{commercial_notes}}' }} {{ '{{next_steps}}' }}
+      </div>
+
+      <div style="font-size:12px;color:var(--steel);margin-bottom:6px;">Item table (put in one table row; the row repeats per item)</div>
+      <div class="mono" style="font-size:12px;line-height:1.9;margin-bottom:14px;">
+        {{ '{{item_no}}' }} {{ '{{item_label}}' }} {{ '{{item_material}}' }} {{ '{{item_size}}' }}
+        {{ '{{item_qty}}' }} {{ '{{item_amount}}' }}
+      </div>
+
+      <div style="font-size:12px;color:var(--steel);margin-bottom:6px;">Charges table (put in one table row; the row repeats per charge)</div>
+      <div class="mono" style="font-size:12px;line-height:1.9;">
+        {{ '{{charge_label}}' }} {{ '{{charge_details}}' }} {{ '{{charge_amount}}' }}
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

@@ -1,6 +1,5 @@
 {% extends 'base.html' %}
 {% from '_ui_macros.html' import pill, stage_tracker %}
-{% from '_share_link_button.html' import share_link_button, share_link_script %}
 {% block title %}{{ quotation.quotation_number }} — FenestraOne{% endblock %}
 
 {% block body %}
@@ -26,10 +25,7 @@
           {% if quotation.project %}
           <a href="{{ url_for('projects.detail', project_id=quotation.project_id) }}" class="btn btn-secondary btn-sm">Project</a>
           {% endif %}
-          {% if quotation.status != QuotationStatus.DRAFT and quotation.status != QuotationStatus.PENDING_DISCOUNT_APPROVAL %}
-          {{ share_link_button('quotation', quotation.id) }}
-          {% endif %}
-          <a href="{{ url_for('quotation.download_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Download PDF</a>
+          <a href="{{ url_for('proposal.download_docx', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Proposal (DOCX)</a>
           <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>
       </div>
@@ -358,5 +354,4 @@
 
   </div>
 </div>
-{{ share_link_script() }}
 {% endblock %}

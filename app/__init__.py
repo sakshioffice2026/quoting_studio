@@ -67,6 +67,7 @@ def create_app(config_name=None):
     from .routes.visualiser import visualiser_bp
     from .routes.quotation import quotation_bp
     from .routes.quotation_flow import quotation_flow_bp
+    from .routes.proposal import proposal_bp
     from .routes.calendar_route import calendar_bp
     from .routes.order import order_bp
     from .routes.payment import payment_bp
@@ -95,6 +96,7 @@ def create_app(config_name=None):
     app.register_blueprint(visualiser_bp)
     app.register_blueprint(quotation_bp)
     app.register_blueprint(quotation_flow_bp)
+    app.register_blueprint(proposal_bp)
     app.register_blueprint(calendar_bp)
     app.register_blueprint(order_bp)
     app.register_blueprint(payment_bp)
