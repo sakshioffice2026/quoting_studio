@@ -396,7 +396,6 @@ body { overflow:hidden; }
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importJson').click()">Import JSON</button>
       <input type="file" id="importJson" accept=".json" style="display:none" onchange="importJSON(event)">
       <button class="btn btn-ghost btn-sm" onclick="exportDxf()">DXF</button>
-      <button class="btn btn-ghost btn-sm" id="btnDraftViews" onclick="exportDraftViews()" title="Native FreeCAD document (.FCStd) — 3D model + Front/Top/Side Draft views">⬇ FreeCAD (.FCStd)</button>
       <!-- <button class="btn btn-ghost btn-sm" id="btnTechDrawViews" onclick="exportTechDrawViews()" title="Native FreeCAD document (.FCStd) — A4 Landscape TechDraw page with Front/Top/Side projection group">⬇ TechDraw Drawing</button> -->
       <button class="btn btn-primary btn-sm" onclick="saveNow()">Save</button>
       {% if next_window %}
@@ -452,10 +451,10 @@ body { overflow:hidden; }
         <span class="ic">📦</span> Export GLB File</div>
       <div class="dz-3dopt" onclick="export3d('stl')" title="Download file for 3D printing (.stl)">
         <span class="ic">🖨️</span> Export STL (Print)</div>
-      <div class="dz-3dopt" onclick="export3d('step')" title="Download CAD file for manufacturing (.step)">
-        <span class="ic">⚙️</span> Export STEP (CAD)</div>
       <div class="dz-3dopt" onclick="exportStepGenerator()" title="STEP built from the section DXF profiles (.step)">
         <span class="ic">🧩</span> Export STEP (From Sections)</div>
+      <div class="dz-3dopt" onclick="exportStepGeneratorFcstd()" title="FreeCAD document built from the section DXF profiles (.FCStd)">
+        <span class="ic">🛠️</span> Export FCStd (From Sections)</div>
       <div class="dz-3dopt" onclick="exportOrthographic()" title="Download CAD file for orthographic views (.dxf)">
         <span class="ic">📐</span> Orthographic Views (DXF)</div>
     </div>
@@ -1400,6 +1399,27 @@ async function exportStepGenerator(){
     a.download=`QS-W${QS_WINDOW_ID}-sections.step`; document.body.appendChild(a); a.click();
     setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1500);
     showToast('✓ STEP downloaded','ok');
+  }catch(e){ showToast('✗ '+e.message,'error'); }
+}
+async function exportStepGeneratorFcstd(){
+  document.getElementById('panel3d')?.classList.remove('show');
+  document.getElementById('tl3D')?.classList.remove('on');
+  set3DBadge(false);
+  showToast('Building FCStd from section profiles… (this can take up to a minute)','info');
+  try{
+    await flushSave();
+    const r=await fetch(`${API}/windows/${QS_WINDOW_ID}/step-generator.fcstd`);
+    if(!r.ok){
+      let msg='FCStd generation failed';
+      try{ const d=await r.json(); msg=d.message||d.error||msg; }catch(e){}
+      showToast('✗ '+msg,'error'); return;
+    }
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url;
+    a.download=`QS-W${QS_WINDOW_ID}-sections.FCStd`; document.body.appendChild(a); a.click();
+    setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1500);
+    showToast('✓ FCStd downloaded','ok');
   }catch(e){ showToast('✗ '+e.message,'error'); }
 }
 function showToast(msg,type){

@@ -358,3 +358,34 @@ def export_step_generator(window_id):
     except Exception as exc:
         current_app.logger.exception('step-generator error window=%d: %s', window_id, exc)
         return jsonify({'error': 'STEP generation failed'}), 500
+
+
+# GET /api/v1/windows/<id>/step-generator.fcstd
+# FreeCAD .FCStd built from the section-based STEP (via freecadcmd).
+@cad_bp.route('/windows/<int:window_id>/step-generator.fcstd', methods=['GET'])
+@login_required
+def export_step_generator_fcstd(window_id):
+    from werkzeug.exceptions import HTTPException
+    from ...services.cad import step_generator_service as sgs
+    from ...services.cad.step_to_fcstd import generate_fcstd_from_sections
+
+    try:
+        window = _own_window(window_id)
+        gate = _require_design_approved(window)
+        if gate:
+            return gate
+
+        data, fname = generate_fcstd_from_sections(window)
+        current_app.logger.info('step-generator fcstd export: window=%d bytes=%d', window_id, len(data))
+        return Response(data, mimetype='application/octet-stream',
+                        headers={'Content-Disposition': f'attachment; filename={fname}'})
+    except HTTPException:
+        raise
+    except sgs.StepUnsupportedError as exc:
+        return jsonify({'error': 'Not supported', 'message': str(exc)}), 400
+    except sgs.StepGeneratorError as exc:
+        current_app.logger.error('step-generator fcstd failed window=%d: %s', window_id, exc)
+        return jsonify({'error': 'FCStd generation failed', 'message': str(exc)}), 500
+    except Exception as exc:
+        current_app.logger.exception('step-generator fcstd error window=%d: %s', window_id, exc)
+        return jsonify({'error': 'FCStd generation failed'}), 500

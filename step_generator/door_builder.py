@@ -145,25 +145,55 @@ def build_door(width=door_config.DEFAULT_DOOR_WIDTH, height=door_config.DEFAULT_
     solid = _finish(shape, "Hinge_Center", width, height, report)
     _register(parts, report, "Hinge_Center", "Hinge", Path(files["Hinge"]).name, solid, hinge)
 
+    # Jamb inner face is stepped: close the gap between jamb and base members.
+    jamb_profile = _load(files["Jamb"], report, "Jamb")
+    depth_limit = min(report["depth"]["Jamb_Left"], report["depth"]["Jamb_Right"])
+    reach = frame_builder._min_reach(jamb_profile, depth_limit)
+    reach_gap = 0.0 if reach is None else max(0.0, jamb_profile.width - reach)
+    jamb_ext = 0.0
+    if reach_gap > 0.01:
+        jamb_ext = min(jamb_profile.width, reach_gap + frame_builder.FILL_MARGIN)
+
     # Base rail and base support: across +Y, run along +X between jamb and hinge.
     for col_name, xa, xb in columns:
+        if col_name == "Left":
+            xa_ext, xb_ext, jamb_name = xa - jamb_ext, xb, "Jamb_Left"
+        else:
+            xa_ext, xb_ext, jamb_name = xa, xb + jamb_ext, "Jamb_Right"
         for prefix, prof, group, y0 in (
             ("Base_Rail", rail, "Base_Rail", rail_y0),
             ("Base_Support", support, "Base_Support", sup_y0),
         ):
             name = f"{prefix}_{col_name}"
             shape = _member(
-                prof, group, name, (xa, y0, 0.0),
-                (0.0, 1.0, 0.0), (1.0, 0.0, 0.0), xb - xa, report,
+                prof, group, name, (xa_ext, y0, 0.0),
+                (0.0, 1.0, 0.0), (1.0, 0.0, 0.0), xb_ext - xa_ext, report,
             )
+            if jamb_ext > 0.0:
+                try:
+                    shape = shape.cut(parts[jamb_name])
+                except Exception as exc:
+                    raise DoorBuildError(f"{name}: jamb trim failed: {exc}", report)
             solid = _finish(shape, name, width, height, report)
             _register(parts, report, name, group, Path(files[group]).name, solid, prof)
 
     # Beads: one mitred ring per glazed opening, above the base support.
     for col_name, xa, xb in columns:
+        if col_name == "Left":
+            rect, jamb_name = (xa - jamb_ext, sup_y1, xb, y_hi), "Jamb_Left"
+        else:
+            rect, jamb_name = (xa, sup_y1, xb + jamb_ext, y_hi), "Jamb_Right"
         _add_bead_ring(
             parts, report, bead, f"Bead_{col_name}",
-            (xa, sup_y1, xb, y_hi), z_top, width, height,
+            rect, z_top, width, height,
         )
+        if jamb_ext > 0.0:
+            for side in ("Bottom", "Top", "Left", "Right"):
+                bead_name = f"Bead_{col_name}_{side}"
+                try:
+                    trimmed = parts[bead_name].cut(parts[jamb_name])
+                except Exception as exc:
+                    raise DoorBuildError(f"{bead_name}: jamb trim failed: {exc}", report)
+                parts[bead_name] = _finish(trimmed, bead_name, width, height, report)
 
     return parts, report
