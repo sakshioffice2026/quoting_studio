@@ -32,6 +32,7 @@ from .template_question import TemplateQuestion, InputType
 from .template_response import TemplateResponse
 from .template_upload import TemplateUpload
 from .share_link import ShareLink, ShareResource
+from .visual_feedback import VisualFeedback, VisualFeedbackKind, VisualFeedbackStatus
 from .proposal import Proposal
 __all__ = [
     'Tenant',
@@ -66,5 +67,6 @@ __all__ = [
     'TemplateResponse',
     'TemplateUpload',
     'ShareLink', 'ShareResource',
+    'VisualFeedback', 'VisualFeedbackKind', 'VisualFeedbackStatus',
     'Proposal',
 ]

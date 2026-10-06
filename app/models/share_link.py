@@ -7,8 +7,11 @@ from ..extensions import db
 class ShareLinkType:
     QUOTATION       = 'QUOTATION'
     DESIGN_APPROVAL = 'DESIGN_APPROVAL'
+    # Customer-facing visual preview of a quotation (rendered photo, approve /
+    # comment only). resource_id = quotation id.
+    VISUALISER      = 'VISUALISER'
 
-    ALL = [QUOTATION, DESIGN_APPROVAL]
+    ALL = [QUOTATION, DESIGN_APPROVAL, VISUALISER]
 
 
 # Backward-compatible alias (models/__init__.py imports ShareResource)
@@ -40,7 +43,7 @@ class ShareLink(db.Model):
     last_opened_at  = db.Column(db.DateTime, nullable=True)
     open_count      = db.Column(db.Integer, nullable=False, default=0)
     responded_at    = db.Column(db.DateTime, nullable=True)
-    response_action = db.Column(db.String(30), nullable=True)   # ACCEPTED / REJECTED / APPROVED / CHANGES_REQUESTED
+    response_action = db.Column(db.String(30), nullable=True)   # ACCEPTED / REJECTED / APPROVED / CHANGES_REQUESTED (visualiser: APPROVED / CHANGES_REQUESTED)
 
     __table_args__ = (
         db.Index('ix_share_links_resource', 'resource_type', 'resource_id'),

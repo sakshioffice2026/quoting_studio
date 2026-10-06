@@ -1,5 +1,5 @@
 from ...extensions import db
-from ...repositories import lead_repo
+from ...repositories import lead_repo, customer_repo
 from ...models.lead import LeadStatus, FollowUpStatus
 from . import customer_service
 
@@ -19,7 +19,22 @@ def create_lead(tenant_id: int, customer_name: str, phone=None, email=None, **fi
     if not phone and not email:
         raise ValueError('At least one of phone or email is required')
 
-    duplicate = lead_repo.find_open_duplicate(tenant_id, phone, email)
+    # Only the SAME enquiry (same contact + product interest + project) is a
+    # duplicate. A returning customer with a new project becomes a normal lead
+    # attached to their existing customer record.
+    duplicate = lead_repo.find_open_duplicate(
+        tenant_id, phone, email,
+        product_interest=fields.get('product_interest'),
+        project_name=fields.get('project_name'),
+    )
+
+    customer_id = None
+    if duplicate:
+        customer_id = duplicate.customer_id
+    else:
+        existing_customer = customer_repo.find_by_phone_or_email(tenant_id, phone, email)
+        if existing_customer:
+            customer_id = existing_customer.id
 
     lead = lead_repo.create(
         tenant_id=tenant_id,
@@ -28,7 +43,7 @@ def create_lead(tenant_id: int, customer_name: str, phone=None, email=None, **fi
         email=email,
         status=LeadStatus.DUPLICATE if duplicate else LeadStatus.NEW,
         duplicate_of_lead_id=duplicate.id if duplicate else None,
-        customer_id=duplicate.customer_id if duplicate else None,
+        customer_id=customer_id,
         **fields,
     )
     db.session.commit()

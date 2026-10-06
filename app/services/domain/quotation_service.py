@@ -2,7 +2,10 @@ import json
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 
+from sqlalchemy import or_, desc
+
 from ...extensions import db
+from ...models.amc import AmcTier
 from ...models import Project, Window, DesignApproval
 from ...models.design_approval import DesignApprovalStatus
 from ...models.quotation import Quotation, QuotationStatus
@@ -60,10 +63,22 @@ def is_project_quoted(tenant_id: int, project_id: int) -> bool:
 #  Guard: design must be APPROVED before quoting
 # ------------------------------------------------------------------ #
 
-def _require_approved_design(tenant_id: int, project_id: int) -> DesignApproval | None:
-    """Design approval is optional. Returns the latest APPROVED design when one
-    exists, otherwise None so the quotation can still be generated."""
+def _require_approved_design(tenant_id: int, project_id: int) -> DesignApproval:
     from sqlalchemy import desc
+    approval = (DesignApproval.query
+                .filter_by(tenant_id=tenant_id, project_id=project_id,
+                            status=DesignApprovalStatus.APPROVED)
+                .order_by(desc(DesignApproval.revision_number))
+                .first())
+    if not approval:
+        raise ValueError(
+            'A customer-approved design (APPROVAL-APPROVED) is required before generating a quotation.'
+        )
+    return approval
+
+
+def _get_approved_design(tenant_id: int, project_id: int) -> DesignApproval | None:
+    """Latest customer-approved design for the project, or None (never raises)."""
     return (DesignApproval.query
             .filter_by(tenant_id=tenant_id, project_id=project_id,
                        status=DesignApprovalStatus.APPROVED)
@@ -247,11 +262,13 @@ def create_quotation(
     if not project:
         raise LookupError('Project not found')
 
-    approval = _require_approved_design(tenant_id, project_id)
+    # Design approval is optional: quote against the approved design when one
+    # exists, otherwise generate the quotation before design (no approval link).
+    approval = _get_approved_design(tenant_id, project_id)
 
+    # Windows are optional too: a project with no openings yet gets an empty
+    # draft that items can be added to afterwards.
     windows = project.windows.all()
-    if not windows:
-        raise ValueError('Project has no windows/openings to quote.')
 
     # Versioning
     prior        = get_latest_for_project(tenant_id, project_id)
@@ -606,3 +623,424 @@ def delete_quotation(tenant_id: int, quotation_id: int) -> str:
             pass
 
     return number
+
+
+# ================================================================== #
+#  MERGE DRAFT QUOTATIONS
+# ================================================================== #
+
+MERGE_MIN = 2
+MERGE_MAX = 10
+
+MERGE_ARCHIVE = 'archive'
+MERGE_DELETE  = 'delete'
+MERGE_KEEP    = 'keep'
+MERGE_SOURCE_ACTIONS = (MERGE_ARCHIVE, MERGE_DELETE, MERGE_KEEP)
+
+_TWO = Decimal('0.01')
+
+
+def _dec(value) -> Decimal:
+    return Decimal(str(value or 0))
+
+
+# ---------------- candidate search ---------------- #
+
+def _merge_candidate_dict(q: Quotation) -> dict:
+    items   = q.line_items
+    project = q.project
+    return {
+        'id':               q.id,
+        'quotation_number': q.quotation_number,
+        'status':           q.status,
+        'status_label':     q.status_label,
+        'customer_id':      project.customer_id if project else None,
+        'customer_name':    project.customer_name if project else '',
+        'project_name':     project.display_name if project else '',
+        'item_count':       len(items),
+        'labels':           [str(i.get('label') or 'Item') for i in items[:3]],
+        'grand_total':      float(q.grand_total) if q.grand_total else 0.0,
+        'updated_at':       q.updated_at.isoformat() if q.updated_at else None,
+    }
+
+
+def list_merge_candidates(tenant_id: int, term: str | None = None,
+                          customer_id: int | None = None,
+                          include_ids: list | None = None,
+                          exclude_ids: list | None = None,
+                          limit: int = 30) -> list[dict]:
+    query = (Quotation.query
+             .join(Project, Project.id == Quotation.project_id)
+             .filter(Quotation.tenant_id == tenant_id,
+                     Quotation.status.in_(list(QuotationStatus.EDITABLE))))
+
+    if customer_id:
+        from sqlalchemy import func
+        from ...models import Customer
+        cust = Customer.query.filter_by(id=customer_id, tenant_id=tenant_id).first()
+        if cust and (cust.name or '').strip():
+            query = query.filter(or_(
+                Project.customer_id == customer_id,
+                func.lower(func.trim(Project.customer_name)) == cust.name.strip().lower(),
+            ))
+        else:
+            query = query.filter(Project.customer_id == customer_id)
+    if exclude_ids:
+        query = query.filter(~Quotation.id.in_(exclude_ids))
+    if term and term.strip():
+        like = f'%{term.strip()}%'
+        query = query.filter(or_(
+            Quotation.quotation_number.ilike(like),
+            Project.customer_name.ilike(like),
+            Project.project_name.ilike(like),
+            Quotation.line_items_json.ilike(like),
+        ))
+
+    rows   = query.order_by(desc(Quotation.updated_at)).limit(limit).all()
+    result = [_merge_candidate_dict(r) for r in rows]
+
+    if include_ids:
+        present = {r['id'] for r in result}
+        missing = [i for i in include_ids if i not in present]
+        if missing:
+            extra = (Quotation.query
+                     .filter(Quotation.tenant_id == tenant_id,
+                             Quotation.id.in_(missing),
+                             Quotation.status.in_(list(QuotationStatus.EDITABLE)))
+                     .all())
+            result = [_merge_candidate_dict(r) for r in extra] + result
+
+    return result
+
+
+def suggest_merge_for(tenant_id: int, quotation_id: int) -> list[dict]:
+    q = get_quotation(tenant_id, quotation_id)
+    if not q or q.status not in QuotationStatus.EDITABLE:
+        return []
+    if not q.project or not q.project.customer_id:
+        return []
+    return list_merge_candidates(
+        tenant_id, customer_id=q.project.customer_id, exclude_ids=[q.id]
+    )
+
+
+# ---------------- validation ---------------- #
+
+def _merge_clean_ids(ids) -> list[int]:
+    try:
+        return list(dict.fromkeys(int(i) for i in (ids or [])))
+    except (TypeError, ValueError):
+        raise ValueError('Invalid quotation selection.')
+
+
+def _merge_load_sources(tenant_id: int, ids) -> list[Quotation]:
+    ids = _merge_clean_ids(ids)
+    if len(ids) < MERGE_MIN:
+        raise ValueError(f'Select at least {MERGE_MIN} draft quotations to merge.')
+    if len(ids) > MERGE_MAX:
+        raise ValueError(f'You can merge at most {MERGE_MAX} quotations at once.')
+
+    rows  = Quotation.query.filter(
+        Quotation.tenant_id == tenant_id, Quotation.id.in_(ids)
+    ).all()
+    by_id = {r.id: r for r in rows}
+    if any(i not in by_id for i in ids):
+        raise LookupError('One or more selected quotations were not found.')
+
+    ordered = [by_id[i] for i in ids]
+    for r in ordered:
+        if r.status not in QuotationStatus.EDITABLE:
+            raise ValueError(
+                f'{r.quotation_number} is "{r.status_label}" and can no longer be merged.'
+            )
+
+    # Same customer = same customer record OR same (case-insensitive) name,
+    # so duplicate customer records for one person do not block a merge.
+    customer_names = {
+        ' '.join((r.project.customer_name or '').split()).lower()
+        for r in ordered
+        if r.project is not None and r.project.customer_id
+    }
+    customer_names.discard('')
+    if len(customer_names) > 1:
+        raise ValueError('Selected quotations belong to different customers.')
+
+    return ordered
+
+
+def _merge_pick_primary(sources: list[Quotation], target_id: int | None) -> Quotation:
+    if target_id:
+        for s in sources:
+            if s.id == int(target_id):
+                return s
+        raise ValueError('Merge target must be one of the selected quotations.')
+
+    # Base the merged record on the quotation that owns real design data
+    # (approved design, or items built from project windows), so the merged
+    # quotation stays attached to the right project. Standalone "+ Create Quote"
+    # drafts are folded into it.
+    for s in sources:
+        if s.design_approval_id:
+            return s
+    for s in sources:
+        if any(i.get('window_id') is not None for i in s.line_items):
+            return s
+    for s in sources:
+        if s.project is not None and s.project.customer_id:
+            return s
+    return sources[0]
+
+
+# ---------------- combine logic ---------------- #
+
+def _merge_dedupe_key(item: dict):
+    if item.get('window_id') is not None:
+        return None
+    if item.get('style_id') is None and item.get('width_mm') is None:
+        return None
+    return (
+        item.get('style_id'),
+        str(item.get('label') or '').strip().lower(),
+        item.get('width_mm'),
+        item.get('height_mm'),
+        item.get('rate_per_sqft'),
+        item.get('material'),
+        item.get('design_json'),
+        item.get('notes') or '',
+    )
+
+
+def _merge_combine(sources: list[Quotation], primary: Quotation, dedupe: bool) -> dict:
+    warnings   = []
+    items      = []
+    index      = {}
+    duplicates = 0
+
+    for src in sources:
+        for raw in src.line_items:
+            item = dict(raw)
+            key  = _merge_dedupe_key(item) if dedupe else None
+
+            if key is not None and key in index:
+                target = items[index[key]]
+                target['qty'] = int(target.get('qty') or 1) + int(item.get('qty') or 1)
+                target['amount'] = float(
+                    (_dec(target.get('amount')) + _dec(item.get('amount'))).quantize(_TWO)
+                )
+                duplicates += 1
+                continue
+
+            item['line_id']     = len(items) + 1
+            item['merged_from'] = src.quotation_number
+            items.append(item)
+            if key is not None:
+                index[key] = len(items) - 1
+
+    if duplicates:
+        warnings.append(f'{duplicates} identical line item(s) were combined by quantity.')
+
+    installation = sum((_dec(s.installation_charge) for s in sources), Decimal('0'))
+    transport    = sum((_dec(s.transport_charge)    for s in sources), Decimal('0'))
+
+    other_charges = []
+    for s in sources:
+        other_charges.extend(s.other_charges)
+
+    amc_sources = [s for s in sources if s.amc_offered]
+    amc_offered = bool(amc_sources)
+    amc_price   = sum((_dec(s.amc_price) for s in amc_sources), Decimal('0'))
+    amc_tier    = None
+    if amc_sources:
+        def _rank(tier):
+            try:
+                return AmcTier.ALL.index(tier)
+            except ValueError:
+                return -1
+        amc_tier = max((s.amc_offer_tier for s in amc_sources), key=_rank)
+        if len(amc_sources) > 1:
+            warnings.append('AMC prices from multiple quotations were added together.')
+
+    sub_total  = Decimal('0')
+    disc_total = Decimal('0')
+    for s in sources:
+        sub = sum((_dec(i.get('amount')) for i in s.line_items), Decimal('0'))
+        sub_total  += sub
+        disc_total += sub * _dec(s.discount_pct) / 100
+    discount_pct = (
+        (disc_total / sub_total * 100).quantize(_TWO) if sub_total else Decimal('0.00')
+    )
+    if len({_dec(s.discount_pct) for s in sources}) > 1:
+        warnings.append('Different discounts were blended into one weighted-average discount.')
+
+    if len({_dec(s.tax_rate) for s in sources}) > 1:
+        warnings.append(f"Tax rates differ; using {primary.quotation_number}'s rate.")
+
+    payment_terms = next((s.payment_terms_template for s in sources if s.payment_terms_template), None)
+    warranty_text = next((s.warranty_terms_text    for s in sources if s.warranty_terms_text), None)
+
+    return {
+        'line_items':             items,
+        'duplicates_merged':      duplicates,
+        'installation_charge':    installation,
+        'transport_charge':       transport,
+        'other_charges':          other_charges,
+        'amc_offered':            amc_offered,
+        'amc_offer_tier':         amc_tier,
+        'amc_price':              amc_price,
+        'discount_pct':           discount_pct,
+        'tax_rate':               _dec(primary.tax_rate),
+        'payment_terms_template': payment_terms,
+        'warranty_months':        max((s.warranty_months or 0 for s in sources), default=12) or 12,
+        'warranty_terms_text':    warranty_text,
+        'validity_days':          max((s.validity_days or 0 for s in sources), default=30) or 30,
+        'warnings':               warnings,
+    }
+
+
+def _merge_totals(p: dict) -> dict:
+    subtotal    = sum((_dec(i.get('amount')) for i in p['line_items']), Decimal('0'))
+    disc_amount = (subtotal * p['discount_pct'] / 100).quantize(_TWO)
+    amc_amt     = p['amc_price'] if p['amc_offered'] else Decimal('0')
+    other_amt   = sum((_dec(c.get('amount')) for c in p['other_charges']), Decimal('0'))
+    taxable     = (subtotal - disc_amount + p['installation_charge']
+                   + p['transport_charge'] + amc_amt + other_amt)
+    tax_amount  = (taxable * p['tax_rate']).quantize(_TWO)
+    return {
+        'subtotal':        subtotal.quantize(_TWO),
+        'discount_amount': disc_amount,
+        'tax_amount':      tax_amount,
+        'grand_total':     (taxable + tax_amount).quantize(_TWO),
+        'other_amount':    other_amt.quantize(_TWO),
+    }
+
+
+# ---------------- preview (no DB writes) ---------------- #
+
+def preview_merge(tenant_id: int, ids, dedupe: bool = True,
+                  target_id: int | None = None) -> dict:
+    sources = _merge_load_sources(tenant_id, ids)
+    primary = _merge_pick_primary(sources, target_id)
+    payload = _merge_combine(sources, primary, dedupe)
+    totals  = _merge_totals(payload)
+
+    return {
+        'sources':             [{'id': s.id, 'number': s.quotation_number} for s in sources],
+        'primary_number':      primary.quotation_number,
+        'item_count':          len(payload['line_items']),
+        'duplicates_merged':   payload['duplicates_merged'],
+        'subtotal':            float(totals['subtotal']),
+        'discount_pct':        float(payload['discount_pct']),
+        'discount_amount':     float(totals['discount_amount']),
+        'installation_charge': float(payload['installation_charge']),
+        'transport_charge':    float(payload['transport_charge']),
+        'other_amount':        float(totals['other_amount']),
+        'amc_price':           float(payload['amc_price']) if payload['amc_offered'] else 0.0,
+        'tax_rate':            float(payload['tax_rate']),
+        'tax_amount':          float(totals['tax_amount']),
+        'grand_total':         float(totals['grand_total']),
+        'needs_discount_approval': payload['discount_pct'] > DISCOUNT_APPROVAL_THRESHOLD,
+        'warnings':            payload['warnings'],
+    }
+
+
+# ---------------- merge ---------------- #
+
+def _merge_next_version(project_id: int) -> int:
+    versions = [
+        v for (v,) in db.session.query(Quotation.quotation_version)
+        .filter(Quotation.project_id == project_id).all()
+    ]
+    return (max(versions) if versions else 0) + 1
+
+
+def _merge_apply(q: Quotation, p: dict, totals: dict, status: str) -> None:
+    q.line_items_json        = json.dumps(p['line_items'])
+    q.subtotal               = totals['subtotal']
+    q.discount_pct           = p['discount_pct']
+    q.discount_amount        = totals['discount_amount']
+    q.discount_approved_by   = None
+    q.discount_approved_at   = None
+    q.tax_rate               = p['tax_rate']
+    q.tax_amount             = totals['tax_amount']
+    q.grand_total            = totals['grand_total']
+    q.installation_charge    = p['installation_charge']
+    q.transport_charge       = p['transport_charge']
+    q.other_charges_json     = json.dumps(p['other_charges']) if p['other_charges'] else None
+    q.amc_offered            = p['amc_offered']
+    q.amc_offer_tier         = p['amc_offer_tier'] if p['amc_offered'] else None
+    q.amc_price              = p['amc_price'] if p['amc_offered'] else None
+    q.payment_terms_template = p['payment_terms_template']
+    q.warranty_months        = p['warranty_months']
+    q.warranty_terms_text    = p['warranty_terms_text']
+    q.validity_days          = p['validity_days']
+    q.validity_date          = date.today() + timedelta(days=p['validity_days'])
+    q.status                 = status
+    q.updated_at             = datetime.utcnow()
+
+
+def _merge_note(q: Quotation, text: str) -> None:
+    q.negotiation_notes = f'{q.negotiation_notes}\n{text}' if q.negotiation_notes else text
+
+
+def merge_quotations(tenant_id: int, user_id: int, ids,
+                     target_id: int | None = None,
+                     dedupe: bool = True,
+                     source_action: str = MERGE_ARCHIVE) -> Quotation:
+    if source_action not in MERGE_SOURCE_ACTIONS:
+        raise ValueError('Invalid source action.')
+
+    sources = _merge_load_sources(tenant_id, ids)
+    primary = _merge_pick_primary(sources, target_id)
+    payload = _merge_combine(sources, primary, dedupe)
+    totals  = _merge_totals(payload)
+
+    status = (
+        QuotationStatus.PENDING_DISCOUNT_APPROVAL
+        if payload['discount_pct'] > DISCOUNT_APPROVAL_THRESHOLD
+        else QuotationStatus.DRAFT
+    )
+
+    source_numbers = ', '.join(s.quotation_number for s in sources)
+
+    if target_id:
+        result = primary
+    else:
+        result = Quotation(
+            tenant_id          = tenant_id,
+            project_id         = primary.project_id,
+            design_approval_id = primary.design_approval_id,
+            quotation_number   = Quotation.generate_number(tenant_id),
+            quotation_version  = _merge_next_version(primary.project_id),
+            status             = QuotationStatus.DRAFT,
+            prepared_by        = user_id,
+            created_at         = datetime.utcnow(),
+            updated_at         = datetime.utcnow(),
+        )
+        db.session.add(result)
+
+    _merge_apply(result, payload, totals, status)
+    _merge_note(result, f'Merged from: {source_numbers}')
+    db.session.flush()
+
+    others = [s for s in sources if s.id != result.id]
+
+    if source_action == MERGE_ARCHIVE:
+        for s in others:
+            s.status = QuotationStatus.EXPIRED
+            _merge_note(s, f'Merged into {result.quotation_number}')
+            s.updated_at = datetime.utcnow()
+
+    db.session.commit()
+
+    if source_action == MERGE_DELETE:
+        for s in others:
+            try:
+                delete_quotation(tenant_id, s.id)
+            except (ValueError, LookupError):
+                fresh = get_quotation(tenant_id, s.id)
+                if fresh:
+                    fresh.status = QuotationStatus.EXPIRED
+                    _merge_note(fresh, f'Merged into {result.quotation_number}')
+                    db.session.commit()
+
+    return result

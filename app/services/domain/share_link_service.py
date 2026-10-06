@@ -101,3 +101,52 @@ def extend(tenant_id: int, link_id: int, days: int | None = None) -> ShareLink:
     link.expires_at = ShareLink.default_expiry(days)
     db.session.commit()
     return link
+
+
+# ------------------------------------------------------------------ #
+#  Visualiser (customer preview) links
+# ------------------------------------------------------------------ #
+
+def create_visualiser_link(
+    tenant_id: int,
+    quotation_id: int,
+    created_by: int | None = None,
+    ttl_days: int | None = None,
+    force_new: bool = False,
+) -> ShareLink:
+    """Link to the read-only rendered preview of a quotation.
+
+    The customer can only view, approve and comment on it. Reuses the active
+    link unless force_new is set (which revokes the previous one).
+    """
+    from ...models.quotation import Quotation, QuotationStatus
+
+    q = Quotation.query.filter_by(id=quotation_id, tenant_id=tenant_id).first()
+    if not q:
+        raise LookupError('Quotation not found')
+    if q.status in QuotationStatus.TERMINAL or q.status == QuotationStatus.EXPIRED:
+        raise ValueError('This quotation is closed; a preview link cannot be created.')
+    if not q.line_items:
+        raise ValueError('Add items to the quotation before sharing a preview.')
+
+    return get_or_create_link(
+        tenant_id=tenant_id,
+        resource_type=ShareLinkType.VISUALISER,
+        resource_id=quotation_id,
+        created_by=created_by,
+        ttl_days=ttl_days,
+        force_new=force_new,
+    )
+
+
+def get_active_visualiser_by_token(token: str):
+    """Active visualiser link for the token, or None for any other link type."""
+    link = get_active_by_token(token)
+    if not link or link.resource_type != ShareLinkType.VISUALISER:
+        return None
+    return link
+
+
+def get_visualiser_link(tenant_id: int, quotation_id: int):
+    """Latest visualiser link for a quotation (any state), for status display."""
+    return get_latest(tenant_id, ShareLinkType.VISUALISER, quotation_id)
