@@ -45,6 +45,40 @@ def _resolve_visual_url(quotation):
         return None
 
 
+def _build_context(quotation, project, tenant, symbol):
+    """Proposal context with each item's frame colour appended to its material."""
+    context = build_proposal_context(quotation, project, tenant, symbol)
+    try:
+        from ...models import Window
+
+        items = quotation.line_items
+        ids = set()
+        for item in items:
+            try:
+                if item.get("window_id") is not None:
+                    ids.add(int(item["window_id"]))
+            except (TypeError, ValueError):
+                pass
+        names = {}
+        if ids:
+            names = {w.id: getattr(w, "frame_colour_name", None) for w in Window.query.filter(
+                Window.id.in_(ids), Window.project_id == quotation.project_id).all()}
+
+        for item, row in zip(items, context["item_rows"]):
+            colour = item.get("colour")
+            if not colour:
+                try:
+                    colour = names.get(int(item.get("window_id")))
+                except (TypeError, ValueError):
+                    colour = None
+            if colour:
+                base = row.get("item_material")
+                row["item_material"] = f"{base} \u00b7 {colour}" if base and base != "-" else str(colour)
+    except Exception as exc:
+        logger.warning("Colour not added to master quote PDF: %s", exc)
+    return context
+
+
 def _qr_data_uri(url):
     """Optional QR code (needs the 'segno' package); silently skipped when absent."""
     try:
@@ -444,7 +478,7 @@ def generate_master_quote_pdf(
     if not currency_symbol:
         currency_symbol = tenant.currency_symbol if tenant is not None else "\u20b9"
     visual_url = visual_url or _resolve_visual_url(quotation)
-    context = build_proposal_context(quotation, project, tenant, currency_symbol)
+    context = _build_context(quotation, project, tenant, currency_symbol)
     copy_data = generate_proposal_copy(context["llm_input"], use_llm=use_llm)
 
     html = _TEMPLATE.render(
@@ -494,7 +528,7 @@ def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency
     except UnicodeEncodeError:
         symbol = "Rs. " if code == "INR" else f"{code} "
 
-    context = build_proposal_context(quotation, project, tenant, symbol)
+    context = _build_context(quotation, project, tenant, symbol)
     copy_data = generate_proposal_copy(context["llm_input"], use_llm=use_llm)
     s = context["scalars"]
     payment = _payment_section(quotation, symbol)

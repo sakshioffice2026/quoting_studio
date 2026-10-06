@@ -9,6 +9,7 @@
             color:#6B7280; cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; }
   .mq-tab[aria-selected="true"] { color:var(--navy); border-bottom-color:var(--copper); }
   .mq-panel[hidden] { display:none; }
+  .mq-off { display:none !important; }
   .mq-pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; background:#E5E7EB; color:#374151; }
   .mq-pill.ok { background:#E7F4EC; color:#1F6B3A; }
   .mq-pill.warn { background:#FDF3E1; color:#8A5A12; }
@@ -33,6 +34,12 @@
      else ('bad' if status in (QuotationStatus.LOST, QuotationStatus.EXPIRED)
      else ('warn' if status == QuotationStatus.NEGOTIATION else '')) %}
 {% set can_accept = status in (QuotationStatus.SENT, QuotationStatus.NEGOTIATION) and not quotation.is_expired %}
+{% set sec = sections if (sections is defined and sections) else {} %}
+{% set show_visual   = sec.get('visual', True) %}
+{% set show_stages   = sec.get('payment_stages', True) %}
+{% set show_terms    = sec.get('terms', True) %}
+{% set show_progress = sec.get('progress', True) %}
+{% set show_payment_tab = show_stages or (pay_status is defined and pay_status) %}
 
 <div class="pub-card">
   <div class="mq-head">
@@ -51,6 +58,7 @@
     </div>
   </div>
   <div class="pub-actions" style="margin-top:12px;">
+    {% if show_visual %}<a class="btn btn-primary" href="#visual" onclick="document.getElementById('tab-visual').click();">👁 See it on your house</a>{% endif %}
     <a class="btn btn-secondary" href="{{ url_for('public_share.quotation_pdf', token=link.token) }}">Download PDF</a>
   </div>
 </div>
@@ -65,14 +73,14 @@
 {% endif %}
 
 <div class="mq-tabs" role="tablist">
-  <button class="mq-tab" role="tab" id="tab-visual"   data-tab="visual"   aria-selected="true">Visual</button>
+  <button class="mq-tab{{ '' if show_visual else ' mq-off' }}" role="tab" id="tab-visual"   data-tab="visual"   aria-selected="false">Visual</button>
   <button class="mq-tab" role="tab" id="tab-quote"    data-tab="quote"    aria-selected="false">Quote</button>
-  <button class="mq-tab" role="tab" id="tab-payment"  data-tab="payment"  aria-selected="false">Payment</button>
-  <button class="mq-tab" role="tab" id="tab-progress" data-tab="progress" aria-selected="false">Progress</button>
+  <button class="mq-tab{{ '' if show_payment_tab else ' mq-off' }}" role="tab" id="tab-payment"  data-tab="payment"  aria-selected="false">Payment</button>
+  <button class="mq-tab{{ '' if show_progress else ' mq-off' }}" role="tab" id="tab-progress" data-tab="progress" aria-selected="false">Progress</button>
 </div>
 
 {# ============================ VISUAL ============================ #}
-<section class="mq-panel" id="panel-visual" role="tabpanel">
+<section class="mq-panel{{ '' if show_visual else ' mq-off' }}" id="panel-visual" role="tabpanel" hidden>
   {% include 'public_share/_scene_composite.html' %}
 
   {% for item in items %}
@@ -104,6 +112,9 @@
           <span>{% if item.width_mm and item.height_mm %}{{ item.width_mm }} × {{ item.height_mm }} mm{% else %}—{% endif %}</span></div>
         {% if item.material %}
         <div class="pub-row"><span class="pub-muted">Material</span><span>{{ item.material }}</span></div>
+        {% endif %}
+        {% if item.colour %}
+        <div class="pub-row"><span class="pub-muted">Colour</span><span>{{ item.colour }}</span></div>
         {% endif %}
         <div class="pub-row total"><span>Price</span>
           <span>{{ currency }}{{ '{:,.2f}'.format(item.amount|float) if item.amount is not none else '—' }}</span></div>
@@ -161,7 +172,8 @@
             <td><strong>{{ item.label or '—' }}</strong></td>
             <td class="pub-muted">
               {{ item.material or '' }}
-              {% if item.width_mm and item.height_mm %}{{ ' · ' if item.material else '' }}{{ item.width_mm }}×{{ item.height_mm }} mm{% endif %}
+              {% if item.colour %}{{ ' · ' if item.material else '' }}{{ item.colour }}{% endif %}
+              {% if item.width_mm and item.height_mm %}{{ ' · ' if (item.material or item.colour) else '' }}{{ item.width_mm }}×{{ item.height_mm }} mm{% endif %}
             </td>
             <td class="num">{{ item.qty or 1 }}</td>
             <td class="num">{{ currency }}{{ '{:,.2f}'.format(item.amount|float) if item.amount else '—' }}</td>
@@ -195,7 +207,7 @@
     </div>
   </div>
 
-  {% if quotation.payment_terms_template or quotation.warranty_months or quotation.warranty_terms_text %}
+  {% if show_terms and (quotation.payment_terms_template or quotation.warranty_months or quotation.warranty_terms_text) %}
   <div class="pub-card">
     <h2>Terms</h2>
     {% if quotation.payment_terms_template %}<p class="pub-muted"><strong>Payment terms:</strong> {{ quotation.payment_terms_template }}</p>{% endif %}
@@ -206,15 +218,73 @@
 
   {% if can_accept %}
   <div class="pub-card">
-    <h2>Sign &amp; accept</h2>
-    <p class="pub-muted">Type your full name to sign and accept this quotation.</p>
-    <form method="post" action="{{ url_for('public_share.quotation_accept', token=link.token) }}">
+    <h2>Approve once &amp; proceed</h2>
+    <p class="pub-muted">One approval covers your visuals, final design, quotation and payment schedule. No further approvals are needed — we start your final design and delivery right after.</p>
+
+    <ul style="list-style:none;margin:12px 0;padding:0;">
+      <li class="pub-row"><span>Visuals</span>
+        <span>{% if state.all_approved %}✔ Approved{% else %}{{ items|length }} item{{ '' if items|length == 1 else 's' }} — included{% endif %}</span></li>
+      {% if design and design.exists %}
+      <li class="pub-row"><span>Design{% if design.revision %} (Rev {{ design.revision }}){% endif %}</span>
+        <span>{% if design.approved %}✔ Approved{% else %}Included in this approval{% endif %}</span></li>
+      {% endif %}
+      <li class="pub-row"><span>Quotation total</span>
+        <span>{{ currency }}{{ '{:,.2f}'.format(quotation.grand_total|float) if quotation.grand_total is not none else '—' }}</span></li>
+      {% if show_stages and plan and plan.stages %}
+      <li class="pub-row total"><span>Pay now ({{ plan.advance_pct|round|int }}% advance)</span>
+        <span>{{ currency }}{{ '{:,.2f}'.format(plan.advance) }}</span></li>
+      {% endif %}
+    </ul>
+
+    {% if show_stages and plan and plan.stages %}
+    <div class="pub-table-wrap">
+      <table class="pub-table">
+        <thead><tr><th>Payment stage</th><th class="num">%</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+          {% for s in plan.stages %}
+          <tr>
+            <td><strong>{{ s.label }}</strong><div class="pub-muted">{{ s.trigger }}</div></td>
+            <td class="num">{{ s.percent|round(1) }}</td>
+            <td class="num">{{ currency }}{{ '{:,.2f}'.format(s.amount) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if state.open_count %}
+      <div class="pub-banner warn" style="margin-top:12px;">You have open change requests. Approval opens once we update your design.</div>
+    {% else %}
+    <form method="post" action="{{ url_for('public_share.master_accept', token=link.token) }}" style="margin-top:14px;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="pub-form-row">
         <label for="accepted_by_name">Full name</label>
         <input type="text" id="accepted_by_name" name="accepted_by_name" required maxlength="200" autocomplete="name">
       </div>
-      <button type="submit" class="btn btn-primary">Sign &amp; accept</button>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:14px;margin:10px 0;">
+        <input type="checkbox" name="agree_terms" value="1" required style="margin-top:3px;">
+        <span>I approve the visuals, final design, quotation and the payment schedule above, and authorise you to proceed with manufacturing and delivery.</span>
+      </label>
+      <button type="submit" class="btn btn-primary" style="width:100%;">Approve &amp; Sign</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="pub-card">
+    <h2>Need something changed?</h2>
+    <p class="pub-muted">Tell us what to change (size, colour, material, price or payment terms). We will update this same page — no calls needed.</p>
+    <form method="post" action="{{ url_for('public_share.visual_comment', token=link.token) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="line_id" value="all">
+      <div class="pub-form-row">
+        <label for="change_author">Your name</label>
+        <input type="text" id="change_author" name="author_name" maxlength="120" autocomplete="name">
+      </div>
+      <div class="pub-form-row">
+        <textarea name="comment" rows="3" maxlength="2000" required placeholder="What would you like changed?"></textarea>
+      </div>
+      <button type="submit" class="btn btn-secondary" style="width:100%;">✏️ Request Change</button>
     </form>
   </div>
 
@@ -241,8 +311,8 @@
 </section>
 
 {# ============================ PAYMENT ============================ #}
-<section class="mq-panel" id="panel-payment" role="tabpanel" hidden>
-  <div class="pub-card">
+<section class="mq-panel{{ '' if show_payment_tab else ' mq-off' }}" id="panel-payment" role="tabpanel" hidden>
+  <div class="pub-card{{ '' if show_stages else ' mq-off' }}">
     <h2>Payment schedule</h2>
     {% if payment is defined and payment and payment.milestones %}
       {% set pct = payment.percent_paid if payment.percent_paid is defined else 0 %}
@@ -270,17 +340,38 @@
           </tbody>
         </table>
       </div>
-    {% elif quotation.payment_terms_template %}
-      <p class="pub-muted"><strong>Payment terms:</strong> {{ quotation.payment_terms_template }}</p>
-      <p class="pub-muted">The detailed schedule appears here once the quotation is accepted.</p>
-    {% else %}
-      <p class="pub-muted">The payment schedule appears here once the quotation is accepted.</p>
+    {% elif plan and plan.stages %}
+      <p class="pub-muted">Payments follow your manufacturing progress. You approve once; each later invoice is raised automatically.</p>
+      <div class="pub-table-wrap" style="margin-top:10px;">
+        <table class="pub-table">
+          <thead><tr><th>Milestone</th><th class="num">%</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            {% for s in plan.stages %}
+            <tr>
+              <td><strong>{{ s.label }}</strong><div class="pub-muted">{{ s.trigger }}</div></td>
+              <td class="num">{{ s.percent|round(1) }}</td>
+              <td class="num">{{ currency }}{{ '{:,.2f}'.format(s.amount) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     {% endif %}
   </div>
+
+  {% if pay_status and pay_status.advance_due %}
+  <div class="pub-card">
+    <h2>Advance payment due</h2>
+    <div class="pub-row"><span class="pub-muted">Invoice</span><span>{{ pay_status.advance_number }}</span></div>
+    <div class="pub-row total"><span>Amount to pay</span>
+      <span>{{ currency }}{{ '{:,.2f}'.format(pay_status.advance_balance|float) }}</span></div>
+    <p class="pub-muted" style="margin-top:8px;">Manufacturing starts as soon as this advance is received. Please contact us for bank details and quote the invoice number as reference.</p>
+  </div>
+  {% endif %}
 </section>
 
 {# ============================ PROGRESS ============================ #}
-<section class="mq-panel" id="panel-progress" role="tabpanel" hidden>
+<section class="mq-panel{{ '' if show_progress else ' mq-off' }}" id="panel-progress" role="tabpanel" hidden>
   <div class="pub-card">
     <h2>Project progress</h2>
     {% if progress is defined and progress and progress.stages %}
@@ -311,9 +402,12 @@
     if (history.replaceState) { history.replaceState(null, '', '#' + name); }
   }
   tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.tab); }); });
+  var visible = [];
+  tabs.forEach(function (t) { if (!t.classList.contains('mq-off')) { visible.push(t.dataset.tab); } });
   var h = (location.hash || '').replace('#', '');
-  if (h.indexOf('item-') === 0) { show('visual'); }
-  else if (['visual', 'quote', 'payment', 'progress'].indexOf(h) > -1) { show(h); }
+  if (h.indexOf('item-') === 0 && visible.indexOf('visual') > -1) { show('visual'); }
+  else if (visible.indexOf(h) > -1) { show(h); }
+  else if (visible.length) { show(visible[0]); }
 })();
 </script>
 {% endblock %}

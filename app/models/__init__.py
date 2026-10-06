@@ -35,6 +35,7 @@ from .template_upload import TemplateUpload
 from .share_link import ShareLink, ShareResource
 from .visual_feedback import VisualFeedback, VisualFeedbackKind, VisualFeedbackStatus
 from .proposal import Proposal
+from .master_quote_config import MasterQuoteConfig
 __all__ = [
     'Tenant',
     'User', 'UserRole',
@@ -71,4 +72,5 @@ __all__ = [
     'ShareLink', 'ShareResource',
     'VisualFeedback', 'VisualFeedbackKind', 'VisualFeedbackStatus',
     'Proposal',
+    'MasterQuoteConfig',
 ]

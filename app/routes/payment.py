@@ -194,6 +194,16 @@ def record_receipt(payment_id):
             done = sum(1 for r in rows if r.is_released)
             flash(f'Receipt recorded. {done} of {len(rows)} units released to manufacturing.',
                   'success' if done else 'warning')
+        elif p.status == PaymentStatus.RECEIVED and p.payment_stage == PaymentStage.ADVANCE:
+            from ..services.domain import manufacturing_service
+            jobs = manufacturing_service.list_for_order(current_user.tenant_id, p.order_id)
+            if jobs:
+                flash(f'Advance {p.payment_number} received. Quotation locked and '
+                      f'{len(jobs)} manufacturing job(s) queued: Cutting → Machining → '
+                      f'Assembly → Glazing → Quality Check.', 'success')
+            else:
+                flash(f'Advance {p.payment_number} received, but no manufacturing jobs '
+                      f'could be queued. Check the order has openings.', 'warning')
         elif p.status == PaymentStatus.RECEIVED:
             flash(f'Payment {p.payment_number} fully received.', 'success')
         else:

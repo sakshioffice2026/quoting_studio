@@ -25,7 +25,6 @@
           {% if quotation.is_editable %}<a href="{{ url_for('quotation.index', merge=quotation.id) }}" class="btn btn-secondary btn-sm">⇄ Merge with other drafts</a>{% endif %}
           {% if quotation.status in (QuotationStatus.SENT, QuotationStatus.NEGOTIATION, QuotationStatus.ACCEPTED) %}{{ share_link_button('master_quote', quotation.id) }}{{ share_link_script() }}{% endif %}
           <a href="{{ url_for('proposal.download_master_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Master Quote (PDF)</a>
-          <a href="{{ url_for('proposal.download_docx', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Proposal (DOCX)</a>
           <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>
       </div>
@@ -46,7 +45,32 @@
       <div class="info-card"><div class="info-card-label">Valid Until</div><div class="info-card-value" style="{{ 'color:var(--error);' if quotation.is_expired }}">{{ quotation.validity_date.strftime('%d %b %Y') if quotation.validity_date else '—' }}</div></div>
     </div>
 
-    {% if quotation.status not in (QuotationStatus.LOST, QuotationStatus.EXPIRED, QuotationStatus.ACCEPTED) %}{{ visual_feedback_panel(quotation) }}{{ visual_feedback_script() }}{% endif %}
+    {% if master_sections is defined and master_sections %}
+    <div class="ui-card">
+      <div class="ui-card-title">Master Quotation — what the customer sees</div>
+      <p class="muted" style="margin:6px 0 12px;">
+        Tick the sections to show in the customer link and PDF.
+        {% if master_has_override %}<strong>Custom for this quotation.</strong>{% else %}Using the default template.{% endif %}
+      </p>
+      <form method="post" action="{{ url_for('quotation.save_master_sections', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
+          {% for s in master_sections %}
+          <label style="display:flex;gap:8px;align-items:flex-start;padding:10px;border:1px solid #E5E7EB;border-radius:8px;{{ 'opacity:.75;' if s.required }}">
+            <input type="checkbox" name="sections" value="{{ s.key }}" {{ 'checked' if s.enabled }} {{ 'disabled' if s.required }} style="margin-top:3px;">
+            {% if s.required %}<input type="hidden" name="sections" value="{{ s.key }}">{% endif %}
+            <span><strong>{{ s.label }}</strong>{% if s.required %} <span class="muted">(always shown)</span>{% endif %}<br><span class="muted" style="font-size:12px;">{{ s.help }}</span></span>
+          </label>
+          {% endfor %}
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+          <button type="submit" name="action" value="quotation" class="btn btn-primary btn-sm">Save for this quotation</button>
+          <button type="submit" name="action" value="default" class="btn btn-secondary btn-sm">Save as default for all</button>
+          {% if master_has_override %}<button type="submit" name="action" value="reset" class="btn btn-secondary btn-sm">Use default template</button>{% endif %}
+        </div>
+      </form>
+    </div>
+    {% endif %}
 
     {% if quotation.installation_charge or quotation.transport_charge or quotation.amc_offered or quotation.other_charges or quotation.warranty_months %}
     <div class="ui-card"><div class="ui-card-title">Installation, Transport, AMC &amp; Warranty</div><div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Item</th><th>Details</th><th style="text-align:right;">Amount</th></tr></thead><tbody>

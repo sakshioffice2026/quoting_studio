@@ -18,6 +18,8 @@ from ..services.domain import (
     quotation_service,
     design_approval_service,
     visual_feedback_service,
+    master_acceptance_service,
+    master_sections_service,
 )
 from ..services.domain.pdf_quotation import generate_quotation_pdf
 from ..services.domain import design_render_service
@@ -118,6 +120,10 @@ def view(token):
             currency=(tenant.currency_symbol if tenant else _CURRENCY),
             payment=_master_payment(q),
             progress=_master_progress(q),
+            sections=master_sections_service.get_sections(link.tenant_id, q.id),
+            plan=master_acceptance_service.payment_plan(q),
+            design=master_acceptance_service.design_status(link.tenant_id, q),
+            pay_status=master_acceptance_service.payment_status(link.tenant_id, q),
             QuotationStatus=QuotationStatus,
         )
 
@@ -188,6 +194,18 @@ def _master_progress(q):
 
     jobs_done = sum(1 for j in jobs if j.status == JobStatus.COMPLETED)
     mfg_note = f'{jobs_done} of {len(jobs)} items ready' if jobs else None
+    if jobs:
+        from ..models.manufacturing_job import ProductionStage
+        stage_counts = {}
+        for j in jobs:
+            if j.status != JobStatus.COMPLETED:
+                label = ProductionStage.LABELS.get(j.production_stage, j.production_stage)
+                stage_counts[label] = stage_counts.get(label, 0) + 1
+        if stage_counts:
+            mfg_note += ' · In production: ' + ', '.join(
+                f'{n} at {label}' for label, n in stage_counts.items())
+    elif advance_done:
+        mfg_note = 'Advance received — production is being scheduled'
 
     stages = [
         {'label': 'Quotation accepted', 'done': True,
@@ -282,9 +300,12 @@ def _visual_items(q, state) -> list[dict]:
                 pass
 
     rendered = set()
+    colours = {}
     if window_ids:
-        owned = {w.id for w in Window.query.filter(
-            Window.id.in_(window_ids), Window.project_id == q.project_id).all()}
+        owned_rows = Window.query.filter(
+            Window.id.in_(window_ids), Window.project_id == q.project_id).all()
+        owned = {w.id for w in owned_rows}
+        colours = {w.id: getattr(w, 'frame_colour_name', None) for w in owned_rows}
         for vis in Visualisation.query.filter(Visualisation.window_id.in_(owned)).all():
             if vis.rendered_path:
                 rendered.add(vis.window_id)
@@ -302,6 +323,7 @@ def _visual_items(q, state) -> list[dict]:
             'line_id':       lid,
             'label':         item.get('label') or 'Item',
             'material':      item.get('material'),
+            'colour':        item.get('colour') or (colours.get(int(wid)) if wid is not None and str(wid).isdigit() else None),
             'width_mm':      item.get('width_mm'),
             'height_mm':     item.get('height_mm'),
             'qty':           item.get('qty') or 1,
@@ -451,6 +473,45 @@ def quotation_accept(token):
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
     return redirect(url_for('public_share.view', token=token))
+
+
+@public_share_bp.route('/<token>/master/accept', methods=['POST'])
+def master_accept(token):
+    link, err = _resolve(token)
+    if err:
+        return err
+    if link.resource_type != ShareLinkType.MASTER_QUOTE:
+        abort(404)
+    if _throttled(token):
+        flash('Too many actions in a short time. Please try again in a few minutes.', 'error')
+        return redirect(url_for('public_share.view', token=token))
+
+    name = (request.form.get('accepted_by_name') or '').strip()
+    if not name:
+        flash('Please enter your full name to approve and proceed.', 'error')
+        return redirect(url_for('public_share.view', token=token) + '#quote')
+    if not request.form.get('agree_terms'):
+        flash('Please tick the box to confirm the design, quotation and payment schedule.', 'error')
+        return redirect(url_for('public_share.view', token=token) + '#quote')
+
+    try:
+        master_acceptance_service.accept_everything(
+            tenant_id=link.tenant_id,
+            quotation_id=link.resource_id,
+            accepted_by_name=name,
+            share_link=link,
+        )
+        share_link_service.record_response(link, 'ACCEPTED')
+        flash('Thank you! Everything is approved. Your advance invoice is ready '
+              'and we will start on your final design and delivery.', 'success')
+    except (ValueError, LookupError) as exc:
+        db.session.rollback()
+        flash(str(exc), 'error')
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception('master_accept error link=%s: %s', link.id, exc)
+        flash('Something went wrong. Please try again or contact us.', 'error')
+    return redirect(url_for('public_share.view', token=token) + '#payment')
 
 
 @public_share_bp.route('/<token>/quotation/reject', methods=['POST'])

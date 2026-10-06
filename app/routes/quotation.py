@@ -8,7 +8,7 @@ from flask_login import login_required, current_user
 from ..models import Project
 from ..models.quotation import QuotationStatus
 from ..models.amc import AmcTier
-from ..services.domain import quotation_service
+from ..services.domain import quotation_service, master_sections_service
 from ..services.domain.pdf_quotation import generate_quotation_pdf
 
 quotation_bp = Blueprint('quotation', __name__)
@@ -48,7 +48,35 @@ def detail(quotation_id):
         'quotation_detail.html',
         quotation=q,
         QuotationStatus=QuotationStatus,
+        master_sections=master_sections_service.form_rows(current_user.tenant_id, q.id),
+        master_has_override=master_sections_service.has_override(current_user.tenant_id, q.id),
     )
+
+
+# ------------------------------------------------------------------ #
+#  POST /quotations/<id>/master-sections  — choose Master Quotation sections
+# ------------------------------------------------------------------ #
+@quotation_bp.route('/quotations/<int:quotation_id>/master-sections', methods=['POST'])
+@login_required
+def save_master_sections(quotation_id):
+    selected = request.form.getlist('sections')
+    action = request.form.get('action') or 'quotation'
+    try:
+        if action == 'reset':
+            master_sections_service.reset_quotation(current_user.tenant_id, quotation_id)
+            flash('Master Quotation now follows the default template.', 'success')
+        elif action == 'default':
+            master_sections_service.save_tenant_default(
+                current_user.tenant_id, selected, current_user.id)
+            master_sections_service.reset_quotation(current_user.tenant_id, quotation_id)
+            flash('Saved as the default template for all quotations.', 'success')
+        else:
+            master_sections_service.save_for_quotation(
+                current_user.tenant_id, quotation_id, selected, current_user.id)
+            flash('Master Quotation sections saved for this quotation.', 'success')
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('quotation.detail', quotation_id=quotation_id))
 
 
 # ------------------------------------------------------------------ #
