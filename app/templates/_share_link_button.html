@@ -9,14 +9,16 @@
 #}
 
 {% macro share_link_button(resource_type, resource_id) -%}
-  {%- set slug = 'design-approval' if resource_type in ('design_approval', 'design-approval', 'DESIGN_APPROVAL') else 'quotation' -%}
+  {%- set slug = 'design-approval' if resource_type in ('design_approval', 'design-approval', 'DESIGN_APPROVAL')
+                 else ('master-quote' if resource_type in ('master_quote', 'master-quote', 'MASTER_QUOTE') else 'quotation') -%}
+  {%- set label = 'Copy Master Quote link' if slug == 'master-quote' else 'Copy customer link' -%}
   <span class="share-link-wrap" style="display:inline-flex;align-items:center;gap:8px;">
     <button type="button"
             class="btn btn-secondary btn-sm js-share-link"
             data-create="{{ url_for('share_link.generate', slug=slug, resource_id=resource_id) }}"
             data-status="{{ url_for('share_link.status', slug=slug, resource_id=resource_id) }}"
             data-csrf="{{ csrf_token() }}">
-      Copy customer link
+      {{ label }}
     </button>
     <small class="js-share-link-msg" style="color:#64748b;"></small>
   </span>

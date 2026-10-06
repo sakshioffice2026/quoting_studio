@@ -104,7 +104,124 @@ def view(token):
             QuotationStatus=QuotationStatus,
         )
 
+    if link.resource_type == ShareLinkType.MASTER_QUOTE:
+        q = quotation_service.get_quotation(link.tenant_id, link.resource_id)
+        if not q or q.status in (QuotationStatus.DRAFT, QuotationStatus.PENDING_DISCOUNT_APPROVAL):
+            abort(404)
+        share_link_service.record_open(link)
+        state = visual_feedback_service.summary(link.tenant_id, q.id)
+        return render_template(
+            'public_share/master_quote.html',
+            link=link, quotation=q, project=q.project, tenant=tenant,
+            items=_visual_items(q, state), state=state,
+            can_respond=q.status not in _VISUAL_CLOSED,
+            currency=_CURRENCY,
+            payment=_master_payment(q),
+            progress=_master_progress(q),
+            QuotationStatus=QuotationStatus,
+        )
+
     abort(404)
+
+
+# ------------------------------------------------------------------ #
+#  Master Quotation helpers (payment + progress, customer-safe)
+# ------------------------------------------------------------------ #
+def _master_payment(q):
+    order = q.active_order
+    if not order:
+        return None
+    from ..models.payment import Payment, PaymentStatus, PaymentStage
+
+    rows = Payment.query.filter_by(order_id=order.id).order_by(Payment.id).all()
+    if not rows:
+        return None
+
+    total = float(order.total_amount or q.grand_total or 0)
+    paid = 0.0
+    milestones = []
+    for p in rows:
+        received = float(p.amount_received or 0)
+        invoice = float(p.invoice_amount or 0)
+        paid += received
+        if p.status in PaymentStatus.TERMINAL:
+            status = 'PAID'
+        elif p.status == PaymentStatus.PARTIAL:
+            status = 'PARTIAL'
+        elif p.status == PaymentStatus.OVERDUE:
+            status = 'OVERDUE'
+        else:
+            status = 'PENDING'
+        milestones.append({
+            'label':   PaymentStage.LABELS.get(p.payment_stage, p.payment_stage),
+            'percent': round(invoice / total * 100) if total else None,
+            'amount':  invoice,
+            'status':  status,
+            'due_on':  p.due_date.strftime('%d %b %Y') if p.due_date else None,
+        })
+
+    return {
+        'milestones':   milestones,
+        'paid':         paid,
+        'total':        total,
+        'percent_paid': min(100, round(paid / total * 100)) if total else 0,
+    }
+
+
+def _master_progress(q):
+    order = q.active_order
+    if not order:
+        return None
+
+    from ..models.payment import Payment, PaymentStage, PaymentStatus
+    from ..models.manufacturing_job import ManufacturingJob, JobStatus
+    from ..models.delivery import Delivery, DeliveryStatus
+    from ..models.installation import Installation, InstallationStatus
+
+    advance = (Payment.query.filter_by(order_id=order.id, payment_stage=PaymentStage.ADVANCE)
+               .first())
+    advance_done = bool(advance and advance.status in PaymentStatus.TERMINAL)
+
+    jobs = ManufacturingJob.query.filter_by(order_id=order.id).all()
+    deliveries = Delivery.query.filter_by(order_id=order.id).all()
+    installs = Installation.query.filter_by(order_id=order.id).all()
+
+    jobs_done = sum(1 for j in jobs if j.status == JobStatus.COMPLETED)
+    mfg_note = f'{jobs_done} of {len(jobs)} items ready' if jobs else None
+
+    stages = [
+        {'label': 'Quotation accepted', 'done': True,
+         'date': q.accepted_at.strftime('%d %b %Y') if q.accepted_at else None},
+        {'label': 'Order confirmed', 'done': order.is_confirmed,
+         'date': order.order_confirmed_at.strftime('%d %b %Y') if order.order_confirmed_at else None},
+        {'label': 'Advance payment received', 'done': advance_done,
+         'date': advance.received_at.strftime('%d %b %Y') if advance_done and advance.received_at else None},
+        {'label': 'Manufacturing', 'done': bool(jobs) and jobs_done == len(jobs), 'note': mfg_note},
+        {'label': 'Delivery',
+         'done': bool(deliveries) and all(d.status == DeliveryStatus.DELIVERED for d in deliveries)},
+        {'label': 'Installation',
+         'done': bool(installs) and all(i.status == InstallationStatus.COMPLETED for i in installs)},
+    ]
+
+    if order.promised_delivery_date:
+        stages[4]['note'] = 'Promised by ' + order.promised_delivery_date.strftime('%d %b %Y')
+
+    active_set = False
+    result = []
+    for s in stages:
+        if s['done']:
+            status = 'DONE'
+        elif not active_set:
+            status, active_set = 'ACTIVE', True
+        else:
+            status = 'PENDING'
+        result.append({
+            'label':  s['label'],
+            'status': status,
+            'note':   s.get('note'),
+            'date':   s.get('date'),
+        })
+    return {'stages': result}
 
 
 # ------------------------------------------------------------------ #
@@ -135,7 +252,7 @@ def _visual_link(token: str):
     link, err = _resolve(token)
     if err:
         return None, err
-    if link.resource_type != ShareLinkType.VISUALISER:
+    if link.resource_type not in (ShareLinkType.VISUALISER, ShareLinkType.MASTER_QUOTE):
         abort(404)
     return link, None
 
@@ -307,7 +424,7 @@ def quotation_accept(token):
     link, err = _resolve(token)
     if err:
         return err
-    if link.resource_type != ShareLinkType.QUOTATION:
+    if link.resource_type not in (ShareLinkType.QUOTATION, ShareLinkType.MASTER_QUOTE):
         abort(404)
 
     name = (request.form.get('accepted_by_name') or '').strip()
@@ -341,7 +458,7 @@ def quotation_reject(token):
     link, err = _resolve(token)
     if err:
         return err
-    if link.resource_type != ShareLinkType.QUOTATION:
+    if link.resource_type not in (ShareLinkType.QUOTATION, ShareLinkType.MASTER_QUOTE):
         abort(404)
 
     reason = (request.form.get('reason') or '').strip()
@@ -365,12 +482,29 @@ def quotation_pdf(token):
     link, err = _resolve(token)
     if err:
         return err
-    if link.resource_type != ShareLinkType.QUOTATION:
+    if link.resource_type not in (ShareLinkType.QUOTATION, ShareLinkType.MASTER_QUOTE):
         abort(404)
 
     q = quotation_service.get_quotation(link.tenant_id, link.resource_id)
     if not q or q.status in (QuotationStatus.DRAFT, QuotationStatus.PENDING_DISCOUNT_APPROVAL):
         abort(404)
+
+    if link.resource_type == ShareLinkType.MASTER_QUOTE:
+        try:
+            from ..services.domain.master_quote_pdf import generate_master_quote_pdf
+            tenant = Tenant.query.get(link.tenant_id)
+            pdf_bytes = generate_master_quote_pdf(
+                quotation=q, project=q.project, tenant=tenant)
+            return send_file(
+                io.BytesIO(pdf_bytes),
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=f'master-quotation-{q.quotation_number}.pdf',
+            )
+        except Exception as exc:
+            current_app.logger.exception('public master_quote_pdf error link=%s: %s', link.id, exc)
+            flash('The PDF could not be generated. Please try again shortly.', 'error')
+            return redirect(url_for('public_share.view', token=token))
 
     if q.pdf_path:
         full_path = os.path.join(current_app.config['UPLOAD_FOLDER'], q.pdf_path)

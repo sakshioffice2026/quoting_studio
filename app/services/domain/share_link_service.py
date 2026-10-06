@@ -140,9 +140,11 @@ def create_visualiser_link(
 
 
 def get_active_visualiser_by_token(token: str):
-    """Active visualiser link for the token, or None for any other link type."""
+    """Active visualiser or master-quote link for the token, or None for any other type."""
     link = get_active_by_token(token)
-    if not link or link.resource_type != ShareLinkType.VISUALISER:
+    if not link or link.resource_type not in (
+        ShareLinkType.VISUALISER, ShareLinkType.MASTER_QUOTE
+    ):
         return None
     return link
 
@@ -150,3 +152,47 @@ def get_active_visualiser_by_token(token: str):
 def get_visualiser_link(tenant_id: int, quotation_id: int):
     """Latest visualiser link for a quotation (any state), for status display."""
     return get_latest(tenant_id, ShareLinkType.VISUALISER, quotation_id)
+
+
+# ------------------------------------------------------------------ #
+#  Master Quotation (combined customer page) links
+# ------------------------------------------------------------------ #
+
+def create_master_link(
+    tenant_id: int,
+    quotation_id: int,
+    created_by: int | None = None,
+    ttl_days: int | None = None,
+    force_new: bool = False,
+) -> ShareLink:
+    """One customer link carrying visual preview, quotation, payment and
+    progress for a quotation version.
+
+    Stays valid after acceptance so the customer can follow payment and
+    progress; only a draft or lost quotation cannot be shared.
+    """
+    from ...models.quotation import Quotation, QuotationStatus
+
+    q = Quotation.query.filter_by(id=quotation_id, tenant_id=tenant_id).first()
+    if not q:
+        raise LookupError('Quotation not found')
+    if q.status in (QuotationStatus.DRAFT, QuotationStatus.PENDING_DISCOUNT_APPROVAL):
+        raise ValueError('Send the quotation to the customer first, then copy the link.')
+    if q.status in (QuotationStatus.LOST, QuotationStatus.EXPIRED):
+        raise ValueError('This quotation is closed; a link cannot be created.')
+    if not q.line_items:
+        raise ValueError('Add items to the quotation before sharing it.')
+
+    return get_or_create_link(
+        tenant_id=tenant_id,
+        resource_type=ShareLinkType.MASTER_QUOTE,
+        resource_id=quotation_id,
+        created_by=created_by,
+        ttl_days=ttl_days,
+        force_new=force_new,
+    )
+
+
+def get_master_link(tenant_id: int, quotation_id: int):
+    """Latest master link for a quotation (any state), for status display."""
+    return get_latest(tenant_id, ShareLinkType.MASTER_QUOTE, quotation_id)

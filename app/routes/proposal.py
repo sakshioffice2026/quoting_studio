@@ -109,6 +109,34 @@ def download_pdf(quotation_id):
 
 
 # ------------------------------------------------------------------ #
+#  GET /quotations/<id>/master-quote.pdf
+# ------------------------------------------------------------------ #
+@proposal_bp.route("/quotations/<int:quotation_id>/master-quote.pdf")
+@login_required
+def download_master_pdf(quotation_id):
+    q = _load_quotation(quotation_id)
+    try:
+        from ..services.domain.master_quote_pdf import generate_master_quote_pdf
+
+        pdf_bytes = generate_master_quote_pdf(
+            quotation=q,
+            project=q.project,
+            tenant=current_user.tenant,
+            use_llm=_use_llm(),
+        )
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype=PDF_MIME,
+            as_attachment=True,
+            download_name=f"master-quotation-{q.quotation_number}.pdf",
+        )
+    except Exception as exc:
+        current_app.logger.exception("master quote pdf error quotation=%s: %s", quotation_id, exc)
+        flash("Master Quotation (PDF) generation failed. Please try again.", "error")
+        return redirect(url_for("quotation.detail", quotation_id=quotation_id))
+
+
+# ------------------------------------------------------------------ #
 #  GET /quotations/<id>/proposals/<proposal_id>/docx|pdf  (history)
 # ------------------------------------------------------------------ #
 def _send_saved(quotation_id: int, proposal_id: int, kind: str):

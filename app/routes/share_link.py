@@ -20,6 +20,7 @@ _TYPE_SLUGS = {
     'quotation':       ShareLinkType.QUOTATION,
     'design-approval': ShareLinkType.DESIGN_APPROVAL,
     'visualiser':      ShareLinkType.VISUALISER,
+    'master-quote':    ShareLinkType.MASTER_QUOTE,
 }
 
 _QUOTE_SHAREABLE = {
@@ -65,8 +66,8 @@ def _payload(link):
     }
 
 
-def _visualiser_messages(quotation_id: int, url: str) -> dict:
-    """Ready-to-send WhatsApp and email text for a visualiser link."""
+def _visualiser_messages(quotation_id: int, url: str, master: bool = False) -> dict:
+    """Ready-to-send WhatsApp and email text for a visualiser or master link."""
     tenant_id = current_user.tenant_id
     q = quotation_service.get_quotation(tenant_id, quotation_id)
     project = q.project if q else None
@@ -80,16 +81,27 @@ def _visualiser_messages(quotation_id: int, url: str) -> dict:
     company = tenant.name if tenant else ''
 
     greeting = f'Hi {name},' if name else 'Hello,'
+    if master:
+        intro = (
+            'Here is your quotation with a preview of your windows and doors. '
+            'You can review each item, request changes, sign to accept, '
+            'and later follow payment and progress on the same page:'
+        )
+        subject = f'Your quotation{" - " + company if company else ""}'
+    else:
+        intro = (
+            'Here is the preview of your windows and doors on your home photo. '
+            'You can look at each item, tap "Looks good" or "Request a change", '
+            'or approve everything in one go:'
+        )
+        subject = f'Your window and door preview{" - " + company if company else ""}'
     body = (
         f'{greeting}\n\n'
-        'Here is the preview of your windows and doors on your home photo. '
-        'You can look at each item, tap "Looks good" or "Request a change", '
-        'or approve everything in one go:\n\n'
+        f'{intro}\n\n'
         f'{url}\n\n'
         'This link is private to you and expires automatically.\n\n'
         f'Thank you,\n{company}'.rstrip()
     )
-    subject = f'Your window and door preview{" - " + company if company else ""}'
 
     whatsapp = f'https://wa.me/{phone}?text={_urlquote(body)}' if phone \
         else f'https://wa.me/?text={_urlquote(body)}'
@@ -139,6 +151,23 @@ def generate(slug, resource_id):
             return jsonify({'ok': False, 'error': str(exc)}), 400
         payload = _payload(link)
         payload.update(_visualiser_messages(resource_id, payload['url']))
+        return jsonify(payload)
+
+    if resource_type == ShareLinkType.MASTER_QUOTE:
+        try:
+            link = share_link_service.create_master_link(
+                tenant_id=current_user.tenant_id,
+                quotation_id=resource_id,
+                created_by=current_user.id,
+                ttl_days=ttl_days,
+                force_new=force_new,
+            )
+        except LookupError as exc:
+            return jsonify({'ok': False, 'error': str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({'ok': False, 'error': str(exc)}), 400
+        payload = _payload(link)
+        payload.update(_visualiser_messages(resource_id, payload['url'], master=True))
         return jsonify(payload)
 
     ok, error = _check_resource(resource_type, resource_id)

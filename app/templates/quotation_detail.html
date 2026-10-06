@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% from '_ui_macros.html' import pill, stage_tracker %}
 {% from '_visual_feedback_panel.html' import visual_feedback_panel, visual_feedback_script %}
+{% from '_share_link_button.html' import share_link_button, share_link_script %}
 {% block title %}{{ quotation.quotation_number }} — FenestraOne{% endblock %}
 
 {% block body %}
@@ -29,6 +30,11 @@
           {% if quotation.is_editable %}
           <a href="{{ url_for('quotation.index', merge=quotation.id) }}" class="btn btn-secondary btn-sm">⇄ Merge with other drafts</a>
           {% endif %}
+          {% if quotation.status in (QuotationStatus.SENT, QuotationStatus.NEGOTIATION, QuotationStatus.ACCEPTED) %}
+          {{ share_link_button('master_quote', quotation.id) }}
+          {{ share_link_script() }}
+          {% endif %}
+          <a href="{{ url_for('proposal.download_master_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Master Quote (PDF)</a>
           <a href="{{ url_for('proposal.download_docx', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Proposal (DOCX)</a>
           <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>
