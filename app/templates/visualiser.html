@@ -90,7 +90,8 @@ input[type=range] { width:100%;accent-color:var(--copper); }
 #houseCanvas.draw-mode { cursor:crosshair; }
 #houseCanvas.moving-window { cursor:move; }
 
-#btnDraw.active, #btnFree.active { background:var(--copper);color:#fff;border-color:var(--copper); }
+#btnDraw.active, #btnFree.active, #btnLife.active { background:var(--copper);color:#fff;border-color:var(--copper); }
+.life-row { display:flex;align-items:center;gap:7px;font-size:11px;color:#566;margin-bottom:10px;cursor:pointer; }
 
 .zoom-controls {
   position:absolute;bottom:14px;right:14px;display:flex;align-items:center;
@@ -157,10 +158,14 @@ input[type=range] { width:100%;accent-color:var(--copper); }
               title="Off: simple move + resize. On: drag each corner freely for angled walls">◇ Perspective</button>
       <button class="btn btn-ghost btn-sm" onclick="straightenCorners()"
               title="Square the placement from the current top-left / bottom-right">⊞ Straighten</button>
+      <button class="btn btn-ghost btn-sm" id="btnLife" onclick="toggleLife()"
+              title="One click: realistic glass, depth, sill, lighting and grain matched to your photo">✨ Bring to Life</button>
       <button class="btn btn-ghost btn-sm" onclick="toggleBeforeAfter()" id="btnBA">Before / After</button>
       <a href="{{ url_for('editor.edit', project_id=project.id, window_id=window.id) }}"
          class="btn btn-ghost btn-sm">← Editor</a>
-      <button class="btn btn-primary btn-sm" onclick="saveVisual()">Save PNG</button>
+      <button class="btn btn-ghost btn-sm" onclick="saveVisual()">Save PNG</button>
+      <button class="btn btn-primary btn-sm" id="btnSaveVersion" onclick="saveVersion()"
+              title="Save this render as a new version and refresh the quotation price">Save version</button>
     </div>
   </div>
 
@@ -267,6 +272,21 @@ input[type=range] { width:100%;accent-color:var(--copper); }
 
         <div class="divider"></div>
 
+        <div class="sec-head">Bring to Life</div>
+        <button class="btn btn-secondary" style="width:100%;justify-content:center;margin-bottom:10px;"
+                onclick="toggleLife()">✨ Bring to Life</button>
+        <div class="slider-field">
+          <label>Realism <span id="lifeVal">70%</span></label>
+          <input type="range" min="0" max="100" value="70" id="lifeSlider"
+                 oninput="onLifeInput(this.value)">
+        </div>
+        <label class="life-row">
+          <input type="checkbox" id="lifeHideOld" checked onchange="onLifeHideOld(this.checked)">
+          Hide existing window behind the new one
+        </label>
+
+        <div class="divider"></div>
+
         <div class="sec-head">Corner positions (px)</div>
         <div class="corner-grid">
           <div class="corner-cell" id="cTL">TL —</div>
@@ -330,7 +350,7 @@ let lastCorner    = 'br';   // last touched corner — arrow keys nudge it
 let showOverlay   = true;   // before/after
 let openings      = [];     // [{id, design_window_id, corners, opacity, brightness}]
 let activeIdx     = 0;      // which opening the handles/sliders control
-const MAX_OPENINGS = 24;
+const MAX_OPENINGS = 12;
 const RENDER_URLS  = {{ (render_urls | tojson) if render_urls else '{}' }};
 const _texCache    = {};    // window_id -> canvas | 'loading' | 'none'
 const DESIGNS      = {{ (designs | tojson) if designs else '{}' }};
@@ -572,6 +592,9 @@ function onWheel(evt) {
   evt.preventDefault();
   const pivot = rawXY(evt);
   const factor = evt.deltaY < 0 ? 1.1 : 0.9;
+  _wheelUntil = performance.now() + 220;
+  clearTimeout(_wheelT);
+  _wheelT = setTimeout(render, 240);
   setZoom(zoom * factor, pivot);
 }
 
@@ -674,9 +697,23 @@ function _openingTex(op) {
   return null;
 }
 
-function _paintAll(ctx, cw, ch, mapPt) {
+function _paintAll(ctx, cw, ch, mapPt, full) {
   if (!showOverlay) return;
-  openings.forEach(op => {
+
+  const lifeActive = _life.on && (full || !_isInteracting()) && !_glFailed;
+  let stats = null;
+  const walls = [];
+  if (lifeActive) {
+    stats = _sceneStats();
+    openings.forEach((op, i) => {
+      const c = op.corners;
+      walls[i] = c
+        ? _ringColor(ctx, { tl: mapPt(c.tl), tr: mapPt(c.tr), bl: mapPt(c.bl), br: mapPt(c.br) })
+        : null;
+    });
+  }
+
+  openings.forEach((op, i) => {
     const tex = _openingTex(op);
     if (!tex || !op.corners) return;
     const c = op.corners;
@@ -684,12 +721,445 @@ function _paintAll(ctx, cw, ch, mapPt) {
     const savedTex = srcTexCanvas, savedOp = _curOp, savedBr = _curBr;
     srcTexCanvas = tex; _curOp = op.opacity; _curBr = op.brightness;
     try {
-      _drawWindowShadow(ctx, s);
-      _applyHomographyWarp(ctx, cw, ch, s);
+      if (lifeActive) {
+        _paintLifeOpening(ctx, cw, ch, s, op, tex, stats, walls[i]);
+      } else {
+        _drawWindowShadow(ctx, s);
+        _applyHomographyWarp(ctx, cw, ch, s);
+      }
     } finally {
       srcTexCanvas = savedTex; _curOp = savedOp; _curBr = savedBr;
     }
   });
+}
+
+/* ================================================================
+   BRING TO LIFE — one-click photo-real upgrade of the overlay:
+   dark interior behind the glass, sky reflection and glints, frame
+   shading and rebate shadows, reveal depth, stone sill, hiding of the
+   old window, colour grading and grain matched to the photo.
+   Heavy work runs only when idle (never while dragging) and is cached.
+   ================================================================ */
+const _life = {
+  on: false, t: 0, glare: -1, intensity: 0.7, hideOld: true,
+  raf: null, cache: new Map(), scratch: null,
+  stats: null, statsFor: null, statsSeq: 0,
+};
+let _wheelUntil = 0, _wheelT = null, _texSeq = 0;
+
+function _isInteracting() {
+  return !!(dragging || resizing || movingWindow || isPanning || drawing ||
+            pointers.size > 0 || performance.now() < _wheelUntil);
+}
+
+function _clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+function _ss(a, b, x) { const t = _clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+function _texId(tex) { if (!tex.__qid) tex.__qid = ++_texSeq; return tex.__qid; }
+function _dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+function _unit(a, b) { const d = _dist(a, b) || 1; return { x: (b.x - a.x) / d, y: (b.y - a.y) / d }; }
+function _centroid(s) {
+  return { x: (s.tl.x + s.tr.x + s.bl.x + s.br.x) / 4, y: (s.tl.y + s.tr.y + s.bl.y + s.br.y) / 4 };
+}
+function _scaleQuad(s, c, k) {
+  const f = p => ({ x: c.x + (p.x - c.x) * k, y: c.y + (p.y - c.y) * k });
+  return { tl: f(s.tl), tr: f(s.tr), bl: f(s.bl), br: f(s.br) };
+}
+function _quadPath(ctx, s) {
+  ctx.beginPath();
+  ctx.moveTo(s.tl.x, s.tl.y); ctx.lineTo(s.tr.x, s.tr.y);
+  ctx.lineTo(s.br.x, s.br.y); ctx.lineTo(s.bl.x, s.bl.y);
+  ctx.closePath();
+}
+function _rgb(a) { return 'rgb(' + a.map(v => Math.round(v)).join(',') + ')'; }
+
+function toggleLife() {
+  _life.on = !_life.on;
+  const btn = document.getElementById('btnLife');
+  if (btn) btn.classList.toggle('active', _life.on);
+  if (_life.raf) { cancelAnimationFrame(_life.raf); _life.raf = null; }
+  _life.glare = -1;
+  if (!_life.on) { _life.t = 0; render(); return; }
+
+  _life.t = 0;
+  const start = performance.now(), dur = 1100;
+  const step = (now) => {
+    const p = Math.min(1, (now - start) / dur);
+    const e = _ss(0, 0.6, p);
+    _life.t = e;
+    _life.glare = p < 1 ? (0.1 + p * 0.9) * 1.3 - 0.15 : -1;
+    render();
+    if (p < 1 && _life.on) _life.raf = requestAnimationFrame(step);
+    else { _life.t = _life.on ? 1 : 0; _life.glare = -1; _life.raf = null; render(); }
+  };
+  _life.raf = requestAnimationFrame(step);
+}
+
+function onLifeInput(v) {
+  document.getElementById('lifeVal').textContent = v + '%';
+  _life.intensity = v / 100;
+  render();
+}
+
+function onLifeHideOld(on) {
+  _life.hideOld = !!on;
+  render();
+}
+
+/* photo statistics: average colour, sky colour, light direction, grain */
+function _sceneStats() {
+  const src = bgImage || 'painted';
+  if (_life.stats && _life.statsFor === src) return _life.stats;
+
+  const W = 240;
+  const H = Math.max(60, Math.round(W * houseCanvas.height / houseCanvas.width));
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  drawBackground(g, W, H);
+  const d = g.getImageData(0, 0, W, H).data;
+
+  let r = 0, gg = 0, b = 0, n = 0;
+  let sr = 0, sg = 0, sb = 0, sn = 0;
+  let lL = 0, cL = 0, lR = 0, cR = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      const R = d[i], G = d[i + 1], B = d[i + 2];
+      const l = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+      r += R; gg += G; b += B; n++;
+      if (y < H * 0.12) { sr += R; sg += G; sb += B; sn++; }
+      if (x < W / 3) { lL += l; cL++; }
+      else if (x > 2 * W / 3) { lR += l; cR++; }
+    }
+  }
+  r /= n; gg /= n; b /= n;
+  const lumMean = (0.2126 * r + 0.7152 * gg + 0.0722 * b) || 1;
+  const gainOf = v => 1 + (_clamp(v / lumMean, 0.85, 1.15) - 1) * 0.6;
+  const sky = sn ? [sr / sn, sg / sn, sb / sn] : [150, 185, 215];
+
+  let grain = 1.2;
+  if (bgImage) {
+    try {
+      const P = 192;
+      const pw = Math.min(P, bgImage.width), ph = Math.min(P, bgImage.height);
+      const pc = document.createElement('canvas');
+      pc.width = pw; pc.height = ph;
+      const pg = pc.getContext('2d', { willReadFrequently: true });
+      pg.drawImage(bgImage, Math.max(0, (bgImage.width - pw) / 2), Math.max(0, (bgImage.height - ph) / 2),
+                   pw, ph, 0, 0, pw, ph);
+      const pd = pg.getImageData(0, 0, pw, ph).data;
+      const diffs = [];
+      for (let y = 0; y < ph; y += 2) {
+        for (let x = 0; x < pw - 1; x += 2) {
+          const i = (y * pw + x) * 4, j = i + 4;
+          const a = 0.2126 * pd[i] + 0.7152 * pd[i + 1] + 0.0722 * pd[i + 2];
+          const e = 0.2126 * pd[j] + 0.7152 * pd[j + 1] + 0.0722 * pd[j + 2];
+          diffs.push(Math.abs(a - e));
+        }
+      }
+      diffs.sort((p, q) => p - q);
+      grain = _clamp((diffs[Math.floor(diffs.length / 2)] || 1) * 0.9, 0.6, 5);
+    } catch (e) { grain = 1.2; }
+  }
+
+  _life.stats = {
+    gain: [gainOf(r), gainOf(gg), gainOf(b)],
+    sky,
+    lightX: (cL && cR && lL / cL >= lR / cR) ? -1 : 1,   // -1 = light from the left
+    grain,
+    id: ++_life.statsSeq,
+  };
+  _life.statsFor = src;
+  return _life.stats;
+}
+
+/* wall colour just outside the window, sampled before anything is painted */
+function _ringColor(ctx, s) {
+  const cw = ctx.canvas.width, ch = ctx.canvas.height;
+  const xs = [s.tl.x, s.tr.x, s.bl.x, s.br.x], ys = [s.tl.y, s.tr.y, s.bl.y, s.br.y];
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const m = 8 + (x1 - x0) * 0.08, P = 6;
+  const spots = [
+    { x: x0 - m,          y: (y0 + y1) / 2, k: 'l' },
+    { x: x1 + m,          y: (y0 + y1) / 2, k: 'r' },
+    { x: (x0 + x1) / 2,   y: y0 - m,        k: 't' },
+    { x: (x0 + x1) / 2,   y: y1 + m,        k: 'b' },
+  ];
+  const got = {};
+  spots.forEach(p => {
+    const px = Math.round(_clamp(p.x - P / 2, 0, Math.max(0, cw - P)));
+    const py = Math.round(_clamp(p.y - P / 2, 0, Math.max(0, ch - P)));
+    try {
+      const d = ctx.getImageData(px, py, P, P).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+      if (n) got[p.k] = [r / n, g / n, b / n];
+    } catch (e) { /* tainted or out of range */ }
+  });
+  const list = Object.keys(got).map(k => got[k]);
+  if (!list.length) return { top: [190, 180, 160], bot: [190, 180, 160], mid: [190, 180, 160] };
+  const med = ch2 => { const a = list.map(c => c[ch2]).sort((p, q) => p - q); return a[Math.floor(a.length / 2)]; };
+  const mid = [med(0), med(1), med(2)];
+  return { top: got.t || mid, bot: got.b || mid, mid };
+}
+
+/* dark room behind the glass, plus a wall patch that hides the old window */
+function _lifeBase(ctx, s, wall, alpha) {
+  if (alpha <= 0.001) return;
+  const c = _centroid(s);
+  const ys = [s.tl.y, s.tr.y, s.bl.y, s.br.y];
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (_life.hideOld && wall) {
+    const g = ctx.createLinearGradient(0, y0, 0, y1);
+    g.addColorStop(0, _rgb(wall.top));
+    g.addColorStop(1, _rgb(wall.bot));
+    ctx.fillStyle = g;
+    _quadPath(ctx, _scaleQuad(s, c, 1.07));
+    ctx.fill();
+  }
+  const room = ctx.createLinearGradient(0, y0, 0, y1);
+  room.addColorStop(0, '#2d2924');
+  room.addColorStop(0.55, '#1d1a16');
+  room.addColorStop(1, '#0f0d0b');
+  ctx.fillStyle = room;
+  _quadPath(ctx, s);
+  ctx.fill();
+  ctx.restore();
+}
+
+/* warp the window and process the pixels: glass vs frame, grade, grain */
+function _lifeLayer(cw, ch, s, op, tex, st) {
+  const f = v => Math.round(v);
+  const key = [
+    cw, ch, _texId(tex), op.opacity.toFixed(2), op.brightness.toFixed(2),
+    f(s.tl.x), f(s.tl.y), f(s.tr.x), f(s.tr.y), f(s.bl.x), f(s.bl.y), f(s.br.x), f(s.br.y),
+    _life.intensity.toFixed(2), document.getElementById('reflectSlider').value, st.id,
+  ].join('|');
+  const hit = _life.cache.get(key);
+  if (hit) return hit;
+
+  const xs = [s.tl.x, s.tr.x, s.bl.x, s.br.x], ys = [s.tl.y, s.tr.y, s.bl.y, s.br.y];
+  const bx = Math.max(0, Math.floor(Math.min(...xs)) - 2);
+  const by = Math.max(0, Math.floor(Math.min(...ys)) - 2);
+  const bw = Math.min(cw, Math.ceil(Math.max(...xs)) + 2) - bx;
+  const bh = Math.min(ch, Math.ceil(Math.max(...ys)) + 2) - by;
+  if (bw < 2 || bh < 2 || bw * bh > 8000000) return null;
+
+  let sc = _life.scratch;
+  if (!sc || sc.width !== cw || sc.height !== ch) {
+    sc = document.createElement('canvas');
+    sc.width = cw; sc.height = ch;
+    _life.scratch = sc;
+  }
+  const sctx = sc.getContext('2d', { willReadFrequently: true });
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  sctx.clearRect(0, 0, cw, ch);
+  _applyHomographyWarp(sctx, cw, ch, s);
+  if (_glFailed) return null;
+
+  const img = sctx.getImageData(bx, by, bw, bh);
+  const d = img.data, n = bw * bh;
+  const opacity = Math.max(0.1, op.opacity);
+  const inten = _life.intensity;
+  const refl = +document.getElementById('reflectSlider').value / 100;
+  const lx = st.lightX;
+
+  const glass = new Uint8Array(n);
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const aN = d[i + 3] / 255 / opacity;
+    if (aN > 0.04 && aN < 0.9) glass[p] = 1;
+  }
+
+  let seed = 1234567;
+  const rnd = () => {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    return ((seed >>> 0) % 10000) / 10000;
+  };
+
+  for (let y = 0; y < bh; y++) {
+    for (let x = 0; x < bw; x++) {
+      const p = y * bw + x, i = p * 4;
+      if (d[i + 3] < 4) continue;
+      let r = d[i], g = d[i + 1], b = d[i + 2];
+      const u = x / bw, v = y / bh;
+
+      if (glass[p]) {
+        const sm = (0.34 - 0.20 * v) * inten * (0.35 + refl);
+        r += (st.sky[0] - r) * sm;
+        g += (st.sky[1] - g) * sm;
+        b += (st.sky[2] - b) * sm;
+        const diag = u * 0.8 + (1 - v) * 0.6;
+        const streak = (_ss(0.30, 0.42, diag) * (1 - _ss(0.46, 0.62, diag)) * 0.16 +
+                        _ss(0.66, 0.72, diag) * (1 - _ss(0.74, 0.86, diag)) * 0.08) * refl * inten * 255;
+        r += streak; g += streak; b += streak;
+        d[i + 3] = Math.min(255, d[i + 3] + 30 * inten);
+      } else {
+        let k = 1 + (0.5 - u) * (-lx) * 0.12 * inten + (0.5 - v) * 0.06 * inten;
+        const ax = x - lx * 2, ay = y + 2;
+        if (ax >= 0 && ax < bw && ay < bh && glass[ay * bw + ax]) {
+          k *= 1 - 0.14 * inten;                     // face turned away from the light
+        } else {
+          const qx = x + lx * 2, qy = y - 2;
+          if (qx >= 0 && qx < bw && qy >= 0 && glass[qy * bw + qx]) k *= 1 + 0.08 * inten;
+        }
+        r *= k; g *= k; b *= k;
+      }
+
+      r *= st.gain[0]; g *= st.gain[1]; b *= st.gain[2];
+      const nz = (rnd() - 0.5) * 2 * st.grain * inten;
+      d[i]     = _clamp(r + nz, 0, 255);
+      d[i + 1] = _clamp(g + nz, 0, 255);
+      d[i + 2] = _clamp(b + nz, 0, 255);
+    }
+  }
+
+  const out = document.createElement('canvas');
+  out.width = bw; out.height = bh;
+  const octx = out.getContext('2d');
+  octx.putImageData(img, 0, 0);
+
+  let finalCanvas = out;
+  if (inten > 0.05 && 'filter' in octx) {                 // match the photo's softness
+    const soft = document.createElement('canvas');
+    soft.width = bw; soft.height = bh;
+    const sg = soft.getContext('2d');
+    sg.filter = 'blur(' + (0.45 * inten).toFixed(2) + 'px)';
+    sg.drawImage(out, 0, 0);
+    finalCanvas = soft;
+  }
+
+  const res = { canvas: finalCanvas, x: bx, y: by };
+  if (_life.cache.size > 30) _life.cache.clear();
+  _life.cache.set(key, res);
+  return res;
+}
+
+function _edgeShade(ctx, p0, p1, c, depth, a) {
+  const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+  let nx = c.x - mx, ny = c.y - my;
+  const L = Math.hypot(nx, ny) || 1;
+  nx /= L; ny /= L;
+  const g = ctx.createLinearGradient(mx, my, mx + nx * depth, my + ny * depth);
+  g.addColorStop(0, 'rgba(0,0,0,' + a.toFixed(3) + ')');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+  ctx.lineTo(p1.x + nx * depth, p1.y + ny * depth);
+  ctx.lineTo(p0.x + nx * depth, p0.y + ny * depth);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/* depth: soft shadow of the wall opening falling inside the frame edge */
+function _lifeReveal(ctx, s, st, alpha) {
+  if (alpha <= 0.001) return;
+  const c = _centroid(s);
+  const w = _dist(s.tl, s.tr);
+  const depth = Math.max(3, w * 0.06) * (0.6 + 0.8 * _life.intensity);
+  const k = alpha * _life.intensity;
+  ctx.save();
+  _quadPath(ctx, s);
+  ctx.clip();
+  _edgeShade(ctx, s.tl, s.tr, c, depth, 0.50 * k);
+  if (st.lightX < 0) {
+    _edgeShade(ctx, s.tl, s.bl, c, depth, 0.40 * k);
+    _edgeShade(ctx, s.tr, s.br, c, depth * 0.5, 0.14 * k);
+  } else {
+    _edgeShade(ctx, s.tr, s.br, c, depth, 0.40 * k);
+    _edgeShade(ctx, s.tl, s.bl, c, depth * 0.5, 0.14 * k);
+  }
+  _edgeShade(ctx, s.bl, s.br, c, depth * 0.4, 0.10 * k);
+  ctx.restore();
+}
+
+/* stone sill under the window with a shadow cast onto the wall */
+function _lifeSill(ctx, s, wall, alpha) {
+  if (alpha <= 0.001) return;
+  const w = _dist(s.bl, s.br);
+  if (w < 24) return;
+  const dirX = _unit(s.bl, s.br);
+  const down = _unit({ x: (s.tl.x + s.tr.x) / 2, y: (s.tl.y + s.tr.y) / 2 },
+                     { x: (s.bl.x + s.br.x) / 2, y: (s.bl.y + s.br.y) / 2 });
+  const th = w * 0.045 * (0.6 + 0.6 * _life.intensity);
+  const over = w * 0.035;
+  const A = { x: s.bl.x - dirX.x * over, y: s.bl.y - dirX.y * over };
+  const B = { x: s.br.x + dirX.x * over, y: s.br.y + dirX.y * over };
+  const C = { x: B.x + down.x * th, y: B.y + down.y * th };
+  const D = { x: A.x + down.x * th, y: A.y + down.y * th };
+  const m = wall ? wall.mid : [200, 195, 185];
+  const stone = [Math.min(255, m[0] * 1.10 + 12), Math.min(255, m[1] * 1.10 + 12), Math.min(255, m[2] * 1.10 + 12)];
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // shadow thrown on the wall under the sill
+  const sh = th * 1.9;
+  const E = { x: C.x + down.x * sh, y: C.y + down.y * sh };
+  const F = { x: D.x + down.x * sh, y: D.y + down.y * sh };
+  const sg = ctx.createLinearGradient(D.x, D.y, F.x, F.y);
+  sg.addColorStop(0, 'rgba(0,0,0,' + (0.34 * _life.intensity).toFixed(3) + ')');
+  sg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath();
+  ctx.moveTo(D.x, D.y); ctx.lineTo(C.x, C.y); ctx.lineTo(E.x, E.y); ctx.lineTo(F.x, F.y);
+  ctx.closePath(); ctx.fill();
+
+  // sill slab
+  const fg = ctx.createLinearGradient(A.x, A.y, D.x, D.y);
+  fg.addColorStop(0, _rgb(stone));
+  fg.addColorStop(1, _rgb([stone[0] * 0.78, stone[1] * 0.78, stone[2] * 0.78]));
+  ctx.fillStyle = fg;
+  ctx.beginPath();
+  ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.lineTo(C.x, C.y); ctx.lineTo(D.x, D.y);
+  ctx.closePath(); ctx.fill();
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+  ctx.restore();
+}
+
+/* the "wow" moment: a glint sweeping across the glass */
+function _lifeGlare(ctx, s, p) {
+  ctx.save();
+  _quadPath(ctx, s);
+  ctx.clip();
+  const g = ctx.createLinearGradient(s.tl.x, s.tl.y, s.br.x, s.br.y);
+  const a = _clamp(p - 0.15, 0, 1), b = _clamp(p, 0, 1), c = _clamp(p + 0.15, 0, 1);
+  g.addColorStop(0, 'rgba(255,255,255,0)');
+  g.addColorStop(a, 'rgba(255,255,255,0)');
+  g.addColorStop(b, 'rgba(255,255,255,0.38)');
+  g.addColorStop(c, 'rgba(255,255,255,0)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(Math.min(s.tl.x, s.bl.x) - 4, Math.min(s.tl.y, s.tr.y) - 4,
+               Math.max(s.tr.x, s.br.x) - Math.min(s.tl.x, s.bl.x) + 8,
+               Math.max(s.bl.y, s.br.y) - Math.min(s.tl.y, s.tr.y) + 8);
+  ctx.restore();
+}
+
+function _paintLifeOpening(ctx, cw, ch, s, op, tex, stats, wall) {
+  const t = _life.t;
+  _lifeBase(ctx, s, wall, t);
+  _drawWindowShadow(ctx, s);
+
+  const layer = _lifeLayer(cw, ch, s, op, tex, stats);
+  if (!layer) {                                   // could not process: plain overlay
+    _applyHomographyWarp(ctx, cw, ch, s);
+    return;
+  }
+  if (t < 0.999) _applyHomographyWarp(ctx, cw, ch, s);
+  ctx.save();
+  ctx.globalAlpha = t;
+  ctx.drawImage(layer.canvas, layer.x, layer.y);
+  ctx.restore();
+
+  _lifeReveal(ctx, s, stats, t);
+  _lifeSill(ctx, s, wall, t);
+  if (_life.glare >= 0) _lifeGlare(ctx, s, _life.glare);
 }
 
 function renderOpeningList() {
@@ -2076,7 +2546,7 @@ function buildExportCanvas() {
   drawBackground(ectx, ex.width, ex.height);
 
   _paintAll(ectx, ex.width, ex.height,
-            p => ({ x: p.x * exportScale, y: p.y * exportScale }));
+            p => ({ x: p.x * exportScale, y: p.y * exportScale }), true);
   return ex;
 }
 
@@ -2086,6 +2556,53 @@ function saveVisual() {
   link.download = `window-${QS_WINDOW_ID}-visualisation.png`;
   link.href = ex.toDataURL('image/png');
   link.click();
+}
+
+/* ================================================================
+   SAVE VERSION — stores the clean composite as a new render version,
+   then asks the server to re-price any open quotation that uses this
+   unit. Prices are always computed server-side; nothing price-related
+   is sent from the browser.
+   ================================================================ */
+async function saveVersion() {
+  const btn = document.getElementById('btnSaveVersion');
+  if (btn) btn.disabled = true;
+  setStatus('stVisSave', '○ Saving version…', false);
+  try {
+    await saveVisState();
+
+    const ex = buildExportCanvas();
+    const res = await fetch(`${API}/windows/${QS_WINDOW_ID}/render`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken':CSRF_TOKEN},
+      body: JSON.stringify({ image: ex.toDataURL('image/png') }),
+    });
+    if (!res.ok) throw new Error('render HTTP ' + res.status);
+    const saved = await res.json();
+
+    const sync = await fetch(`${API}/windows/${QS_WINDOW_ID}/sync-quotations`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken':CSRF_TOKEN},
+      body: '{}',
+    });
+    if (!sync.ok) throw new Error('sync HTTP ' + sync.status);
+    const priced = await sync.json();
+
+    const quotes = priced.quotations || [];
+    const reset  = quotes.reduce((n, q) => n + (q.approvals_reset || 0), 0);
+    let msg = '● Version ' + saved.version + ' saved';
+    if (quotes.length) {
+      msg += ' · total ' + Number(quotes[0].grand_total).toLocaleString();
+      if (reset) msg += ' · ' + reset + ' approval(s) reset';
+    }
+    setStatus('stVisSave', msg, true);
+    if (saved.render_url) { RENDER_URLS[QS_WINDOW_ID] = saved.render_url; }
+  } catch (e) {
+    console.error('[QS] saveVersion failed:', e);
+    setStatus('stVisSave', '✕ Version not saved', false);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 /* ================================================================

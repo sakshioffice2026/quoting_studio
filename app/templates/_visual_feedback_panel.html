@@ -1,0 +1,192 @@
+{#
+  Visualiser preview link + customer feedback inbox.
+  Usage (quotation or project page):
+    {% from '_visual_feedback_panel.html' import visual_feedback_panel %}
+    {{ visual_feedback_panel(quotation) }}
+  Endpoints (blueprint "share_link"): generate (slug=visualiser), status,
+  feedback_inbox, feedback_resolve.
+#}
+
+{% macro visual_feedback_panel(quotation) -%}
+{%- if quotation and quotation.line_items -%}
+<div class="ui-card js-vf" id="vf-panel-{{ quotation.id }}"
+     data-generate="{{ url_for('share_link.generate', slug='visualiser', resource_id=quotation.id) }}"
+     data-inbox="{{ url_for('share_link.feedback_inbox', quotation_id=quotation.id) }}"
+     data-resolve="{{ url_for('share_link.feedback_resolve', feedback_id=0) }}"
+     data-csrf="{{ csrf_token() }}"
+     style="margin-top:16px;">
+  <div class="ui-card-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span>Customer preview &amp; feedback</span>
+    <span class="js-vf-badge" style="font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:#e2e8f0;color:#334155;">…</span>
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0;">
+    <button type="button" class="btn btn-secondary btn-sm js-vf-copy">Copy preview link</button>
+    <a class="btn btn-secondary btn-sm js-vf-wa" href="#" target="_blank" rel="noopener" style="display:none;">Send on WhatsApp</a>
+    <a class="btn btn-secondary btn-sm js-vf-mail" href="#" style="display:none;">Send by email</a>
+    <button type="button" class="btn btn-ghost btn-sm js-vf-new" title="Revoke the current link and create a new one">New link</button>
+    <small class="js-vf-msg" style="color:#64748b;"></small>
+  </div>
+
+  <div class="js-vf-ready" style="display:none;margin:8px 0;padding:8px 10px;border-radius:8px;background:#ecfdf5;color:#065f46;font-size:13px;">
+    Every item is approved and no comments are open.
+  </div>
+
+  <div class="js-vf-items" style="display:flex;flex-direction:column;gap:6px;margin:8px 0;"></div>
+
+  <div style="font-weight:600;font-size:13px;margin:12px 0 6px;">Open comments</div>
+  <div class="js-vf-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+</div>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro visual_feedback_script() -%}
+<script>
+(function () {
+  if (window.__vfInit) return;
+  window.__vfInit = true;
+
+  function el(tag, css, text) {
+    var n = document.createElement(tag);
+    if (css) n.style.cssText = css;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function post(url, csrf, body) {
+    return fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+      body: JSON.stringify(body || {})
+    }).then(function (r) {
+      return r.json().then(function (d) { return d; });
+    });
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy') ? resolve() : reject(new Error('copy failed')); }
+      catch (e) { reject(e); }
+      finally { document.body.removeChild(ta); }
+    });
+  }
+
+  function Panel(root) {
+    this.root = root;
+    this.q = function (s) { return root.querySelector(s); };
+    this.csrf = root.dataset.csrf;
+    this.msg = this.q('.js-vf-msg');
+    var self = this;
+
+    this.q('.js-vf-copy').addEventListener('click', function () { self.generate(false); });
+    this.q('.js-vf-new').addEventListener('click', function () {
+      if (window.confirm('Revoke the current link and create a new one?')) self.generate(true);
+    });
+    this.load();
+  }
+
+  Panel.prototype.say = function (text, isError) {
+    this.msg.textContent = text || '';
+    this.msg.style.color = isError ? '#b91c1c' : '#64748b';
+  };
+
+  Panel.prototype.generate = function (forceNew) {
+    var self = this;
+    self.say('Working…');
+    post(self.root.dataset.generate, self.csrf, { force_new: !!forceNew }).then(function (d) {
+      if (!d || !d.ok) { self.say((d && d.error) || 'Could not create link.', true); return; }
+
+      var m = d.message || {};
+      var wa = self.q('.js-vf-wa'), mail = self.q('.js-vf-mail');
+      if (m.whatsapp_url) { wa.href = m.whatsapp_url; wa.style.display = ''; }
+      if (m.email_url)    { mail.href = m.email_url;  mail.style.display = ''; }
+
+      var text = m.whatsapp_text || d.url;
+      return copyText(text).then(function () {
+        self.say('Message copied · ' + d.link.status_label);
+      }).catch(function () {
+        window.prompt('Copy this message:', text);
+        self.say(d.link.status_label);
+      });
+    }).catch(function () { self.say('Network error.', true); });
+  };
+
+  Panel.prototype.load = function () {
+    var self = this;
+    fetch(self.root.dataset.inbox, { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.ok) self.render(d); })
+      .catch(function () {});
+  };
+
+  Panel.prototype.render = function (d) {
+    var self = this;
+
+    var badge = self.q('.js-vf-badge');
+    var linkLabel = d.link ? d.link.status_label : 'No link yet';
+    badge.textContent = linkLabel + (d.open_count ? ' · ' + d.open_count + ' open' : '');
+    badge.style.background = d.open_count ? '#fef3c7' : '#e2e8f0';
+    badge.style.color = d.open_count ? '#92400e' : '#334155';
+
+    self.q('.js-vf-ready').style.display = d.ready_to_lock ? '' : 'none';
+
+    var items = self.q('.js-vf-items');
+    items.textContent = '';
+    (d.items || []).forEach(function (it) {
+      var row = el('div', 'display:flex;justify-content:space-between;gap:8px;font-size:13px;');
+      row.appendChild(el('span', '', it.label));
+      var state = it.needs_review ? 'Updated, awaiting review'
+                : it.approved ? 'Approved'
+                : it.open_count ? it.open_count + ' comment(s)' : 'Pending';
+      var color = it.approved ? '#047857' : (it.needs_review || it.open_count) ? '#b45309' : '#64748b';
+      row.appendChild(el('span', 'color:' + color + ';font-weight:600;', state));
+      items.appendChild(row);
+    });
+
+    var list = self.q('.js-vf-list');
+    list.textContent = '';
+    if (!d.requests || !d.requests.length) {
+      list.appendChild(el('div', 'color:#64748b;font-size:13px;', 'No open comments.'));
+      return;
+    }
+    d.requests.forEach(function (r) {
+      var box = el('div', 'border:1px solid #e2e8f0;border-radius:8px;padding:10px;');
+      var head = el('div', 'display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;');
+      head.appendChild(el('strong', 'color:#0f172a;', r.item_label));
+      head.appendChild(el('span', '', (r.author_name ? r.author_name + ' · ' : '') +
+        (r.created_at ? new Date(r.created_at + 'Z').toLocaleString() : '')));
+      box.appendChild(head);
+      box.appendChild(el('div', 'margin:6px 0;white-space:pre-wrap;font-size:14px;', r.comment || ''));
+
+      var note = el('input', 'width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-bottom:6px;');
+      note.type = 'text'; note.maxLength = 500; note.placeholder = 'Optional reply to the customer';
+      box.appendChild(note);
+
+      var btn = el('button', '', 'Mark resolved');
+      btn.type = 'button'; btn.className = 'btn btn-primary btn-sm';
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        var url = self.root.dataset.resolve.replace(/\/0\/resolve$/, '/' + r.id + '/resolve');
+        post(url, self.csrf, { note: note.value }).then(function (res) {
+          if (!res || !res.ok) { btn.disabled = false; self.say((res && res.error) || 'Could not resolve.', true); return; }
+          self.load();
+        }).catch(function () { btn.disabled = false; self.say('Network error.', true); });
+      });
+      box.appendChild(btn);
+      list.appendChild(box);
+    });
+  };
+
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.js-vf').forEach(function (root) { new Panel(root); });
+  });
+})();
+</script>
+{%- endmacro %}

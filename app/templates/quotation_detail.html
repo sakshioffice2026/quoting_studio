@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from '_ui_macros.html' import pill, stage_tracker %}
+{% from '_visual_feedback_panel.html' import visual_feedback_panel, visual_feedback_script %}
 {% block title %}{{ quotation.quotation_number }} — FenestraOne{% endblock %}
 
 {% block body %}
@@ -78,6 +79,12 @@
         </div>
       </div>
     </div>
+
+    {# =================== 2a. CUSTOMER PREVIEW LINK & FEEDBACK INBOX =================== #}
+    {% if quotation.status not in (QuotationStatus.LOST, QuotationStatus.EXPIRED, QuotationStatus.ACCEPTED) %}
+      {{ visual_feedback_panel(quotation) }}
+      {{ visual_feedback_script() }}
+    {% endif %}
 
     {# =================== 2b. INSTALLATION / TRANSPORT / AMC / WARRANTY =================== #}
     {% if quotation.installation_charge or quotation.transport_charge or quotation.amc_offered or quotation.other_charges or quotation.warranty_months %}
