@@ -154,7 +154,7 @@ body { overflow: hidden; }
       <div class="bl-sec">Live price</div>
       <div class="bl-price">
         <div>Scene total (excl. extras)</div>
-        <div class="big" id="sceneTotal">₹0</div>
+        <div class="big" id="sceneTotal">{{ currency_symbol }}0</div>
         <table id="priceRows"></table>
       </div>
 
@@ -185,7 +185,7 @@ const UNITS      = {{ units_json|safe }};
 const API        = '/api/v1';
 const CSRF       = document.querySelector('meta[name="csrf-token"]').content;
 const TINT_HEX   = {{ glass_tints|tojson }};
-const RUPEE      = '₹';
+const RUPEE      = {{ currency_symbol|tojson }};
 
 const canvas = document.getElementById('sceneCanvas');
 const ctx    = canvas.getContext('2d');

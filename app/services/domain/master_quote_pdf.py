@@ -25,6 +25,38 @@ from .proposal_copy_service import generate_proposal_copy
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_visual_url(quotation):
+    """Public customer link (visual preview + quotation); None if it cannot be created."""
+    try:
+        from flask import has_request_context, url_for
+        if not has_request_context():
+            return None
+        from ...models.quotation import QuotationStatus
+        from ...models.share_link import ShareLinkType
+        from .share_link_service import get_or_create_link, create_visualiser_link
+        if quotation.status in (QuotationStatus.DRAFT, QuotationStatus.PENDING_DISCOUNT_APPROVAL):
+            link = create_visualiser_link(quotation.tenant_id, quotation.id)
+        else:
+            link = get_or_create_link(quotation.tenant_id, ShareLinkType.MASTER_QUOTE, quotation.id)
+        return url_for('public_share.view', token=link.token, _external=True)
+    except Exception as exc:
+        logger.warning('Visual link not added to master quote PDF: %s', exc)
+        return None
+
+
+def _qr_data_uri(url):
+    """Optional QR code (needs the 'segno' package); silently skipped when absent."""
+    try:
+        import base64, io, segno
+        buf = io.BytesIO()
+        segno.make(url, error='m').save(buf, kind='svg', scale=3, border=1)
+        return 'data:image/svg+xml;base64,' + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+logger = logging.getLogger(__name__)
+
 _DATE_FMT = "%d %b %Y"
 
 _PLANNED_DUE = {
@@ -198,6 +230,7 @@ _TEMPLATE_SRC = r"""
   .customer { background: #F6F3EC; border-left: 3pt solid #C97B3D; padding: 8pt 12pt; margin-bottom: 14pt; }
   .label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: .06em; color: #8A93A6; }
   .cname { font-size: 12pt; font-weight: 700; }
+  .visual-cta { display: flex; justify-content: space-between; align-items: center; gap: 12pt; background: #FDF6EE; border: 1pt solid #C97B3D; padding: 8pt 12pt; margin-bottom: 14pt; }
 
   h2 { font-size: 11pt; color: #1B2430; margin: 16pt 0 6pt; padding-bottom: 3pt; border-bottom: 1pt solid #E5E7EB; }
   p.para { margin-bottom: 6pt; white-space: pre-line; }
@@ -243,6 +276,17 @@ _TEMPLATE_SRC = r"""
   <div class="cname">{{ s.customer_name or 'Customer' }}</div>
   {% if s.project_address %}<div>{{ s.project_address }}</div>{% endif %}
 </div>
+
+{% if visual_url %}
+<div class="visual-cta">
+  <div>
+    <div class="label">View your design</div>
+    <div style="font-size:10pt;font-weight:700;">See your windows and doors on your home, approve or request changes online</div>
+    <a href="{{ visual_url }}" style="color:#C97B3D;font-size:8.5pt;word-break:break-all;">{{ visual_url }}</a>
+  </div>
+  {% if qr %}<img src="{{ qr }}" style="width:72pt;height:72pt;">{% endif %}
+</div>
+{% endif %}
 
 {# ---------- Proposal ---------- #}
 {% if copy.executive_summary %}
@@ -389,13 +433,17 @@ def generate_master_quote_pdf(
     project,
     tenant,
     use_llm: bool = False,
-    currency_symbol: str = "₹",
+    currency_symbol: str | None = None,
+    visual_url: str | None = None,
 ) -> bytes:
     """Return the Master Quotation as PDF bytes.
 
     use_llm defaults to False so the customer download is fast and
     deterministic; the built-in fallback copy is used for the narrative.
     """
+    if not currency_symbol:
+        currency_symbol = tenant.currency_symbol if tenant is not None else "\u20b9"
+    visual_url = visual_url or _resolve_visual_url(quotation)
     context = build_proposal_context(quotation, project, tenant, currency_symbol)
     copy_data = generate_proposal_copy(context["llm_input"], use_llm=use_llm)
 
@@ -406,6 +454,8 @@ def generate_master_quote_pdf(
         copy=copy_data,
         payment=_payment_section(quotation, currency_symbol),
         manufacturing=_manufacturing_section(quotation),
+        visual_url=visual_url,
+        qr=_qr_data_uri(visual_url) if visual_url else None,
     )
 
     try:
@@ -413,7 +463,7 @@ def generate_master_quote_pdf(
     except (ImportError, OSError) as exc:
         logger.warning("WeasyPrint unavailable (%s); using reportlab for master quote %s",
                        exc, quotation.quotation_number)
-        return _generate_with_reportlab(quotation, project, tenant, use_llm, currency_symbol)
+        return _generate_with_reportlab(quotation, project, tenant, use_llm, currency_symbol, visual_url)
 
     pdf_bytes = HTML(string=html).write_pdf()
     logger.info("Master quote PDF rendered: %s size=%d bytes",
@@ -425,7 +475,7 @@ def generate_master_quote_pdf(
 #  reportlab fallback (pure Python, no GTK/Pango needed — works on Windows)
 # ------------------------------------------------------------------ #
 
-def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency_symbol: str) -> bytes:
+def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency_symbol: str, visual_url: str | None = None) -> bytes:
     import io
     from xml.sax.saxutils import escape
 
@@ -437,7 +487,12 @@ def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     # Built-in PDF fonts have no rupee glyph.
-    symbol = "Rs. " if currency_symbol == "\u20b9" else currency_symbol
+    code = (tenant.currency_code if tenant is not None and getattr(tenant, "currency_code", None) else "INR")
+    try:
+        currency_symbol.encode("cp1252")
+        symbol = currency_symbol
+    except UnicodeEncodeError:
+        symbol = "Rs. " if code == "INR" else f"{code} "
 
     context = build_proposal_context(quotation, project, tenant, symbol)
     copy_data = generate_proposal_copy(context["llm_input"], use_llm=use_llm)
@@ -508,6 +563,11 @@ def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency
     story.append(Paragraph(f"<b>{text(s.get('customer_name') or 'Customer')}</b>", styles["Heading2"]))
     if s.get("project_address"):
         story.append(Paragraph(text(s["project_address"]), meta))
+    if visual_url:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(
+            '<b>View your design online:</b> <link href="' + text(visual_url) + '" color="#C97B3D">'
+            + text(visual_url) + '</link>', body))
 
     # ---- Proposal narrative ----
     if copy_data.get("executive_summary"):

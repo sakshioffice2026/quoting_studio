@@ -572,7 +572,7 @@
     run:        "{{ url_for('quotation.merge_run') }}"
   };
   var CSRF = "{{ csrf_token() }}";
-  var CUR  = "£";
+  var CUR  = {{ currency_symbol|tojson }};
 
   function $(id) { return document.getElementById(id); }
   var overlay = $('mqOverlay'), list = $('mqList'), search = $('mqSearch');

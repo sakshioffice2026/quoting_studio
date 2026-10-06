@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+{% block title %}Review Product — {{ quotation.quotation_number }} — FenestraOne{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    <div class="page-header">
+      <div>
+        <h1>Review Product</h1>
+        <div class="sub mono">{{ quotation.quotation_number }} · {{ quotation.project.customer_name }}</div>
+      </div>
+      <div>
+        {% if source == 'gallery' %}
+          <a href="{{ url_for('quotation_flow.gallery', quotation_id=quotation.id) }}" class="btn btn-secondary">← Back to Gallery</a>
+        {% else %}
+          <a href="{{ url_for('quotation_flow.builder', quotation_id=quotation.id) }}" class="btn btn-secondary">← Back to Builder</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <style>
+      .rv-grid { display:grid; grid-template-columns:1fr 1.4fr; gap:16px; align-items:start; }
+      @media (max-width: 900px) { .rv-grid { grid-template-columns:1fr; } }
+      .rv-img { height:240px; background:#F3F4F6; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:64px; overflow:hidden; }
+      .rv-img img { width:100%; height:100%; object-fit:contain; }
+      .rv-title { margin:14px 0 2px; font-weight:700; color:var(--navy); font-size:16px; }
+      .rv-sub { font-size:13px; color:#6B7280; }
+      .rv-row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+      .rv-est { margin-top:6px; padding:12px 14px; background:#FFF7ED; border-radius:8px; display:flex; justify-content:space-between; font-size:14px; }
+      .rv-est strong { color:var(--copper); }
+      .rv-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; }
+    </style>
+
+    <div class="rv-grid">
+
+      <div class="ui-card">
+        <div class="rv-img">
+          {% if style and style.image %}
+            <img src="{{ style.image }}" alt="{{ style.name }}">
+          {% else %}
+            🪟
+          {% endif %}
+        </div>
+        {% if style %}
+          <div class="rv-title">{{ style.name }}</div>
+          <div class="rv-sub">{{ series.name }} · {{ series.material }} · {{ style.panels }} panel{{ 's' if style.panels != 1 }}</div>
+        {% else %}
+          <div class="rv-title">Custom Configuration</div>
+          <div class="rv-sub">Enter dimensions and pricing manually.</div>
+        {% endif %}
+      </div>
+
+      <div class="ui-card">
+        <form method="post" action="{{ url_for('quotation_flow.add_item', quotation_id=quotation.id) }}" id="rvForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="source" value="{{ source }}">
+          <input type="hidden" name="style_id" value="{{ style.id if style else '' }}">
+
+          <div class="form-group">
+            <label>Label / Location</label>
+            <input type="text" class="form-control" name="label" value="{{ style.name if style else '' }}" placeholder="e.g. Living Room Window">
+          </div>
+
+          <div class="rv-row2">
+            <div class="form-group">
+              <label>Width (mm) *</label>
+              <input type="number" class="form-control" name="width_mm" id="rvW" min="1" value="1200" required>
+            </div>
+            <div class="form-group">
+              <label>Height (mm) *</label>
+              <input type="number" class="form-control" name="height_mm" id="rvH" min="1" value="1400" required>
+            </div>
+          </div>
+
+          <div class="rv-row2">
+            <div class="form-group">
+              <label>Quantity *</label>
+              <input type="number" class="form-control" name="qty" id="rvQ" min="1" value="1" required>
+            </div>
+            <div class="form-group">
+              <label>Rate per sq.ft ($) *</label>
+              <input type="number" class="form-control" name="rate_per_sqft" id="rvR" min="0" step="0.01" value="0" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Notes</label>
+            <textarea class="form-control" name="notes" rows="3" placeholder="Glass, colour, hardware or other remarks"></textarea>
+          </div>
+
+          <div class="rv-est">
+            <span>Area: <strong id="rvArea">0.00</strong> sq.ft</span>
+            <span>Line total: <strong id="rvTotal">{{ currency_symbol }}0.00</strong></span>
+          </div>
+
+          <div class="rv-actions">
+            <a href="{{ url_for('quotation_flow.builder', quotation_id=quotation.id) }}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">Add to Quotation</button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var SQMM_PER_SQFT = 92903.04;
+  var w = document.getElementById('rvW');
+  var h = document.getElementById('rvH');
+  var q = document.getElementById('rvQ');
+  var r = document.getElementById('rvR');
+  var area = document.getElementById('rvArea');
+  var total = document.getElementById('rvTotal');
+
+  function fmt(n) {
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function calc() {
+    var a = ((parseFloat(w.value) || 0) * (parseFloat(h.value) || 0)) / SQMM_PER_SQFT;
+    var t = a * (parseFloat(r.value) || 0) * (parseInt(q.value, 10) || 0);
+    area.textContent = fmt(a);
+    total.textContent = {{ currency_symbol|tojson }} + fmt(t);
+  }
+
+  [w, h, q, r].forEach(function (el) { el.addEventListener('input', calc); });
+  calc();
+})();
+</script>
+{% endblock %}

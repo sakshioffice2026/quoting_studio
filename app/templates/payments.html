@@ -87,10 +87,10 @@
                 {% endif %}
               {% else %}—{% endif %}
             </td>
-            <td class="num-cell">{{ '${:,.2f}'.format(p.invoice_amount|float) if p.invoice_amount else '—' }}</td>
-            <td class="num-cell">{{ '${:,.2f}'.format(p.amount_received|float) if p.amount_received else '—' }}</td>
+            <td class="num-cell">{{ currency_symbol ~ '{:,.2f}'.format(p.invoice_amount|float) if p.invoice_amount else '—' }}</td>
+            <td class="num-cell">{{ currency_symbol ~ '{:,.2f}'.format(p.amount_received|float) if p.amount_received else '—' }}</td>
             <td class="num-cell" style="font-weight:600; color:var(--copper);">
-              {{ '${:,.2f}'.format(p.balance|float) if p.balance else '—' }}
+              {{ currency_symbol ~ '{:,.2f}'.format(p.balance|float) if p.balance else '—' }}
             </td>
             <td class="muted mono" style="font-size:12px;">
               {% if p.due_date %}

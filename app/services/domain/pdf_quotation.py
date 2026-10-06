@@ -138,7 +138,7 @@ _PDF_TEMPLATE = r"""
       <td><strong>{{ item.label or item.get('label', 'Item') }}</strong></td>
       <td>{{ item.material or '—' }}</td>
       <td>{{ item.qty or 1 }}</td>
-      <td class="td-right td-mono">${{ '%.2f'|format(item.amount or 0) }}</td>
+      <td class="td-right td-mono">{{ sym }}{{ '%.2f'|format(item.amount or 0) }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -159,28 +159,28 @@ _PDF_TEMPLATE = r"""
     <tr>
       <td><strong>Installation Charges</strong></td>
       <td class="row-note">Fitting &amp; on-site installation</td>
-      <td class="td-right td-mono">${{ '%.2f'|format(quotation.installation_charge) }}</td>
+      <td class="td-right td-mono">{{ sym }}{{ '%.2f'|format(quotation.installation_charge) }}</td>
     </tr>
     {% endif %}
     {% if quotation.transport_charge %}
     <tr>
       <td><strong>Transport Charges</strong></td>
       <td class="row-note">Delivery to site</td>
-      <td class="td-right td-mono">${{ '%.2f'|format(quotation.transport_charge) }}</td>
+      <td class="td-right td-mono">{{ sym }}{{ '%.2f'|format(quotation.transport_charge) }}</td>
     </tr>
     {% endif %}
     {% for charge in quotation.other_charges %}
     <tr>
       <td><strong>{{ charge.label }}</strong></td>
       <td class="row-note">—</td>
-      <td class="td-right td-mono">${{ '%.2f'|format(charge.amount) }}</td>
+      <td class="td-right td-mono">{{ sym }}{{ '%.2f'|format(charge.amount) }}</td>
     </tr>
     {% endfor %}
     {% if quotation.amc_offered %}
     <tr>
       <td><strong>AMC — {{ quotation.amc_offer_tier or '—' }}</strong></td>
       <td class="row-note">Annual maintenance contract</td>
-      <td class="td-right td-mono">{{ '$%.2f'|format(quotation.amc_price) if quotation.amc_price else '—' }}</td>
+      <td class="td-right td-mono">{{ sym ~ '%.2f'|format(quotation.amc_price) if quotation.amc_price else '—' }}</td>
     </tr>
     {% endif %}
     {% if quotation.warranty_months %}
@@ -197,21 +197,21 @@ _PDF_TEMPLATE = r"""
 <div class="totals-block">
   <div class="totals-row">
     <span>Subtotal</span>
-    <span class="amount">${{ '%.2f'|format(quotation.subtotal or 0) }}</span>
+    <span class="amount">{{ sym }}{{ '%.2f'|format(quotation.subtotal or 0) }}</span>
   </div>
   {% if quotation.discount_amount %}
   <div class="totals-row">
     <span>Discount ({{ quotation.discount_pct or 0 }}%)</span>
-    <span class="amount">− ${{ '%.2f'|format(quotation.discount_amount) }}</span>
+    <span class="amount">− {{ sym }}{{ '%.2f'|format(quotation.discount_amount) }}</span>
   </div>
   {% endif %}
   <div class="totals-row">
     <span>Tax ({{ ((quotation.tax_rate or 0) * 100)|int }}%)</span>
-    <span class="amount">${{ '%.2f'|format(quotation.tax_amount or 0) }}</span>
+    <span class="amount">{{ sym }}{{ '%.2f'|format(quotation.tax_amount or 0) }}</span>
   </div>
   <div class="totals-row total-line">
     <span>Grand Total</span>
-    <span class="amount">${{ '%.2f'|format(quotation.grand_total or 0) }}</span>
+    <span class="amount">{{ sym }}{{ '%.2f'|format(quotation.grand_total or 0) }}</span>
   </div>
 </div>
 
@@ -230,6 +230,18 @@ _PDF_TEMPLATE = r"""
 """
 
 
+def _pdf_symbol(quotation, tenant, safe=False):
+    """Currency symbol from the company Settings; safe=True avoids glyphs missing from built-in PDF fonts."""
+    code = (getattr(tenant, "currency_code", None) or "INR") if tenant is not None else "INR"
+    symbol = tenant.currency_symbol if tenant is not None else quotation.currency_symbol
+    if safe:
+        try:
+            symbol.encode("cp1252")
+        except UnicodeEncodeError:
+            symbol = "Rs. " if code == "INR" else f"{code} "
+    return symbol
+
+
 def _generate_with_reportlab(quotation, project, tenant) -> bytes:
     """
     Pure-Python fallback PDF generator — no native GTK/Pango libraries
@@ -237,6 +249,7 @@ def _generate_with_reportlab(quotation, project, tenant) -> bytes:
     (gobject-2.0-0, pango, etc.) are not installed on the host, which is
     common on Windows dev machines.
     """
+    sym = _pdf_symbol(quotation, tenant, safe=True)
     import io
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -282,7 +295,7 @@ def _generate_with_reportlab(quotation, project, tenant) -> bytes:
         material = item.get('material') if isinstance(item, dict) else getattr(item, 'material', None)
         qty = item.get('qty', 1) if isinstance(item, dict) else getattr(item, 'qty', 1)
         amount = item.get('amount', 0) if isinstance(item, dict) else getattr(item, 'amount', 0)
-        spec_rows.append([label, material or '—', str(qty or 1), f"${float(amount or 0):,.2f}"])
+        spec_rows.append([label, material or '—', str(qty or 1), f"{sym}{float(amount or 0):,.2f}"])
     spec_table = Table(spec_rows, colWidths=[70 * mm, 40 * mm, 20 * mm, 40 * mm])
     spec_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1B2430')),
@@ -298,16 +311,16 @@ def _generate_with_reportlab(quotation, project, tenant) -> bytes:
     extra_rows = [['Item', 'Details', 'Amount']]
     if quotation.installation_charge:
         extra_rows.append(['Installation Charges', 'Fitting & on-site installation',
-                            f"${float(quotation.installation_charge):,.2f}"])
+                            f"{sym}{float(quotation.installation_charge):,.2f}"])
     if quotation.transport_charge:
         extra_rows.append(['Transport Charges', 'Delivery to site',
-                            f"${float(quotation.transport_charge):,.2f}"])
+                            f"{sym}{float(quotation.transport_charge):,.2f}"])
     for charge in quotation.other_charges:
         label = charge.get('label') if isinstance(charge, dict) else getattr(charge, 'label', '')
         amount = charge.get('amount') if isinstance(charge, dict) else getattr(charge, 'amount', 0)
-        extra_rows.append([label, '—', f"${float(amount or 0):,.2f}"])
+        extra_rows.append([label, '—', f"{sym}{float(amount or 0):,.2f}"])
     if quotation.amc_offered:
-        amc_amt = f"${float(quotation.amc_price):,.2f}" if quotation.amc_price else '—'
+        amc_amt = f"{sym}{float(quotation.amc_price):,.2f}" if quotation.amc_price else '—'
         extra_rows.append([f"AMC — {quotation.amc_offer_tier or '—'}", 'Annual maintenance contract', amc_amt])
     if quotation.warranty_months:
         wtext = quotation.warranty_terms_text or f"{quotation.warranty_months} months standard warranty"
@@ -328,13 +341,13 @@ def _generate_with_reportlab(quotation, project, tenant) -> bytes:
 
     # ---- Totals ----
     story.append(Spacer(1, 10))
-    totals_rows = [['Subtotal', f"${float(quotation.subtotal or 0):,.2f}"]]
+    totals_rows = [['Subtotal', f"{sym}{float(quotation.subtotal or 0):,.2f}"]]
     if quotation.discount_amount:
         totals_rows.append([f"Discount ({quotation.discount_pct or 0}%)",
-                             f"- ${float(quotation.discount_amount):,.2f}"])
+                             f"- {sym}{float(quotation.discount_amount):,.2f}"])
     totals_rows.append([f"Tax ({int(float(quotation.tax_rate or 0) * 100)}%)",
-                         f"${float(quotation.tax_amount or 0):,.2f}"])
-    totals_rows.append(['Grand Total', f"${float(quotation.grand_total or 0):,.2f}"])
+                         f"{sym}{float(quotation.tax_amount or 0):,.2f}"])
+    totals_rows.append(['Grand Total', f"{sym}{float(quotation.grand_total or 0):,.2f}"])
     totals_table = Table(totals_rows, colWidths=[110 * mm, 40 * mm], hAlign='RIGHT')
     totals_table.setStyle(TableStyle([
         ('FONTSIZE', (0, 0), (-1, -1), 10),
@@ -382,6 +395,7 @@ def generate_quotation_pdf(quotation, project, tenant) -> bytes:
             quotation=quotation,
             project=project,
             tenant=tenant,
+            sym=_pdf_symbol(quotation, tenant, safe=False),
         )
 
         pdf_bytes = HTML(string=html_str).write_pdf()

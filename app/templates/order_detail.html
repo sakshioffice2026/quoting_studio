@@ -42,7 +42,7 @@
     <div class="info-card-row">
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Total Amount</div>
-        <div class="info-card-value">{{ '${:,.2f}'.format(order.total_amount|float) if order.total_amount else '—' }}</div>
+        <div class="info-card-value">{{ currency_symbol ~ '{:,.2f}'.format(order.total_amount|float) if order.total_amount else '—' }}</div>
       </div>
       <div class="info-card">
         <div class="info-card-label">Contract Ref</div>
@@ -484,7 +484,7 @@
             <tr>
               <td class="mono" style="font-size:12px; font-weight:600;">{{ _c.amc_number }}</td>
               <td style="font-size:12px;">{{ _c.plan_tier }} · {{ _c.visits_per_year }} visit(s)/yr</td>
-              <td style="font-size:12px;">{{ '${:,.2f}'.format(_c.annual_fee|float) if _c.annual_fee else '—' }}</td>
+              <td style="font-size:12px;">{{ currency_symbol ~ '{:,.2f}'.format(_c.annual_fee|float) if _c.annual_fee else '—' }}</td>
               <td style="font-size:12px;">
                 {% if _c.amc_start_date and _c.amc_end_date %}
                   {{ _c.amc_start_date.strftime('%d %b %Y') }} → {{ _c.amc_end_date.strftime('%d %b %Y') }}

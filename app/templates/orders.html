@@ -70,7 +70,7 @@
             <td>{{ pill(o.status_label, tone_map.get(o.status, 'neutral')) }}</td>
             <td class="num-cell" style="font-weight:600; color:var(--copper);">
               {% if o.total_amount %}
-                ${{ '{:,.2f}'.format(o.total_amount|float) }}
+                {{ currency_symbol }}{{ '{:,.2f}'.format(o.total_amount|float) }}
               {% else %}—{% endif %}
             </td>
             <td class="muted mono" style="font-size:12px;">

@@ -57,11 +57,11 @@
         </div>
         <div class="info-card info-card-highlight">
           <div class="info-card-label">Pipeline value</div>
-          <div class="info-card-value">${{ '{:,.0f}'.format(stats.get('pipeline', 0)) }}</div>
+          <div class="info-card-value">{{ currency_symbol }}{{ '{:,.0f}'.format(stats.get('pipeline', 0)) }}</div>
         </div>
         <div class="info-card">
           <div class="info-card-label">Won value</div>
-          <div class="info-card-value">${{ '{:,.0f}'.format(stats.get('won_value', 0)) }}</div>
+          <div class="info-card-value">{{ currency_symbol }}{{ '{:,.0f}'.format(stats.get('won_value', 0)) }}</div>
         </div>
         <div class="info-card">
           <div class="info-card-label">Quotes generated</div>
@@ -69,7 +69,7 @@
         </div>
         <div class="info-card">
           <div class="info-card-label">Avg quote value</div>
-          <div class="info-card-value">${{ '{:,.0f}'.format(stats.get('avg_quote', 0)) }}</div>
+          <div class="info-card-value">{{ currency_symbol }}{{ '{:,.0f}'.format(stats.get('avg_quote', 0)) }}</div>
         </div>
       </div>
     </div>
@@ -107,15 +107,15 @@
         </div>
         <div class="info-card info-card-highlight">
           <div class="info-card-label">Confirmed order value</div>
-          <div class="info-card-value">${{ '{:,.0f}'.format(stats.get('order_value', 0)) }}</div>
+          <div class="info-card-value">{{ currency_symbol }}{{ '{:,.0f}'.format(stats.get('order_value', 0)) }}</div>
         </div>
         <div class="info-card">
           <div class="info-card-label">Payments received</div>
-          <div class="info-card-value">${{ '{:,.0f}'.format(stats.get('payments_received_total', 0)) }}</div>
+          <div class="info-card-value">{{ currency_symbol }}{{ '{:,.0f}'.format(stats.get('payments_received_total', 0)) }}</div>
         </div>
         <div class="info-card">
           <div class="info-card-label">Payments outstanding</div>
-          <div class="info-card-value">${{ '{:,.0f}'.format(stats.get('payments_outstanding', 0)) }}</div>
+          <div class="info-card-value">{{ currency_symbol }}{{ '{:,.0f}'.format(stats.get('payments_outstanding', 0)) }}</div>
         </div>
         <div class="info-card">
           <div class="info-card-label">Payments overdue</div>

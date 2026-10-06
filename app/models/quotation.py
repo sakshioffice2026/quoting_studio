@@ -135,6 +135,25 @@ class Quotation(db.Model):
         return self.status in QuotationStatus.EDITABLE
 
     @property
+    def currency(self):
+        from .tenant import Tenant
+        code = None
+        try:
+            code = self.tenant.currency_code if self.tenant else None
+        except Exception:
+            code = None
+        code = code or self.currency_code or 'INR'
+        return Tenant.CURRENCIES.get(code, Tenant.CURRENCIES['INR'])
+
+    @property
+    def currency_symbol(self) -> str:
+        return self.currency['symbol']
+
+    @property
+    def currency_name(self) -> str:
+        return self.currency['name']
+
+    @property
     def is_expired(self) -> bool:
         if self.status == QuotationStatus.EXPIRED:
             return True

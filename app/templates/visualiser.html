@@ -2592,7 +2592,7 @@ async function saveVersion() {
     const reset  = quotes.reduce((n, q) => n + (q.approvals_reset || 0), 0);
     let msg = '● Version ' + saved.version + ' saved';
     if (quotes.length) {
-      msg += ' · total ' + Number(quotes[0].grand_total).toLocaleString();
+      msg += ' · total ' + {{ currency_symbol|tojson }} + Number(quotes[0].grand_total).toLocaleString();
       if (reset) msg += ' · ' + reset + ' approval(s) reset';
     }
     setStatus('stVisSave', msg, true);

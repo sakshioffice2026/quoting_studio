@@ -100,7 +100,7 @@ def view(token):
             link=link, quotation=q, project=q.project, tenant=tenant,
             items=_visual_items(q, state), state=state,
             can_respond=q.status not in _VISUAL_CLOSED,
-            currency=_CURRENCY,
+            currency=(tenant.currency_symbol if tenant else _CURRENCY),
             QuotationStatus=QuotationStatus,
         )
 
@@ -115,7 +115,7 @@ def view(token):
             link=link, quotation=q, project=q.project, tenant=tenant,
             items=_visual_items(q, state), state=state,
             can_respond=q.status not in _VISUAL_CLOSED,
-            currency=_CURRENCY,
+            currency=(tenant.currency_symbol if tenant else _CURRENCY),
             payment=_master_payment(q),
             progress=_master_progress(q),
             QuotationStatus=QuotationStatus,

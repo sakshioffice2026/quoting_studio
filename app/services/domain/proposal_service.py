@@ -62,7 +62,7 @@ def generate_proposal_docx(
     tenant,
     use_llm: bool = True,
     template_filename: str | None = None,
-    currency_symbol: str = "$",
+    currency_symbol: str | None = None,
 ) -> dict:
     """
     Returns {
@@ -158,7 +158,7 @@ def generate_proposal_pdf(
     tenant,
     use_llm: bool = True,
     template_filename: str | None = None,
-    currency_symbol: str = "$",
+    currency_symbol: str | None = None,
 ) -> dict:
     docx_result = generate_proposal_docx(
         quotation, project, tenant,
@@ -211,7 +211,7 @@ def create_proposal(
     with_pdf: bool = False,
     use_llm: bool = True,
     template_filename: str | None = None,
-    currency_symbol: str = "$",
+    currency_symbol: str | None = None,
 ) -> dict:
     """
     Generates a new proposal revision, saves the files and stores a Proposal row.

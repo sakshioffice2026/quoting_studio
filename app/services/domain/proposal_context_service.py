@@ -132,7 +132,7 @@ def _count_openings(quotation) -> dict:
     return {"windows": windows, "doors": doors}
 
 
-def build_proposal_context(quotation, project, tenant, currency_symbol: str = "$") -> dict:
+def build_proposal_context(quotation, project, tenant, currency_symbol: str | None = None) -> dict:
     """
     Returns:
       scalars      -> {token_name: str}  (all non-LLM tokens)
@@ -140,6 +140,8 @@ def build_proposal_context(quotation, project, tenant, currency_symbol: str = "$
       charge_rows  -> list of dict for the charges table
       llm_input    -> facts handed to the LLM for writing copy (no price authority)
     """
+    if not currency_symbol:
+        currency_symbol = tenant.currency_symbol if tenant is not None else "$"
     scalars = {
         "company_name": getattr(tenant, "name", "") or "",
         "company_email": getattr(tenant, "contact_email", "") or "",

@@ -49,15 +49,15 @@
     <div class="info-card-row">
       <div class="info-card">
         <div class="info-card-label">Invoice Amount</div>
-        <div class="info-card-value">{{ '${:,.2f}'.format(payment.invoice_amount|float) if payment.invoice_amount else '—' }}</div>
+        <div class="info-card-value">{{ currency_symbol ~ '{:,.2f}'.format(payment.invoice_amount|float) if payment.invoice_amount else '—' }}</div>
       </div>
       <div class="info-card">
         <div class="info-card-label">Received</div>
-        <div class="info-card-value">{{ '${:,.2f}'.format(payment.amount_received|float) if payment.amount_received else '—' }}</div>
+        <div class="info-card-value">{{ currency_symbol ~ '{:,.2f}'.format(payment.amount_received|float) if payment.amount_received else '—' }}</div>
       </div>
       <div class="info-card info-card-highlight">
         <div class="info-card-label">Balance</div>
-        <div class="info-card-value">{{ '${:,.2f}'.format(payment.balance|float) if payment.balance else '—' }}</div>
+        <div class="info-card-value">{{ currency_symbol ~ '{:,.2f}'.format(payment.balance|float) if payment.balance else '—' }}</div>
       </div>
       <div class="info-card">
         <div class="info-card-label">Due Date</div>
@@ -91,7 +91,7 @@
         {% if payment.order_total_basis %}
         <div class="info-grid-item"><div>
           <div class="info-grid-label">Order Value</div>
-          <div class="info-grid-value">{{ '${:,.2f}'.format(payment.order_total_basis|float) }}</div>
+          <div class="info-grid-value">{{ currency_symbol ~ '{:,.2f}'.format(payment.order_total_basis|float) }}</div>
         </div></div>
         {% endif %}
         {% endif %}
@@ -170,9 +170,9 @@
             </td>
             <td>{{ u.label or ('Unit ' ~ u.window_id) }}</td>
             <td>{{ pill(u.unit_type|capitalize, 'neutral') }}</td>
-            <td class="num-cell">{{ '${:,.2f}'.format(u.line_amount|float) }}</td>
-            <td class="num-cell">{{ '${:,.2f}'.format(u.required_advance|float) }}</td>
-            <td class="num-cell">{{ '${:,.2f}'.format(u.allocated_amount|float) }}</td>
+            <td class="num-cell">{{ currency_symbol ~ '{:,.2f}'.format(u.line_amount|float) }}</td>
+            <td class="num-cell">{{ currency_symbol ~ '{:,.2f}'.format(u.required_advance|float) }}</td>
+            <td class="num-cell">{{ currency_symbol ~ '{:,.2f}'.format(u.allocated_amount|float) }}</td>
             <td>
               {% set ut = {'UNIT-RELEASED': 'success', 'UNIT-PARTIAL': 'warn', 'UNIT-PENDING': 'neutral'} %}
               {{ pill(u.status_label, ut.get(u.status, 'neutral')) }}
@@ -232,7 +232,7 @@
             <td>{{ (r.payment_mode or '—')|replace('_', ' ')|title }}</td>
             <td class="mono" style="font-size:12px;">{{ r.transaction_ref or '—' }}</td>
             <td>{{ r.notes or '—' }}</td>
-            <td class="num-cell">{{ '${:,.2f}'.format(r.amount|float) }}</td>
+            <td class="num-cell">{{ currency_symbol ~ '{:,.2f}'.format(r.amount|float) }}</td>
           </tr>
           {% endfor %}
         </tbody>

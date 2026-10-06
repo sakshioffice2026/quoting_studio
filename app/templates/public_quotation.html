@@ -51,7 +51,7 @@
           </td>
           <td>{{ item.width_mm }} × {{ item.height_mm }}</td>
           <td class="num">{{ item.qty or 1 }}</td>
-          <td class="num" style="font-weight:600;">₹{{ '{:,.2f}'.format((item.amount or 0)|float) }}</td>
+          <td class="num" style="font-weight:600;">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format((item.amount or 0)|float) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -64,18 +64,18 @@
 
 <div class="pub-card">
   <h2>Summary</h2>
-  <div class="pub-row"><span>Subtotal</span><span>₹{{ '{:,.2f}'.format((quotation.subtotal or 0)|float) }}</span></div>
+  <div class="pub-row"><span>Subtotal</span><span>{{ quotation.currency_symbol }}{{ '{:,.2f}'.format((quotation.subtotal or 0)|float) }}</span></div>
   {% if quotation.discount_amount and quotation.discount_amount|float > 0 %}
-  <div class="pub-row"><span>Discount</span><span>− ₹{{ '{:,.2f}'.format(quotation.discount_amount|float) }}</span></div>
+  <div class="pub-row"><span>Discount</span><span>− {{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.discount_amount|float) }}</span></div>
   {% endif %}
   {% if quotation.installation_charge and quotation.installation_charge|float > 0 %}
-  <div class="pub-row"><span>Installation</span><span>₹{{ '{:,.2f}'.format(quotation.installation_charge|float) }}</span></div>
+  <div class="pub-row"><span>Installation</span><span>{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.installation_charge|float) }}</span></div>
   {% endif %}
   {% if quotation.transport_charge and quotation.transport_charge|float > 0 %}
-  <div class="pub-row"><span>Transport</span><span>₹{{ '{:,.2f}'.format(quotation.transport_charge|float) }}</span></div>
+  <div class="pub-row"><span>Transport</span><span>{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.transport_charge|float) }}</span></div>
   {% endif %}
-  <div class="pub-row"><span>Tax ({{ ((quotation.tax_rate or 0)|float * 100)|round(0)|int }}%)</span><span>₹{{ '{:,.2f}'.format((quotation.tax_amount or 0)|float) }}</span></div>
-  <div class="pub-row total"><span>Grand Total</span><span>₹{{ '{:,.2f}'.format((quotation.grand_total or 0)|float) }}</span></div>
+  <div class="pub-row"><span>Tax ({{ ((quotation.tax_rate or 0)|float * 100)|round(0)|int }}%)</span><span>{{ quotation.currency_symbol }}{{ '{:,.2f}'.format((quotation.tax_amount or 0)|float) }}</span></div>
+  <div class="pub-row total"><span>Grand Total</span><span>{{ quotation.currency_symbol }}{{ '{:,.2f}'.format((quotation.grand_total or 0)|float) }}</span></div>
 </div>
 
 <div class="pub-card">

@@ -37,6 +37,16 @@
                    oninput="document.querySelector('[name=brand_colour]').value=this.value">
           </div>
         </div>
+        <div class="form-group">
+          <label class="form-label">Currency
+            <span style="font-size:10px;font-weight:400;color:var(--steel);">— used on quotes and proposals</span>
+          </label>
+          <select class="form-control" name="currency_code" style="max-width:280px;">
+            {% for code, c in tenant.CURRENCIES.items() %}
+            <option value="{{ code }}" {{ "selected" if tenant.currency_code == code }}>{{ code }} — {{ c.name }} ({{ c.symbol }})</option>
+            {% endfor %}
+          </select>
+        </div>
         <button type="submit" class="btn btn-primary">Save changes</button>
       </form>
     </div>

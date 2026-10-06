@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+{% from '_ui_macros.html' import pill %}
+{% block title %}New Quotation — {{ quotation.quotation_number }} — FenestraOne{% endblock %}
+{% block body %}
+<div class="dash-layout">
+  {% include '_nav_sidebar.html' %}
+
+  <div class="dash-content">
+
+    <div class="page-header">
+      <div>
+        <h1>New Quotation</h1>
+        <div class="sub mono">{{ quotation.quotation_number }} · {{ quotation.status_label }}</div>
+      </div>
+      <div>
+        <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary">Back to Quotations</a>
+      </div>
+    </div>
+
+    <style>
+      .qb-grid { display:grid; grid-template-columns:2fr 1fr; gap:16px; align-items:start; }
+      @media (max-width: 900px) { .qb-grid { grid-template-columns:1fr; } }
+      .qb-cust { display:flex; align-items:center; gap:12px; }
+      .qb-avatar { width:40px; height:40px; border-radius:50%; background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; }
+      .qb-name { font-weight:600; color:var(--navy); }
+      .qb-meta { font-size:12px; color:#6B7280; }
+      .qb-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+      .qb-sum-row { display:flex; justify-content:space-between; padding:6px 0; font-size:14px; }
+      .qb-sum-row.total { border-top:1px solid #E5E7EB; margin-top:6px; padding-top:10px; font-weight:700; color:var(--copper); font-size:16px; }
+      .qb-thumb { font-size:12px; color:#6B7280; }
+    </style>
+
+    <div class="qb-grid">
+
+      <div>
+        <div class="ui-card" style="margin-bottom:16px;">
+          <h3 style="margin:0 0 12px;">Customer</h3>
+          <div class="qb-cust">
+            <div class="qb-avatar">{{ (quotation.project.customer_name or 'W')[:1]|upper }}</div>
+            <div>
+              <div class="qb-name">{{ quotation.project.customer_name }}</div>
+              <div class="qb-meta">
+                {% if walk_in %}
+                  Walk-In Customer
+                {% else %}
+                  {{ [quotation.project.customer.phone, quotation.project.customer.email, quotation.project.customer.city]|select|join(' · ') }}
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-card">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+            <h3 style="margin:0;">Items</h3>
+            <span class="mono" style="font-size:12px; color:#6B7280;">{{ quotation.line_items|length }} item{{ 's' if quotation.line_items|length != 1 }}</span>
+          </div>
+
+          <div class="qb-actions">
+            <a href="{{ url_for('quotation_flow.gallery', quotation_id=quotation.id) }}" class="btn btn-primary">Pick from Gallery</a>
+            <a href="{{ url_for('quotation_flow.configurator', quotation_id=quotation.id) }}" class="btn btn-secondary">Configurator</a>
+          </div>
+
+          {% if quotation.line_items %}
+          <div style="overflow-x:auto;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Item</th>
+                  <th>Size (mm)</th>
+                  <th style="text-align:right;">Qty</th>
+                  <th style="text-align:right;">Unit</th>
+                  <th style="text-align:right;">Amount</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in quotation.line_items %}
+                <tr>
+                  <td class="mono" style="font-size:12px;">{{ loop.index }}</td>
+                  <td>
+                    <div style="font-weight:600; color:var(--navy);">{{ item.label }}</div>
+                    <div class="qb-thumb">
+                      {% if item.series %}{{ item.series }} · {{ item.style }}{% else %}Configurator{% endif %}
+                    </div>
+                  </td>
+                  <td class="mono" style="font-size:12px;">{{ item.width_mm }} × {{ item.height_mm }}</td>
+                  <td class="num-cell">{{ item.qty }}</td>
+                  <td class="num-cell">{{ currency_symbol }}{{ '{:,.2f}'.format(item.unit_total|float) }}</td>
+                  <td class="num-cell" style="font-weight:600;">{{ currency_symbol }}{{ '{:,.2f}'.format(item.amount|float) }}</td>
+                  <td style="text-align:right;">
+                    <form method="post" action="{{ url_for('quotation_flow.delete_item', quotation_id=quotation.id, line_id=item.line_id) }}" onsubmit="return confirm('Remove this item?');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit" class="btn btn-secondary btn-sm">Remove</button>
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="empty-state">
+            <div class="icon">🪟</div>
+            <p>No products added yet. Pick from the gallery or use the configurator.</p>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="ui-card">
+        <h3 style="margin:0 0 12px;">Summary</h3>
+        <div class="qb-sum-row"><span>Subtotal</span><span class="mono">{{ currency_symbol }}{{ '{:,.2f}'.format((quotation.subtotal or 0)|float) }}</span></div>
+        <div class="qb-sum-row"><span>Tax ({{ ((quotation.tax_rate or 0)|float * 100)|round(0)|int }}%)</span><span class="mono">{{ currency_symbol }}{{ '{:,.2f}'.format((quotation.tax_amount or 0)|float) }}</span></div>
+        <div class="qb-sum-row total"><span>Grand Total</span><span class="mono">{{ currency_symbol }}{{ '{:,.2f}'.format((quotation.grand_total or 0)|float) }}</span></div>
+
+        <form method="post" action="{{ url_for('quotation_flow.proceed', quotation_id=quotation.id) }}" style="margin-top:16px;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary" style="width:100%;" {{ '' if can_proceed else 'disabled' }}>
+            Proceed to Quotation
+          </button>
+          {% if not can_proceed %}
+          <div class="qb-meta" style="margin-top:8px;">Add at least one product to continue.</div>
+          {% endif %}
+        </form>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
