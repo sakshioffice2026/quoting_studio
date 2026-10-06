@@ -1,0 +1,71 @@
+{% set scene = scene_composite(quotation) %}
+{% if scene.has %}
+<div class="pub-card" id="scene-composite">
+  <h2>Your home, with the new windows &amp; doors</h2>
+  <img src="{{ url_for('public_scene.scene_image', token=link.token) }}?v={{ scene.version }}"
+       alt="Your home with the proposed windows and doors"
+       style="width:100%;height:auto;border-radius:10px;display:block;">
+
+  <div style="margin-top:16px;">
+    {% for item in items %}
+    <div class="pub-row">
+      <span>
+        <strong>{{ item.label }}</strong>
+        <span class="pub-muted">
+          {% if item.width_mm and item.height_mm %} · {{ item.width_mm }} × {{ item.height_mm }} mm{% endif %}
+          {% if item.material %} · {{ item.material }}{% endif %}
+          {% if item.qty and item.qty > 1 %} · ×{{ item.qty }}{% endif %}
+        </span>
+      </span>
+      <span>{{ currency }}{{ '{:,.2f}'.format(item.amount|float) if item.amount is not none else '—' }}</span>
+    </div>
+    {% endfor %}
+
+    <div class="pub-row">
+      <span>Subtotal</span>
+      <span>{{ currency }}{{ '{:,.2f}'.format(quotation.subtotal|float) if quotation.subtotal is not none else '—' }}</span>
+    </div>
+    {% if quotation.discount_amount and quotation.discount_amount|float > 0 %}
+    <div class="pub-row">
+      <span>Discount</span>
+      <span>−{{ currency }}{{ '{:,.2f}'.format(quotation.discount_amount|float) }}</span>
+    </div>
+    {% endif %}
+    {% if quotation.tax_amount is not none and quotation.tax_amount|float > 0 %}
+    <div class="pub-row">
+      <span>Tax</span>
+      <span>{{ currency }}{{ '{:,.2f}'.format(quotation.tax_amount|float) }}</span>
+    </div>
+    {% endif %}
+    <div class="pub-row total">
+      <span>Total</span>
+      <span>{{ currency }}{{ '{:,.2f}'.format(quotation.grand_total|float) if quotation.grand_total is not none else '—' }}</span>
+    </div>
+  </div>
+
+  {% if can_respond %}
+  <div class="pub-split" style="margin-top:18px;">
+    <form method="post" action="{{ url_for('public_share.visual_approve', token=link.token) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="line_id" value="all">
+      <div class="pub-form-row">
+        <label for="sc-name-ok">Your name (optional)</label>
+        <input id="sc-name-ok" name="author_name" type="text" maxlength="120">
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;">👍 Looks Good</button>
+    </form>
+
+    <form method="post" action="{{ url_for('public_share.visual_comment', token=link.token) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="line_id" value="all">
+      <div class="pub-form-row">
+        <label for="sc-comment">What would you like changed?</label>
+        <textarea id="sc-comment" name="comment" rows="3" maxlength="2000" required></textarea>
+      </div>
+      <input type="hidden" name="author_name" value="">
+      <button type="submit" class="btn btn-secondary" style="width:100%;">✏️ Request Change</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

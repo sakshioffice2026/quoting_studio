@@ -1,0 +1,767 @@
+{% extends 'base.html' %}
+{% block title %}Bring it to Life — {{ project.display_name }}{% endblock %}
+
+{% block head %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<style>
+body { overflow: hidden; }
+.bl-wrap { display:flex; flex-direction:column; width:100%; height:100%; min-width:0; }
+.bl-bar {
+  display:flex; align-items:center; gap:10px; padding:8px 16px;
+  background:var(--navy); color:#fff; flex-shrink:0;
+}
+.bl-bar a { color:#B7C0CE; }
+.bl-bar .sp { flex:1; }
+.bl-main { display:flex; flex:1; min-height:0; min-width:0; }
+.bl-stage {
+  flex:1; min-width:0; position:relative; background:#10151c; overflow:hidden;
+  display:flex; align-items:center; justify-content:center;
+}
+.bl-stage canvas { max-width:100%; max-height:100%; width:auto; height:auto; touch-action:none; cursor:default; }
+.bl-empty { color:#8896A8; text-align:center; font-size:14px; padding:40px; }
+.bl-panel {
+  width:340px; background:#fff; border-left:1px solid var(--line);
+  overflow-y:auto; padding:14px; flex-shrink:0;
+}
+.bl-sec { font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--steel); font-weight:600; margin:14px 0 8px; }
+.bl-sec:first-child { margin-top:0; }
+.bl-upload {
+  border:2px dashed var(--line); border-radius:8px; padding:14px;
+  text-align:center; cursor:pointer; font-size:12px; color:var(--steel);
+}
+.bl-upload:hover { border-color:var(--copper); }
+.bl-units { display:flex; flex-direction:column; gap:5px; }
+.bl-unit {
+  display:flex; align-items:center; justify-content:space-between;
+  border:1px solid var(--line); border-radius:6px; padding:6px 9px;
+  font-size:12px;
+}
+.bl-unit.placed { background:#F4F7FA; }
+.bl-open {
+  display:flex; justify-content:space-between; align-items:center;
+  border:1px solid var(--line); border-radius:6px; padding:6px 9px;
+  font-size:12px; cursor:pointer; margin-bottom:5px;
+}
+.bl-open.active { border-color:var(--copper); background:rgba(201,123,61,.07); }
+.bl-swatches { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; }
+.bl-sw {
+  width:26px; height:26px; border-radius:50%; border:2px solid #fff;
+  box-shadow:0 0 0 1px var(--line); cursor:pointer;
+}
+.bl-sw.on { box-shadow:0 0 0 2px var(--copper); }
+.bl-tints { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+.bl-tint {
+  padding:4px 9px; border-radius:14px; font-size:11px; cursor:pointer;
+  border:1px solid var(--line); background:#fff;
+}
+.bl-tint.on { background:var(--copper); color:#fff; border-color:var(--copper); }
+.bl-row { display:flex; align-items:center; justify-content:space-between;
+  font-size:12px; margin-bottom:9px; }
+.bl-step { display:flex; align-items:center; gap:8px; }
+.bl-step button {
+  width:24px; height:24px; border-radius:50%; border:1px solid var(--line);
+  background:#fff; cursor:pointer; font-size:14px; line-height:1;
+}
+.bl-rng { margin-bottom:9px; font-size:11px; color:#566; }
+.bl-rng input { width:100%; accent-color:var(--copper); }
+.bl-price {
+  border:1px solid var(--line); border-radius:8px; padding:10px;
+  font-size:12px; background:#FAFBFC;
+}
+.bl-price .big { font-size:20px; font-weight:700; color:var(--navy); }
+.bl-price table { width:100%; border-collapse:collapse; margin-top:6px; }
+.bl-price td { padding:2px 0; }
+.bl-price td:last-child { text-align:right; }
+.bl-msg { font-size:11px; color:var(--steel); min-height:16px; margin-top:6px; }
+.bl-msg.err { color:#B3261E; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="bl-wrap">
+
+  <div class="bl-bar">
+    <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.display_name }}</a>
+    <span>/</span>
+    <strong>Bring it to Life</strong>
+    <span class="sp"></span>
+    <button class="btn btn-ghost btn-sm" id="btnBefore" style="color:#fff;">Before / After</button>
+    <button class="btn btn-ghost btn-sm" id="btnPersp" style="color:#fff;">◇ Perspective</button>
+    <button class="btn btn-primary btn-sm" id="btnSave">Save scene</button>
+  </div>
+
+  <div class="bl-main">
+    <div class="bl-stage" id="stage">
+      <div class="bl-empty" id="emptyHint">Upload a photo of the house to begin.</div>
+      <canvas id="sceneCanvas" style="display:none;"></canvas>
+    </div>
+
+    <aside class="bl-panel">
+
+      <div class="bl-sec">House photo</div>
+      <div class="bl-upload" id="uploadZone">📷 Click to upload / replace photo</div>
+      <input type="file" id="photoInput" accept="image/*" style="display:none;">
+
+      <div class="bl-sec">Units in this project</div>
+      <div class="bl-units" id="unitList"></div>
+
+      <div class="bl-sec">Placed on photo</div>
+      <div id="openList"></div>
+
+      <div id="optBox" style="display:none;">
+        <div class="bl-sec">Frame colour</div>
+        <div class="bl-swatches" id="swatches">
+          {% for s in swatches %}
+          <div class="bl-sw" data-hex="{{ s.hex }}" title="{{ s.name }}"
+               style="background:{{ s.hex }};"></div>
+          {% endfor %}
+        </div>
+
+        <div class="bl-sec">Glass tint</div>
+        <div class="bl-tints" id="tints">
+          {% for key, hex in glass_tints.items() %}
+          <div class="bl-tint" data-tint="{{ key }}">{{ key|capitalize }}</div>
+          {% endfor %}
+        </div>
+
+        <div class="bl-sec">Glazing bars</div>
+        <div class="bl-row"><span>Vertical</span>
+          <span class="bl-step"><button data-bar="v" data-d="-1">−</button>
+            <b id="barV">0</b><button data-bar="v" data-d="1">+</button></span></div>
+        <div class="bl-row"><span>Horizontal</span>
+          <span class="bl-step"><button data-bar="h" data-d="-1">−</button>
+            <b id="barH">0</b><button data-bar="h" data-d="1">+</button></span></div>
+
+        <div class="bl-sec">Blending</div>
+        <div class="bl-rng">Glass transparency <span id="gaVal">55%</span>
+          <input type="range" id="glassAlpha" min="15" max="95" value="55"></div>
+        <div class="bl-rng">Overlay opacity <span id="opVal">92%</span>
+          <input type="range" id="opacity" min="30" max="100" value="92"></div>
+        <div class="bl-rng">Brightness <span id="brVal">100%</span>
+          <input type="range" id="brightness" min="60" max="140" value="100"></div>
+        <div class="bl-rng">Realism <span id="rlVal">70%</span>
+          <input type="range" id="realism" min="0" max="100" value="70"></div>
+        <label class="bl-row" style="cursor:pointer;"><span>Hide original window</span>
+          <input type="checkbox" id="hideOld" checked></label>
+
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button class="btn btn-secondary btn-sm" id="btnApply" style="flex:1;">Apply to design</button>
+          <button class="btn btn-ghost btn-sm" id="btnRemove">Remove</button>
+        </div>
+      </div>
+
+      <div class="bl-sec">Live price</div>
+      <div class="bl-price">
+        <div>Scene total (excl. extras)</div>
+        <div class="big" id="sceneTotal">₹0</div>
+        <table id="priceRows"></table>
+      </div>
+
+      <div class="bl-sec">Quotation</div>
+      <select id="quoteSel" class="form-control" style="width:100%;margin-bottom:6px;">
+        <option value="">— select quotation —</option>
+        {% for q in quotations %}
+        <option value="{{ q.id }}" {% if scene.quotation_id == q.id %}selected{% endif %}>
+          {{ q.quotation_number }} · v{{ q.quotation_version }}
+        </option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-secondary btn-sm" id="btnLink" style="width:100%;">Link scene to quotation</button>
+
+      <div class="bl-msg" id="msg"></div>
+    </aside>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+'use strict';
+
+const PROJECT_ID = {{ project.id }};
+const UNITS      = {{ units_json|safe }};
+const API        = '/api/v1';
+const CSRF       = document.querySelector('meta[name="csrf-token"]').content;
+const TINT_HEX   = {{ glass_tints|tojson }};
+const RUPEE      = '₹';
+
+const canvas = document.getElementById('sceneCanvas');
+const ctx    = canvas.getContext('2d');
+const $      = id => document.getElementById(id);
+
+let photo = null;          // HTMLImageElement
+let openings = [];         // see makeOpening()
+let active = -1;
+let freeCorners = false;
+let showAfter = true;
+let drag = null;
+let seq = 0;
+let previewTimer = null;
+
+/* ---------------- helpers ---------------- */
+function msg(text, err) {
+  const m = $('msg'); m.textContent = text || ''; m.className = 'bl-msg' + (err ? ' err' : '');
+}
+function money(n) { return RUPEE + Number(n || 0).toLocaleString('en-IN', {maximumFractionDigits: 0}); }
+async function api(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({'X-CSRFToken': CSRF}, opts.headers || {});
+  if (opts.json !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.json);
+    delete opts.json;
+  }
+  const res = await fetch(API + path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+function unitOf(id) { return UNITS.find(u => u.id === id); }
+
+/* ---------------- homography (unit square -> quad) ---------------- */
+function squareToQuad(c) {
+  const x0 = c.tl.x, y0 = c.tl.y, x1 = c.tr.x, y1 = c.tr.y,
+        x2 = c.br.x, y2 = c.br.y, x3 = c.bl.x, y3 = c.bl.y;
+  const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+  const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+  let a, b, cc, d, e, f, g, h;
+  if (Math.abs(dx3) < 1e-9 && Math.abs(dy3) < 1e-9) {
+    a = x1 - x0; b = x2 - x1; cc = x0; d = y1 - y0; e = y2 - y1; f = y0; g = 0; h = 0;
+  } else {
+    const det = dx1 * dy2 - dx2 * dy1 || 1e-9;
+    g = (dx3 * dy2 - dx2 * dy3) / det;
+    h = (dx1 * dy3 - dx3 * dy1) / det;
+    a = x1 - x0 + g * x1; b = x3 - x0 + h * x3; cc = x0;
+    d = y1 - y0 + g * y1; e = y3 - y0 + h * y3; f = y0;
+  }
+  return function (u, v) {
+    const w = g * u + h * v + 1;
+    return { x: (a * u + b * v + cc) / w, y: (d * u + e * v + f) / w };
+  };
+}
+
+/* ---------------- mesh warp of an image onto a quad ---------------- */
+function drawTriangle(c, img, s0, s1, s2, d0, d1, d2) {
+  c.save();
+  c.beginPath();
+  c.moveTo(d0.x, d0.y); c.lineTo(d1.x, d1.y); c.lineTo(d2.x, d2.y);
+  c.closePath(); c.clip();
+  const det = (s1.x - s0.x) * (s2.y - s0.y) - (s2.x - s0.x) * (s1.y - s0.y);
+  if (Math.abs(det) < 1e-9) { c.restore(); return; }
+  const a = ((d1.x - d0.x) * (s2.y - s0.y) - (d2.x - d0.x) * (s1.y - s0.y)) / det;
+  const b = ((d1.y - d0.y) * (s2.y - s0.y) - (d2.y - d0.y) * (s1.y - s0.y)) / det;
+  const cc = ((d2.x - d0.x) * (s1.x - s0.x) - (d1.x - d0.x) * (s2.x - s0.x)) / det;
+  const d = ((d2.y - d0.y) * (s1.x - s0.x) - (d1.y - d0.y) * (s2.x - s0.x)) / det;
+  const e = d0.x - a * s0.x - cc * s0.y;
+  const f = d0.y - b * s0.x - d * s0.y;
+  c.transform(a, b, cc, d, e, f);
+  c.drawImage(img, 0, 0);
+  c.restore();
+}
+function warpImage(c, img, corners, n) {
+  const map = squareToQuad(corners);
+  const tw = img.naturalWidth || img.width, th = img.naturalHeight || img.height;
+  if (!tw || !th) return;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const u0 = i / n, u1 = (i + 1) / n, v0 = j / n, v1 = (j + 1) / n;
+      const p00 = map(u0, v0), p10 = map(u1, v0), p01 = map(u0, v1), p11 = map(u1, v1);
+      const s00 = {x: u0 * tw, y: v0 * th}, s10 = {x: u1 * tw, y: v0 * th};
+      const s01 = {x: u0 * tw, y: v1 * th}, s11 = {x: u1 * tw, y: v1 * th};
+      drawTriangle(c, img, s00, s10, s01, p00, p10, p01);
+      drawTriangle(c, img, s10, s11, s01, p10, p11, p01);
+    }
+  }
+}
+
+/* ---------------- openings ---------------- */
+function makeOpening(windowId, corners, extra) {
+  const u = unitOf(windowId) || {};
+  const o = {
+    uid: ++seq,
+    window_id: windowId,
+    corners: corners,
+    opacity: 0.92,
+    brightness: 1.0,
+    glass_tint: 'clear',
+    options: {
+      frame_color: u.frame_colour_hex || '#2B2F33',
+      bars: {v: 0, h: 0},
+      glass_alpha: 0.55,
+    },
+    img: null,
+    price: null,
+  };
+  return Object.assign(o, extra || {});
+}
+function defaultCorners(windowId) {
+  const u = unitOf(windowId) || {width_mm: 1200, height_mm: 1400};
+  const w = canvas.width * 0.22;
+  const h = w * (u.height_mm / u.width_mm);
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  return {
+    tl: {x: cx - w / 2, y: cy - h / 2}, tr: {x: cx + w / 2, y: cy - h / 2},
+    bl: {x: cx - w / 2, y: cy + h / 2}, br: {x: cx + w / 2, y: cy + h / 2},
+  };
+}
+async function refreshOpening(o) {
+  const res = await api('/windows/' + o.window_id + '/scene-preview', {
+    method: 'POST',
+    json: {options: Object.assign({}, o.options, {glass_tint: o.glass_tint})},
+  });
+  o.price = res.price;
+  const img = new Image();
+  await new Promise(resolve => {
+    img.onload = resolve; img.onerror = resolve;
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(res.svg);
+  });
+  o.img = img;
+  render();
+  renderLists();
+}
+function scheduleRefresh(o) {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => {
+    refreshOpening(o).catch(e => msg(e.message, true));
+  }, 120);
+}
+
+/* ---------------- render ---------------- */
+const layer = document.createElement('canvas');
+const lctx  = layer.getContext('2d');
+let realism = 0.7, hideOld = true, noisePat = null;
+
+function mid(a, b) { return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}; }
+function scaleQuad(c, k) {
+  const m = {x: (c.tl.x + c.tr.x + c.bl.x + c.br.x) / 4, y: (c.tl.y + c.tr.y + c.bl.y + c.br.y) / 4};
+  const f = p => ({x: m.x + (p.x - m.x) * k, y: m.y + (p.y - m.y) * k});
+  return {tl: f(c.tl), tr: f(c.tr), bl: f(c.bl), br: f(c.br)};
+}
+function quadPath(g, c) {
+  g.beginPath();
+  g.moveTo(c.tl.x, c.tl.y); g.lineTo(c.tr.x, c.tr.y);
+  g.lineTo(c.br.x, c.br.y); g.lineTo(c.bl.x, c.bl.y); g.closePath();
+}
+function strokeEdge(a, b, style, lw) {
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+  ctx.strokeStyle = style; ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.stroke();
+}
+function rgbStr(c, a) {
+  return 'rgba(' + Math.round(c.r) + ',' + Math.round(c.g) + ',' + Math.round(c.b) + ',' + (a === undefined ? 1 : a) + ')';
+}
+function sampleWall(c) {
+  const k = scaleQuad(c, 1.18);
+  const pts = [k.tl, k.tr, k.bl, k.br, mid(k.tl, k.tr), mid(k.bl, k.br), mid(k.tl, k.bl), mid(k.tr, k.br)];
+  let r = 0, g = 0, b = 0, n = 0;
+  pts.forEach(p => {
+    const x = Math.round(Math.min(canvas.width - 4, Math.max(0, p.x - 2)));
+    const y = Math.round(Math.min(canvas.height - 4, Math.max(0, p.y - 2)));
+    try {
+      const d = ctx.getImageData(x, y, 4, 4).data;
+      for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+    } catch (e) { /* ignore */ }
+  });
+  if (!n) return {r: 120, g: 90, b: 80};
+  return {r: r / n, g: g / n, b: b / n};
+}
+function getNoise() {
+  if (noisePat) return noisePat;
+  const n = document.createElement('canvas'); n.width = n.height = 128;
+  const c = n.getContext('2d'), d = c.createImageData(128, 128);
+  for (let i = 0; i < d.data.length; i += 4) {
+    const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255;
+  }
+  c.putImageData(d, 0, 0);
+  noisePat = ctx.createPattern(n, 'repeat');
+  return noisePat;
+}
+
+function paintOpening(o, fast) {
+  const c = o.corners, R = fast ? 0 : realism;
+  const w = Math.hypot(c.tr.x - c.tl.x, c.tr.y - c.tl.y);
+  const h = Math.hypot(c.bl.x - c.tl.x, c.bl.y - c.tl.y);
+  const ux = (c.tr.x - c.tl.x) / (w || 1), uy = (c.tr.y - c.tl.y) / (w || 1);
+  const vx = (c.bl.x - c.tl.x) / (h || 1), vy = (c.bl.y - c.tl.y) / (h || 1);
+  let match = 1, wall = null;
+
+  if (R > 0) {
+    wall = sampleWall(c);
+    const lum = 0.2126 * wall.r + 0.7152 * wall.g + 0.0722 * wall.b;
+    match = Math.min(1.05, Math.max(0.85, 0.8 + (lum / 255) * 0.35));
+
+    /* hide the original window with the surrounding wall colour */
+    if (hideOld) {
+      ctx.save();
+      quadPath(ctx, scaleQuad(c, 1.07));
+      ctx.fillStyle = rgbStr(wall, 0.92); ctx.fill();
+      ctx.restore();
+    }
+
+    /* stone sill under the unit */
+    const ex = w * 0.035, sh = h * 0.05;
+    const bl = {x: c.bl.x - ux * ex, y: c.bl.y - uy * ex};
+    const br = {x: c.br.x + ux * ex, y: c.br.y + uy * ex};
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,' + (0.45 * R) + ')';
+    ctx.shadowBlur = Math.max(3, w * 0.02); ctx.shadowOffsetY = Math.max(2, h * 0.012);
+    ctx.beginPath();
+    ctx.moveTo(bl.x - vx * h * 0.01, bl.y - vy * h * 0.01);
+    ctx.lineTo(br.x - vx * h * 0.01, br.y - vy * h * 0.01);
+    ctx.lineTo(br.x + vx * sh, br.y + vy * sh);
+    ctx.lineTo(bl.x + vx * sh, bl.y + vy * sh);
+    ctx.closePath();
+    const sg = ctx.createLinearGradient(bl.x, bl.y, bl.x + vx * sh, bl.y + vy * sh);
+    sg.addColorStop(0, '#e4e1d9'); sg.addColorStop(1, '#a8a49a');
+    ctx.fillStyle = sg; ctx.fill();
+    ctx.restore();
+
+    /* interior behind the glass + cast shadow on the wall */
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,' + (0.55 * R) + ')';
+    ctx.shadowBlur = Math.max(4, w * 0.035); ctx.shadowOffsetY = Math.max(2, h * 0.015);
+    quadPath(ctx, c);
+    const ig = ctx.createLinearGradient(c.tl.x, c.tl.y, c.bl.x, c.bl.y);
+    ig.addColorStop(0, '#0f141a'); ig.addColorStop(1, '#2b2622');
+    ctx.fillStyle = ig; ctx.fill();
+    ctx.restore();
+  }
+
+  /* warp the SVG onto an offscreen layer, then composite with blending */
+  lctx.clearRect(0, 0, layer.width, layer.height);
+  warpImage(lctx, o.img, c, fast ? 8 : 14);
+  ctx.save();
+  ctx.globalAlpha = o.opacity;
+  if ('filter' in ctx) ctx.filter = 'brightness(' + (o.brightness * match) + ')';
+  ctx.drawImage(layer, 0, 0);
+  ctx.restore();
+
+  if (R <= 0) return;
+
+  /* glass: top reveal shadow, sky reflection, glint */
+  const glass = scaleQuad(c, 0.9);
+  ctx.save();
+  quadPath(ctx, glass); ctx.clip();
+  const tg = ctx.createLinearGradient(c.tl.x, c.tl.y, c.bl.x, c.bl.y);
+  tg.addColorStop(0, 'rgba(0,0,0,' + (0.38 * R) + ')'); tg.addColorStop(0.28, 'rgba(0,0,0,0)');
+  ctx.fillStyle = tg; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const sky = ctx.createLinearGradient(c.tl.x, c.tl.y, c.br.x, c.br.y);
+  sky.addColorStop(0, 'rgba(190,220,255,' + (0.30 * R) + ')');
+  sky.addColorStop(0.5, 'rgba(190,220,255,' + (0.06 * R) + ')');
+  sky.addColorStop(1, 'rgba(255,255,255,' + (0.12 * R) + ')');
+  ctx.globalCompositeOperation = 'screen';
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = 'source-over';
+  const gl = ctx.createLinearGradient(c.tl.x, c.tl.y, c.tr.x, c.tr.y);
+  gl.addColorStop(0.18, 'rgba(255,255,255,0)'); gl.addColorStop(0.26, 'rgba(255,255,255,' + (0.20 * R) + ')');
+  gl.addColorStop(0.34, 'rgba(255,255,255,0)'); gl.addColorStop(0.46, 'rgba(255,255,255,' + (0.10 * R) + ')');
+  gl.addColorStop(0.52, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gl; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  /* frame bevel: dark rebate line, lit top/left, shaded bottom/right */
+  const lw = Math.max(1.2, w * 0.005);
+  const inner = scaleQuad(c, 0.9);
+  ctx.save();
+  quadPath(ctx, inner);
+  ctx.strokeStyle = 'rgba(0,0,0,' + (0.40 * R) + ')'; ctx.lineWidth = lw; ctx.stroke();
+  ctx.restore();
+  strokeEdge(c.tl, c.tr, 'rgba(255,255,255,' + (0.35 * R) + ')', lw);
+  strokeEdge(c.tl, c.bl, 'rgba(255,255,255,' + (0.22 * R) + ')', lw);
+  strokeEdge(c.bl, c.br, 'rgba(0,0,0,' + (0.35 * R) + ')', lw);
+  strokeEdge(c.tr, c.br, 'rgba(0,0,0,' + (0.30 * R) + ')', lw);
+
+  /* grain matched to the photo */
+  ctx.save();
+  quadPath(ctx, c); ctx.clip();
+  ctx.globalAlpha = 0.07 * R; ctx.globalCompositeOperation = 'overlay';
+  ctx.fillStyle = getNoise(); ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+function render(forExport, fast) {
+  if (!photo) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(photo, 0, 0, canvas.width, canvas.height);
+  if (showAfter) {
+    openings.forEach(o => { if (o.img) paintOpening(o, fast); });
+  }
+  if (!forExport && showAfter) drawHandles();
+}
+function drawHandles() {
+  const o = openings[active];
+  if (!o) return;
+  const c = o.corners, r = Math.max(6, canvas.width / 150);
+  ctx.save();
+  ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = Math.max(2, r / 3);
+  ctx.beginPath();
+  ctx.moveTo(c.tl.x, c.tl.y); ctx.lineTo(c.tr.x, c.tr.y);
+  ctx.lineTo(c.br.x, c.br.y); ctx.lineTo(c.bl.x, c.bl.y); ctx.closePath();
+  ctx.stroke();
+  ['tl', 'tr', 'br', 'bl'].forEach(k => {
+    ctx.beginPath(); ctx.arc(c[k].x, c[k].y, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
+  });
+  ctx.restore();
+}
+
+/* ---------------- pointer interaction ---------------- */
+function toPhoto(evt) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (evt.clientX - r.left) * (canvas.width / r.width),
+    y: (evt.clientY - r.top) * (canvas.height / r.height),
+  };
+}
+function inQuad(p, c) {
+  const poly = [c.tl, c.tr, c.br, c.bl];
+  let inside = false;
+  for (let i = 0, j = 3; i < 4; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > p.y) !== (b.y > p.y) &&
+        p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+canvas.addEventListener('pointerdown', evt => {
+  if (!photo || !showAfter) return;
+  const p = toPhoto(evt);
+  const hit = Math.max(14, canvas.width / 60);
+  const cur = openings[active];
+  if (cur) {
+    for (const k of ['tl', 'tr', 'br', 'bl']) {
+      if (Math.hypot(cur.corners[k].x - p.x, cur.corners[k].y - p.y) <= hit) {
+        drag = {type: 'corner', key: k}; canvas.setPointerCapture(evt.pointerId); return;
+      }
+    }
+  }
+  for (let i = openings.length - 1; i >= 0; i--) {
+    if (inQuad(p, openings[i].corners)) {
+      setActive(i);
+      drag = {type: 'move', last: p};
+      canvas.setPointerCapture(evt.pointerId);
+      return;
+    }
+  }
+  setActive(-1);
+});
+canvas.addEventListener('pointermove', evt => {
+  if (!drag) return;
+  const o = openings[active]; if (!o) return;
+  const p = toPhoto(evt), c = o.corners;
+  if (drag.type === 'move') {
+    const dx = p.x - drag.last.x, dy = p.y - drag.last.y;
+    ['tl', 'tr', 'bl', 'br'].forEach(k => { c[k].x += dx; c[k].y += dy; });
+    drag.last = p;
+  } else if (freeCorners) {
+    c[drag.key].x = p.x; c[drag.key].y = p.y;
+  } else {
+    const opp = {tl: 'br', br: 'tl', tr: 'bl', bl: 'tr'}[drag.key];
+    const ax = c[opp].x, ay = c[opp].y;
+    const left = Math.min(ax, p.x), right = Math.max(ax, p.x);
+    const top = Math.min(ay, p.y), bottom = Math.max(ay, p.y);
+    c.tl = {x: left, y: top}; c.tr = {x: right, y: top};
+    c.bl = {x: left, y: bottom}; c.br = {x: right, y: bottom};
+  }
+  render(false, true);
+});
+canvas.addEventListener('pointerup', () => { drag = null; render(); });
+
+/* ---------------- UI lists ---------------- */
+function setActive(i) {
+  active = i;
+  renderLists();
+  syncOptionBox();
+  render();
+}
+function renderLists() {
+  const ul = $('unitList'); ul.innerHTML = '';
+  UNITS.forEach(u => {
+    const placed = openings.some(o => o.window_id === u.id);
+    const d = document.createElement('div');
+    d.className = 'bl-unit' + (placed ? ' placed' : '');
+    d.innerHTML = '<span>' + u.label + ' <small>' + u.width_mm + '×' + u.height_mm + '</small></span>';
+    const b = document.createElement('button');
+    b.className = 'btn btn-secondary btn-sm'; b.textContent = 'Add';
+    b.onclick = () => addUnit(u.id);
+    d.appendChild(b); ul.appendChild(d);
+  });
+
+  const ol = $('openList'); ol.innerHTML = '';
+  if (!openings.length) ol.innerHTML = '<div style="font-size:12px;color:#8896A8;">Nothing placed yet.</div>';
+  openings.forEach((o, i) => {
+    const u = unitOf(o.window_id) || {label: 'Unit'};
+    const d = document.createElement('div');
+    d.className = 'bl-open' + (i === active ? ' active' : '');
+    d.innerHTML = '<span>' + u.label + '</span><b>' + (o.price ? money(o.price.total) : '…') + '</b>';
+    d.onclick = () => setActive(i);
+    ol.appendChild(d);
+  });
+
+  let total = 0; const rows = $('priceRows'); rows.innerHTML = '';
+  openings.forEach(o => {
+    if (!o.price) return;
+    total += o.price.total;
+    const u = unitOf(o.window_id) || {label: 'Unit'};
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + u.label + '</td><td>' + money(o.price.total) + '</td>';
+    rows.appendChild(tr);
+  });
+  $('sceneTotal').textContent = money(total);
+}
+function syncOptionBox() {
+  const o = openings[active];
+  $('optBox').style.display = o ? 'block' : 'none';
+  if (!o) return;
+  document.querySelectorAll('#swatches .bl-sw').forEach(s =>
+    s.classList.toggle('on', s.dataset.hex.toUpperCase() === String(o.options.frame_color).toUpperCase()));
+  document.querySelectorAll('#tints .bl-tint').forEach(t =>
+    t.classList.toggle('on', t.dataset.tint === o.glass_tint));
+  $('barV').textContent = o.options.bars.v;
+  $('barH').textContent = o.options.bars.h;
+  $('glassAlpha').value = Math.round(o.options.glass_alpha * 100);
+  $('gaVal').textContent = Math.round(o.options.glass_alpha * 100) + '%';
+  $('opacity').value = Math.round(o.opacity * 100);
+  $('opVal').textContent = Math.round(o.opacity * 100) + '%';
+  $('brightness').value = Math.round(o.brightness * 100);
+  $('brVal').textContent = Math.round(o.brightness * 100) + '%';
+}
+async function addUnit(windowId) {
+  if (!photo) { msg('Upload a photo first.', true); return; }
+  const o = makeOpening(windowId, defaultCorners(windowId));
+  openings.push(o);
+  active = openings.length - 1;
+  syncOptionBox();
+  try { await refreshOpening(o); } catch (e) { msg(e.message, true); }
+}
+
+/* ---------------- option controls ---------------- */
+document.querySelectorAll('#swatches .bl-sw').forEach(s => s.onclick = () => {
+  const o = openings[active]; if (!o) return;
+  o.options.frame_color = s.dataset.hex; syncOptionBox(); scheduleRefresh(o);
+});
+document.querySelectorAll('#tints .bl-tint').forEach(t => t.onclick = () => {
+  const o = openings[active]; if (!o) return;
+  o.glass_tint = t.dataset.tint; syncOptionBox(); scheduleRefresh(o);
+});
+document.querySelectorAll('[data-bar]').forEach(b => b.onclick = () => {
+  const o = openings[active]; if (!o) return;
+  const k = b.dataset.bar;
+  o.options.bars[k] = Math.max(0, Math.min(8, o.options.bars[k] + Number(b.dataset.d)));
+  syncOptionBox(); scheduleRefresh(o);
+});
+$('glassAlpha').oninput = e => {
+  const o = openings[active]; if (!o) return;
+  o.options.glass_alpha = e.target.value / 100; $('gaVal').textContent = e.target.value + '%';
+  scheduleRefresh(o);
+};
+$('opacity').oninput = e => {
+  const o = openings[active]; if (!o) return;
+  o.opacity = e.target.value / 100; $('opVal').textContent = e.target.value + '%'; render();
+};
+$('brightness').oninput = e => {
+  const o = openings[active]; if (!o) return;
+  o.brightness = e.target.value / 100; $('brVal').textContent = e.target.value + '%'; render();
+};
+$('btnRemove').onclick = () => {
+  if (active < 0) return;
+  openings.splice(active, 1); setActive(-1);
+};
+$('btnApply').onclick = async () => {
+  const o = openings[active]; if (!o) return;
+  try {
+    const res = await api('/windows/' + o.window_id + '/scene-options', {
+      method: 'POST', json: {options: o.options},
+    });
+    const u = unitOf(o.window_id);
+    if (u) u.frame_colour_hex = o.options.frame_color;
+    msg('Design updated' + (res.quotations && res.quotations.length
+      ? ' · ' + res.quotations.length + ' quotation(s) repriced' : ''));
+  } catch (e) { msg(e.message, true); }
+};
+$('btnPersp').onclick = () => {
+  freeCorners = !freeCorners;
+  $('btnPersp').style.background = freeCorners ? 'var(--copper)' : '';
+};
+$('btnBefore').onclick = () => { showAfter = !showAfter; render(); };
+$('realism').oninput = e => { realism = e.target.value / 100; $('rlVal').textContent = e.target.value + '%'; render(); };
+$('hideOld').onchange = e => { hideOld = e.target.checked; render(); };
+
+/* ---------------- photo + save ---------------- */
+function loadPhoto(url, w, h) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      photo = img;
+      canvas.width = w || img.naturalWidth; canvas.height = h || img.naturalHeight;
+      layer.width = canvas.width; layer.height = canvas.height;
+      canvas.style.display = 'block'; $('emptyHint').style.display = 'none';
+      resolve();
+    };
+    img.src = url;
+  });
+}
+$('uploadZone').onclick = () => $('photoInput').click();
+$('photoInput').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const fd = new FormData(); fd.append('photo', f);
+  try {
+    msg('Uploading…');
+    const s = await api('/projects/' + PROJECT_ID + '/scene/photo', {method: 'POST', body: fd});
+    await loadPhoto(s.photo_url + '?v=' + s.version, s.photo_width, s.photo_height);
+    render(); msg('Photo uploaded');
+  } catch (err) { msg(err.message, true); }
+};
+$('btnSave').onclick = async () => {
+  if (!photo) { msg('Upload a photo first.', true); return; }
+  try {
+    msg('Saving…');
+    await api('/projects/' + PROJECT_ID + '/scene/openings', {
+      method: 'PUT',
+      json: {openings: openings.map(o => ({
+        window_id: o.window_id, corners: o.corners, opacity: o.opacity,
+        brightness: o.brightness, glass_tint: o.glass_tint,
+      }))},
+    });
+    const keep = showAfter; showAfter = true;
+    render(true);
+    const png = canvas.toDataURL('image/png');
+    showAfter = keep; render();
+    await api('/projects/' + PROJECT_ID + '/scene/composite', {method: 'POST', json: {image: png}});
+    msg('Scene saved');
+  } catch (e) { msg(e.message, true); }
+};
+$('btnLink').onclick = async () => {
+  const id = $('quoteSel').value;
+  if (!id) { msg('Select a quotation.', true); return; }
+  try {
+    await api('/projects/' + PROJECT_ID + '/scene/link-quotation', {
+      method: 'POST', json: {quotation_id: Number(id)},
+    });
+    msg('Scene linked to quotation');
+  } catch (e) { msg(e.message, true); }
+};
+
+/* ---------------- boot ---------------- */
+(async function boot() {
+  renderLists();
+  try {
+    const s = await api('/projects/' + PROJECT_ID + '/scene');
+    if (s.photo_url) {
+      await loadPhoto(s.photo_url + '?v=' + s.version, s.photo_width, s.photo_height);
+      for (const row of (s.openings || [])) {
+        const o = makeOpening(row.window_id, row.corners, {
+          opacity: row.opacity, brightness: row.brightness, glass_tint: row.glass_tint,
+        });
+        openings.push(o);
+      }
+      render();
+      await Promise.all(openings.map(o => refreshOpening(o).catch(() => null)));
+    }
+  } catch (e) { msg(e.message, true); }
+})();
+
+})();
+</script>
+{% endblock %}

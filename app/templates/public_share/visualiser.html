@@ -1,0 +1,123 @@
+{% extends 'public_share/base.html' %}
+{% block title %}Your new windows &amp; doors — {{ project.display_name }}{% endblock %}
+{% block subtitle %}Preview · Quotation {{ quotation.quotation_number }}{% endblock %}
+
+{% block content %}
+
+{% if state.all_approved and state.open_count == 0 %}
+  <div class="pub-banner ok">Everything has been approved. Thank you!</div>
+{% elif state.open_count %}
+  <div class="pub-banner warn">
+    {{ state.open_count }} change request{{ '' if state.open_count == 1 else 's' }} sent — we'll be in touch shortly.
+  </div>
+{% endif %}
+
+{% if not can_respond %}
+  <div class="pub-banner bad">This preview is now closed and can no longer be changed.</div>
+{% endif %}
+
+{% include 'public_share/_scene_composite.html' %}
+
+{% for item in items %}
+<div class="pub-card" id="item-{{ item.line_id }}">
+  <h2>
+    {{ item.label }}
+    {% if item.qty and item.qty > 1 %}<span class="pub-muted">× {{ item.qty }}</span>{% endif %}
+    {% if item.approved %}
+      <span style="color:#1F6B3A;font-size:13px;font-weight:600;margin-left:8px;">✔ Approved</span>
+    {% elif item.needs_review %}
+      <span style="color:#8A5A12;font-size:13px;font-weight:600;margin-left:8px;">Updated — please review again</span>
+    {% endif %}
+  </h2>
+
+  <div class="pub-split">
+    <div>
+      {% if item.has_photo %}
+        <img src="{{ url_for('public_share.visual_image', token=link.token, line_id=item.line_id) }}"
+             alt="{{ item.label }} on your home"
+             style="width:100%;height:auto;border-radius:10px;display:block;">
+      {% elif item.svg %}
+        <div style="background:#F3F6F9;border-radius:10px;padding:10px;">{{ item.svg|safe }}</div>
+      {% else %}
+        <div class="pub-muted">No preview available.</div>
+      {% endif %}
+    </div>
+
+    <div>
+      <div class="pub-row"><span class="pub-muted">Size</span>
+        <span>{% if item.width_mm and item.height_mm %}{{ item.width_mm }} × {{ item.height_mm }} mm{% else %}—{% endif %}</span></div>
+      {% if item.material %}
+      <div class="pub-row"><span class="pub-muted">Material</span><span>{{ item.material }}</span></div>
+      {% endif %}
+      <div class="pub-row total"><span>Price</span>
+        <span>{{ currency }}{{ '{:,.2f}'.format(item.amount|float) if item.amount is not none else '—' }}</span></div>
+      {% if item.notes %}
+      <div class="pub-muted" style="margin-top:8px;">{{ item.notes }}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if item.thread %}
+  <div style="margin-top:14px;border-top:1px solid #F3F4F6;padding-top:10px;">
+    {% for t in item.thread %}
+    <div class="pub-muted" style="margin-bottom:6px;">
+      <strong>{{ t.author_name or ('Our team' if t.kind == 'STAFF_REPLY' else 'You') }}:</strong>
+      {{ t.comment }}
+      {% if t.status == 'RESOLVED' %}<em>(resolved)</em>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if can_respond %}
+  <div class="pub-split" style="margin-top:14px;">
+    <form method="post" action="{{ url_for('public_share.visual_approve', token=link.token) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="line_id" value="{{ item.line_id }}">
+      <input type="hidden" name="author_name" value="">
+      <button type="submit" class="btn btn-primary" style="width:100%;"
+              {% if item.approved %}disabled{% endif %}>
+        {{ '✔ Approved' if item.approved else '👍 Looks Good' }}
+      </button>
+    </form>
+
+    <form method="post" action="{{ url_for('public_share.visual_comment', token=link.token) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="line_id" value="{{ item.line_id }}">
+      <input type="hidden" name="author_name" value="">
+      <div class="pub-form-row">
+        <textarea name="comment" rows="2" maxlength="2000" required
+                  placeholder="What would you like changed?"></textarea>
+      </div>
+      <button type="submit" class="btn btn-secondary" style="width:100%;">✏️ Request Change</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<div class="pub-card">
+  <div class="pub-row"><span>Subtotal</span>
+    <span>{{ currency }}{{ '{:,.2f}'.format(quotation.subtotal|float) if quotation.subtotal is not none else '—' }}</span></div>
+  {% if quotation.discount_amount and quotation.discount_amount|float > 0 %}
+  <div class="pub-row"><span>Discount</span>
+    <span>−{{ currency }}{{ '{:,.2f}'.format(quotation.discount_amount|float) }}</span></div>
+  {% endif %}
+  {% if quotation.tax_amount is not none and quotation.tax_amount|float > 0 %}
+  <div class="pub-row"><span>Tax</span>
+    <span>{{ currency }}{{ '{:,.2f}'.format(quotation.tax_amount|float) }}</span></div>
+  {% endif %}
+  <div class="pub-row total"><span>Total</span>
+    <span>{{ currency }}{{ '{:,.2f}'.format(quotation.grand_total|float) if quotation.grand_total is not none else '—' }}</span></div>
+
+  {% if can_respond and items|length > 1 %}
+  <form method="post" action="{{ url_for('public_share.visual_approve', token=link.token) }}" style="margin-top:14px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="line_id" value="all">
+    <input type="hidden" name="author_name" value="">
+    <button type="submit" class="btn btn-primary" style="width:100%;">Approve everything</button>
+  </form>
+  {% endif %}
+</div>
+
+{% endblock %}
