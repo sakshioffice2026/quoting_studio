@@ -18,7 +18,8 @@
         <h1>Quotations</h1>
         <div class="sub mono">{{ quotations|length }} record{{ 's' if quotations|length != 1 }}</div>
       </div>
-      <div>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn btn-secondary" data-open-merge>⇄ Merge Quotes</button>
         <button type="button" class="btn btn-primary" data-open-create-quote>+ Create Quote</button>
       </div>
     </div>
@@ -92,6 +93,7 @@
               <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}" class="btn btn-secondary btn-sm">View →</a>
               {% if q.is_editable %}
               <a href="{{ url_for('quotation.detail', quotation_id=q.id) }}#edit-quotation" class="btn btn-secondary btn-sm">Edit</a>
+              <button type="button" class="btn btn-secondary btn-sm" data-open-merge data-merge-id="{{ q.id }}">Merge</button>
               {% endif %}
               {% if q.status != QuotationStatus.ACCEPTED %}
               <form method="post" action="{{ url_for('quotation.delete', quotation_id=q.id) }}" style="display:inline;" onsubmit="return confirm('Delete quotation {{ q.quotation_number }}? This cannot be undone.');">
@@ -119,4 +121,333 @@
 </div>
 
 {% include 'quotation_flow/_select_customer_modal.html' %}
+
+{# =================== MERGE DRAFT QUOTATIONS MODAL =================== #}
+<style>
+  .mq-overlay { position:fixed; inset:0; background:rgba(15,23,42,.55); display:none; align-items:center; justify-content:center; z-index:1000; padding:16px; }
+  .mq-overlay.open { display:flex; }
+  .mq-modal { background:#fff; width:100%; max-width:860px; max-height:92vh; display:flex; flex-direction:column; border-radius:12px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
+  .mq-head { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #E5E7EB; }
+  .mq-head h3 { margin:0; font-size:16px; color:var(--navy); }
+  .mq-close { background:none; border:0; font-size:22px; line-height:1; cursor:pointer; color:#6B7280; }
+  .mq-body { display:grid; grid-template-columns:1.2fr 1fr; gap:18px; padding:18px 20px; overflow:auto; }
+  @media (max-width:760px) { .mq-body { grid-template-columns:1fr; } }
+  .mq-tools { display:flex; gap:10px; align-items:center; margin-top:8px; font-size:12px; color:#374151; }
+  .mq-list { border:1px solid #E5E7EB; border-radius:8px; max-height:340px; overflow:auto; margin-top:10px; }
+  .mq-row { display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border-bottom:1px solid #F3F4F6; cursor:pointer; }
+  .mq-row:last-child { border-bottom:0; }
+  .mq-row:hover { background:#F9FAFB; }
+  .mq-row.selected { background:#FFF7ED; }
+  .mq-row input { margin-top:3px; }
+  .mq-row .n { font-weight:600; color:var(--navy); font-size:13px; }
+  .mq-row .m { font-size:12px; color:#6B7280; }
+  .mq-row .t { margin-left:auto; font-weight:600; color:var(--copper); font-size:13px; white-space:nowrap; }
+  .mq-empty { padding:16px; text-align:center; color:#6B7280; font-size:13px; }
+  .mq-panel { border:1px solid #E5E7EB; border-radius:8px; padding:14px; background:#FAFAFA; }
+  .mq-panel h4 { margin:0 0 10px; font-size:13px; color:var(--navy); }
+  .mq-sum { display:flex; justify-content:space-between; font-size:13px; padding:3px 0; }
+  .mq-sum.total { border-top:1px solid #E5E7EB; margin-top:6px; padding-top:8px; font-weight:700; color:var(--copper); }
+  .mq-warn { margin-top:10px; padding:8px 10px; border-radius:6px; background:#FEF3C7; color:#92400E; font-size:12px; }
+  .mq-err { margin-top:10px; padding:8px 10px; border-radius:6px; background:#FEE2E2; color:#B91C1C; font-size:12px; }
+  .mq-opts { margin-top:14px; display:grid; gap:10px; }
+  .mq-opts label { font-size:12px; color:#374151; display:block; margin-bottom:3px; }
+  .mq-foot { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:14px 20px; border-top:1px solid #E5E7EB; }
+  .mq-count { font-size:13px; color:#374151; }
+</style>
+
+<div class="mq-overlay" id="mqOverlay" aria-hidden="true">
+  <div class="mq-modal" role="dialog" aria-modal="true" aria-labelledby="mqTitle">
+    <div class="mq-head">
+      <h3 id="mqTitle">Merge Draft Quotations</h3>
+      <button type="button" class="mq-close" id="mqClose" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="mq-body">
+      <div>
+        <input type="text" class="form-control" id="mqSearch"
+               placeholder="Search by quote #, customer, project or product" autocomplete="off">
+        <div class="mq-tools">
+          <label style="display:flex;gap:6px;align-items:center;margin:0;">
+            <input type="checkbox" id="mqSameCustomer" checked> Same customer only
+          </label>
+        </div>
+        <div class="mq-list" id="mqList"><div class="mq-empty">Loading…</div></div>
+      </div>
+
+      <div>
+        <div class="mq-panel">
+          <h4>Merged result</h4>
+          <div id="mqSummary"><div class="mq-empty">Select at least 2 quotations.</div></div>
+          <div id="mqMsg"></div>
+        </div>
+
+        <div class="mq-opts">
+          <div>
+            <label for="mqMode">Merge into</label>
+            <select id="mqMode" class="form-control">
+              <option value="new">A new quotation</option>
+              <option value="into">First selected quotation</option>
+            </select>
+          </div>
+          <div>
+            <label for="mqSourceAction">Original quotations</label>
+            <select id="mqSourceAction" class="form-control">
+              <option value="archive">Archive them (mark Expired)</option>
+              <option value="delete">Delete them</option>
+              <option value="keep">Keep them untouched</option>
+            </select>
+          </div>
+          <label style="display:flex;gap:6px;align-items:center;margin:0;">
+            <input type="checkbox" id="mqDedupe" checked>
+            Combine identical items by quantity
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="mq-foot">
+      <span class="mq-count" id="mqCount">0 selected</span>
+      <div style="display:flex;gap:8px;">
+        <button type="button" class="btn btn-secondary" id="mqCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="mqSubmit" disabled>Merge Quotations</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var URLS = {
+    candidates: "{{ url_for('quotation.merge_candidates') }}",
+    preview:    "{{ url_for('quotation.merge_preview') }}",
+    run:        "{{ url_for('quotation.merge_run') }}"
+  };
+  var CSRF = "{{ csrf_token() }}";
+
+  function $(id) { return document.getElementById(id); }
+  var overlay = $('mqOverlay'), list = $('mqList'), search = $('mqSearch');
+  var sameCust = $('mqSameCustomer'), summary = $('mqSummary'), msg = $('mqMsg');
+  var modeSel = $('mqMode'), srcSel = $('mqSourceAction'), dedupe = $('mqDedupe');
+  var submit = $('mqSubmit'), count = $('mqCount');
+
+  var selected = [];
+  var initialCustomer = null;
+  var pendingSelectAll = false;
+  var cache = {};
+  var searchTimer = null, previewTimer = null, previewSeq = 0, previewOk = false;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function money(n) {
+    return '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function activeCustomer() {
+    if (!sameCust.checked) return null;
+    for (var i = 0; i < selected.length; i++) {
+      var c = cache[selected[i]];
+      if (c && c.customer_id) return c.customer_id;
+    }
+    return initialCustomer;
+  }
+
+  function openModal(preselectId, customerId, selectAll) {
+    selected = preselectId ? [Number(preselectId)] : [];
+    initialCustomer = customerId ? Number(customerId) : null;
+    pendingSelectAll = !!selectAll;
+    search.value = '';
+    msg.innerHTML = '';
+    previewOk = false;
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    loadCandidates();
+    refreshState();
+  }
+  function closeModal() {
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+
+  function loadCandidates() {
+    var params = new URLSearchParams();
+    if (search.value.trim()) params.set('q', search.value.trim());
+    var cust = activeCustomer();
+    if (cust) params.set('customer_id', cust);
+    if (selected.length) params.set('include', selected.join(','));
+
+    fetch(URLS.candidates + '?' + params.toString(), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (rows) {
+        rows.forEach(function (r) { cache[r.id] = r; });
+        if (pendingSelectAll) {
+          pendingSelectAll = false;
+          selected = rows.slice(0, 10).map(function (r) { return r.id; });
+        }
+        renderList(rows);
+        refreshState();
+      })
+      .catch(function () {
+        list.innerHTML = '<div class="mq-empty">Could not load quotations.</div>';
+      });
+  }
+
+  function renderList(rows) {
+    if (!rows.length) {
+      list.innerHTML = '<div class="mq-empty">No matching draft quotations.</div>';
+      return;
+    }
+    list.innerHTML = rows.map(function (r) {
+      var on = selected.indexOf(r.id) !== -1;
+      var items = r.labels.length ? esc(r.labels.join(', ')) + (r.item_count > r.labels.length ? '…' : '') : 'No items';
+      return '<div class="mq-row' + (on ? ' selected' : '') + '" data-id="' + r.id + '">' +
+        '<input type="checkbox"' + (on ? ' checked' : '') + ' tabindex="-1">' +
+        '<div><div class="n">' + esc(r.quotation_number) + ' · ' + esc(r.customer_name || 'Walk-In') + '</div>' +
+        '<div class="m">' + esc(r.project_name) + ' — ' + r.item_count + ' item' + (r.item_count === 1 ? '' : 's') + ': ' + items + '</div></div>' +
+        '<div class="t">' + money(r.grand_total) + '</div></div>';
+    }).join('');
+  }
+
+  function toggle(id) {
+    var idx = selected.indexOf(id);
+    if (idx === -1) {
+      if (selected.length >= 10) { showError('You can merge at most 10 quotations at once.'); return; }
+      selected.push(id);
+    } else {
+      selected.splice(idx, 1);
+    }
+    msg.innerHTML = '';
+    if (sameCust.checked) { loadCandidates(); } else { updateRows(); refreshState(); }
+  }
+
+  function updateRows() {
+    list.querySelectorAll('.mq-row').forEach(function (row) {
+      var id = Number(row.getAttribute('data-id'));
+      var on = selected.indexOf(id) !== -1;
+      row.classList.toggle('selected', on);
+      row.querySelector('input').checked = on;
+    });
+  }
+
+  function showError(text) { msg.innerHTML = '<div class="mq-err">' + esc(text) + '</div>'; }
+
+  function payload() {
+    return {
+      ids: selected,
+      target_id: modeSel.value === 'into' ? selected[0] : null,
+      dedupe: dedupe.checked,
+      source_action: srcSel.value
+    };
+  }
+
+  function refreshState() {
+    count.textContent = selected.length + ' selected';
+    updateRows();
+    previewOk = false;
+    submit.disabled = true;
+    clearTimeout(previewTimer);
+    if (selected.length < 2) {
+      summary.innerHTML = '<div class="mq-empty">Select at least 2 quotations.</div>';
+      return;
+    }
+    previewTimer = setTimeout(runPreview, 250);
+  }
+
+  function runPreview() {
+    var seq = ++previewSeq;
+    fetch(URLS.preview, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(payload())
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (seq !== previewSeq) return;
+        if (!res.ok) {
+          summary.innerHTML = '<div class="mq-empty">—</div>';
+          showError(res.d.error || 'Preview failed.');
+          return;
+        }
+        var d = res.d, html = '';
+        html += '<div class="mq-sum"><span>Line items</span><span>' + d.item_count + '</span></div>';
+        html += '<div class="mq-sum"><span>Subtotal</span><span>' + money(d.subtotal) + '</span></div>';
+        if (d.discount_amount) html += '<div class="mq-sum"><span>Discount (' + d.discount_pct + '%)</span><span>− ' + money(d.discount_amount) + '</span></div>';
+        if (d.installation_charge) html += '<div class="mq-sum"><span>Installation</span><span>' + money(d.installation_charge) + '</span></div>';
+        if (d.transport_charge) html += '<div class="mq-sum"><span>Transport</span><span>' + money(d.transport_charge) + '</span></div>';
+        if (d.other_amount) html += '<div class="mq-sum"><span>Other charges</span><span>' + money(d.other_amount) + '</span></div>';
+        if (d.amc_price) html += '<div class="mq-sum"><span>AMC</span><span>' + money(d.amc_price) + '</span></div>';
+        html += '<div class="mq-sum"><span>Tax (' + (d.tax_rate * 100).toFixed(0) + '%)</span><span>' + money(d.tax_amount) + '</span></div>';
+        html += '<div class="mq-sum total"><span>Grand total</span><span>' + money(d.grand_total) + '</span></div>';
+        summary.innerHTML = html;
+
+        var warns = (d.warnings || []).slice();
+        if (d.needs_discount_approval) warns.push('Merged discount is above the limit and will need manager approval.');
+        msg.innerHTML = warns.map(function (w) { return '<div class="mq-warn">' + esc(w) + '</div>'; }).join('');
+        previewOk = true;
+        submit.disabled = false;
+      })
+      .catch(function () { showError('Preview failed.'); });
+  }
+
+  function runMerge() {
+    if (!previewOk) return;
+    var p = payload();
+    if (p.source_action === 'delete' &&
+        !confirm('The original quotations will be permanently deleted after merging. Continue?')) return;
+    submit.disabled = true;
+    submit.textContent = 'Merging…';
+    fetch(URLS.run, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(p)
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (res.ok && res.d.url) { window.location.href = res.d.url; return; }
+        showError(res.d.error || 'Merge failed.');
+        submit.disabled = false;
+        submit.textContent = 'Merge Quotations';
+      })
+      .catch(function () {
+        showError('Merge failed.');
+        submit.disabled = false;
+        submit.textContent = 'Merge Quotations';
+      });
+  }
+
+  document.querySelectorAll('[data-open-merge]').forEach(function (btn) {
+    btn.addEventListener('click', function () { openModal(btn.getAttribute('data-merge-id')); });
+  });
+
+  var urlParams = new URLSearchParams(window.location.search);
+  var autoMerge = urlParams.get('merge');
+  var autoCustomer = urlParams.get('merge_customer');
+  if (autoMerge && /^\d+$/.test(autoMerge)) {
+    openModal(autoMerge);
+  } else if (autoCustomer && /^\d+$/.test(autoCustomer)) {
+    openModal(null, autoCustomer, true);
+  }
+  $('mqClose').addEventListener('click', closeModal);
+  $('mqCancel').addEventListener('click', closeModal);
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
+
+  list.addEventListener('click', function (e) {
+    var row = e.target.closest('.mq-row');
+    if (row) toggle(Number(row.getAttribute('data-id')));
+  });
+  search.addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadCandidates, 250);
+  });
+  sameCust.addEventListener('change', loadCandidates);
+  modeSel.addEventListener('change', refreshState);
+  dedupe.addEventListener('change', refreshState);
+  submit.addEventListener('click', runMerge);
+})();
+</script>
 {% endblock %}

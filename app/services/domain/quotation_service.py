@@ -60,18 +60,15 @@ def is_project_quoted(tenant_id: int, project_id: int) -> bool:
 #  Guard: design must be APPROVED before quoting
 # ------------------------------------------------------------------ #
 
-def _require_approved_design(tenant_id: int, project_id: int) -> DesignApproval:
+def _require_approved_design(tenant_id: int, project_id: int) -> DesignApproval | None:
+    """Design approval is optional. Returns the latest APPROVED design when one
+    exists, otherwise None so the quotation can still be generated."""
     from sqlalchemy import desc
-    approval = (DesignApproval.query
-                .filter_by(tenant_id=tenant_id, project_id=project_id,
-                            status=DesignApprovalStatus.APPROVED)
-                .order_by(desc(DesignApproval.revision_number))
-                .first())
-    if not approval:
-        raise ValueError(
-            'A customer-approved design (APPROVAL-APPROVED) is required before generating a quotation.'
-        )
-    return approval
+    return (DesignApproval.query
+            .filter_by(tenant_id=tenant_id, project_id=project_id,
+                       status=DesignApprovalStatus.APPROVED)
+            .order_by(desc(DesignApproval.revision_number))
+            .first())
 
 
 # ------------------------------------------------------------------ #
@@ -291,7 +288,7 @@ def create_quotation(
     quotation = Quotation(
         tenant_id               = tenant_id,
         project_id              = project_id,
-        design_approval_id      = approval.id,
+        design_approval_id      = approval.id if approval else None,
         quotation_number        = Quotation.generate_number(tenant_id),
         quotation_version       = new_version,
         parent_quotation_id     = parent_id,

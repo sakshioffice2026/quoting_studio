@@ -25,6 +25,9 @@
           {% if quotation.project %}
           <a href="{{ url_for('projects.detail', project_id=quotation.project_id) }}" class="btn btn-secondary btn-sm">Project</a>
           {% endif %}
+          {% if quotation.is_editable %}
+          <a href="{{ url_for('quotation.index', merge=quotation.id) }}" class="btn btn-secondary btn-sm">⇄ Merge with other drafts</a>
+          {% endif %}
           <a href="{{ url_for('proposal.download_docx', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Proposal (DOCX)</a>
           <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>

@@ -3,9 +3,32 @@ from flask_login import login_required, current_user
 
 from ..models import Project
 from ..models.design_approval import DesignApprovalStatus
-from ..services.domain import design_approval_service
+from ..models.share_link import ShareLinkType
+from ..services.domain import design_approval_service, share_link_service
 
 design_approval_bp = Blueprint('design_approval', __name__)
+
+
+def _active_link_url(approval):
+    """URL of the current active customer link, or None (never creates one)."""
+    if approval.status not in (DesignApprovalStatus.APPROVAL_SENT, DesignApprovalStatus.APPROVED):
+        return None
+    link = share_link_service.get_latest(
+        current_user.tenant_id, ShareLinkType.DESIGN_APPROVAL, approval.id
+    )
+    if not link or not link.is_active:
+        return None
+    return url_for('public_share.view', token=link.token, _external=True)
+
+
+def _ensure_customer_link(approval):
+    """Creates (or reuses) the customer link right after the design is sent."""
+    share_link_service.get_or_create_link(
+        tenant_id=current_user.tenant_id,
+        resource_type=ShareLinkType.DESIGN_APPROVAL,
+        resource_id=approval.id,
+        created_by=current_user.id,
+    )
 
 
 @design_approval_bp.route('/design-approvals')
@@ -31,6 +54,7 @@ def detail(approval_id):
         design_approval_service.expire_approval(current_user.tenant_id, approval_id)
         approval = design_approval_service.get_approval(current_user.tenant_id, approval_id)
     return render_template('design_approval_detail.html', approval=approval,
+                           share_url=_active_link_url(approval),
                            DesignApprovalStatus=DesignApprovalStatus)
 
 
@@ -58,10 +82,12 @@ def send_to_customer(approval_id):
         approval = design_approval_service.send_to_customer(
             current_user.tenant_id, approval_id, current_user.id, sla_days=sla_days
         )
+        _ensure_customer_link(approval)
         flash(
             f'Design sent to customer for approval — response expected within '
             f'{approval.approval_sla_days} days (by '
-            f'{approval.expires_at.strftime("%Y-%m-%d") if approval.expires_at else "N/A"}).',
+            f'{approval.expires_at.strftime("%Y-%m-%d") if approval.expires_at else "N/A"}). '
+            f'The customer link is ready below.',
             'success',
         )
     except (ValueError, LookupError) as exc:
@@ -78,6 +104,7 @@ def resend_to_customer(approval_id):
         approval = design_approval_service.resend_to_customer(
             current_user.tenant_id, approval_id, current_user.id, sla_days=sla_days
         )
+        _ensure_customer_link(approval)
         flash(
             f'Design re-sent to customer — new deadline '
             f'{approval.expires_at.strftime("%Y-%m-%d") if approval.expires_at else "N/A"}.',

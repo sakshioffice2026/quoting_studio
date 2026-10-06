@@ -1,7 +1,7 @@
 import os
 import io
 import json
-from flask import (Blueprint, render_template, request, redirect, url_for,
+from flask import (Blueprint, render_template, request, redirect, url_for, jsonify,
                     flash, send_file, current_app, abort)
 from flask_login import login_required, current_user
 
@@ -107,6 +107,9 @@ def generate(project_id):
             )
         else:
             flash(f'Quotation {q.quotation_number} (v{q.quotation_version}) created.', 'success')
+        if not q.line_items:
+            flash('No windows or doors on this project yet — add products to the quotation.', 'warning')
+            return redirect(url_for('quotation_flow.builder', quotation_id=q.id))
         return redirect(url_for('quotation.detail', quotation_id=q.id))
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
@@ -317,3 +320,78 @@ def delete(quotation_id):
     except (ValueError, LookupError) as exc:
         flash(str(exc), 'error')
         return redirect(url_for('quotation.detail', quotation_id=quotation_id))
+
+
+# ================================================================== #
+#  MERGE DRAFT QUOTATIONS
+# ================================================================== #
+def _merge_int_list(raw):
+    out = []
+    for part in (raw or '').split(','):
+        part = part.strip()
+        if part.isdigit():
+            out.append(int(part))
+    return out
+
+
+@quotation_bp.route('/quotations/merge/candidates')
+@login_required
+def merge_candidates():
+    rows = quotation_service.list_merge_candidates(
+        current_user.tenant_id,
+        term=(request.args.get('q') or '').strip() or None,
+        customer_id=request.args.get('customer_id', type=int),
+        include_ids=_merge_int_list(request.args.get('include')),
+        exclude_ids=_merge_int_list(request.args.get('exclude')),
+    )
+    return jsonify(rows)
+
+
+@quotation_bp.route('/quotations/merge/suggest/<int:quotation_id>')
+@login_required
+def merge_suggest(quotation_id):
+    return jsonify(quotation_service.suggest_merge_for(current_user.tenant_id, quotation_id))
+
+
+@quotation_bp.route('/quotations/merge/preview', methods=['POST'])
+@login_required
+def merge_preview():
+    data = request.get_json(silent=True) or {}
+    try:
+        result = quotation_service.preview_merge(
+            current_user.tenant_id,
+            data.get('ids') or [],
+            dedupe=bool(data.get('dedupe', True)),
+            target_id=data.get('target_id') or None,
+        )
+    except LookupError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify(result)
+
+
+@quotation_bp.route('/quotations/merge/run', methods=['POST'])
+@login_required
+def merge_run():
+    data = request.get_json(silent=True) or {}
+    try:
+        q = quotation_service.merge_quotations(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            ids=data.get('ids') or [],
+            target_id=data.get('target_id') or None,
+            dedupe=bool(data.get('dedupe', True)),
+            source_action=data.get('source_action') or quotation_service.MERGE_ARCHIVE,
+        )
+    except LookupError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    return jsonify({
+        'id':               q.id,
+        'quotation_number': q.quotation_number,
+        'status':           q.status,
+        'url':              url_for('quotation.detail', quotation_id=q.id),
+    })

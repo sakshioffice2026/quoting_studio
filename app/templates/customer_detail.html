@@ -29,6 +29,7 @@
           {% if customer.email %}
           <a href="mailto:{{ customer.email }}" class="btn btn-secondary btn-sm">Email</a>
           {% endif %}
+          <a href="{{ url_for('quotation.index', merge_customer=customer.id) }}" class="btn btn-primary btn-sm">⇄ Merge Quotes</a>
           <a href="{{ url_for('customers.index') }}" class="btn btn-secondary btn-sm">← All Customers</a>
         </div>
       </div>

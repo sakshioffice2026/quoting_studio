@@ -24,7 +24,7 @@
           <span class="customer-chip">Revision {{ approval.revision_number }}</span>
         </div>
         <div class="lead-header-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
-          {% if approval.status != DesignApprovalStatus.DRAFT and approval.status != DesignApprovalStatus.SUPERSEDED %}
+          {% if approval.status == DesignApprovalStatus.APPROVAL_SENT or approval.status == DesignApprovalStatus.APPROVED %}
           {{ share_link_button('design_approval', approval.id) }}
           {% endif %}
           <a href="{{ url_for('design_approval.index') }}" class="btn btn-secondary btn-sm">← All Approvals</a>
@@ -102,6 +102,41 @@
         {% endif %}
       </div>
     </div>
+
+    {# =================== CUSTOMER LINK =================== #}
+    {% if share_url %}
+    <div class="ui-card">
+      <div class="ui-card-title" style="margin-bottom:8px;">Customer Link</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <input type="text" id="customerLinkUrl" class="form-control" readonly
+               value="{{ share_url }}" style="flex:1; min-width:260px;" onclick="this.select();">
+        <button type="button" class="btn btn-primary btn-sm" id="customerLinkCopy">Copy link</button>
+        <a href="{{ share_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">Open</a>
+      </div>
+      <div class="form-hint" id="customerLinkMsg" style="margin-top:6px;">
+        Send this link to the customer. They can view the drawings, download the PDF, and approve or request changes.
+      </div>
+    </div>
+    <script>
+      (function () {
+        var btn = document.getElementById('customerLinkCopy');
+        var input = document.getElementById('customerLinkUrl');
+        var msg = document.getElementById('customerLinkMsg');
+        if (!btn || !input) return;
+        btn.addEventListener('click', function () {
+          input.select();
+          var done = function () { msg.textContent = 'Link copied.'; };
+          if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(input.value).then(done, function () {
+              document.execCommand('copy'); done();
+            });
+          } else {
+            document.execCommand('copy'); done();
+          }
+        });
+      })();
+    </script>
+    {% endif %}
 
     {# =================== 3. ACTION CARDS =================== #}
 
