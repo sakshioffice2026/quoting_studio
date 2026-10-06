@@ -7,7 +7,7 @@ from decimal import Decimal
 from flask import current_app, url_for
 
 from ...extensions import db
-from ...models import Customer, Project
+from ...models import Customer, Project, Tenant
 from ...models.product import ProductSeries, WindowStyle
 from ...models.project import ProjectStatus
 from ...models.quotation import Quotation, QuotationStatus
@@ -22,10 +22,6 @@ SQMM_PER_SQFT = Decimal('92903.04')
 def _d(value) -> Decimal:
     return Decimal(str(value or 0))
 
-
-# ------------------------------------------------------------------ #
-#  Read helpers
-# ------------------------------------------------------------------ #
 
 def get_draft(tenant_id: int, quotation_id: int) -> Quotation | None:
     q = Quotation.query.filter_by(id=quotation_id, tenant_id=tenant_id).first()
@@ -58,14 +54,6 @@ def _slug(value: str) -> str:
 
 
 def _find_pdf(style: WindowStyle, series: ProductSeries) -> str | None:
-    """
-    Convention-based lookup (no DB change). Files live in
-    app/static/catalog_pdfs/ and are matched in this order:
-      1. style-<style_id>.pdf
-      2. <style-name-slug>.pdf
-      3. series-<series_id>.pdf
-      4. <series-name-slug>.pdf
-    """
     base = os.path.join(current_app.static_folder, CATALOG_PDF_DIR)
     candidates = [
         f'style-{style.id}.pdf',
@@ -92,10 +80,7 @@ def list_gallery(tenant_id: int) -> list[dict]:
             d = s.to_dict()
             d['pdf_url'] = _find_pdf(s, series)
             style_dicts.append(d)
-        gallery.append({
-            'series': series.to_dict(),
-            'styles': style_dicts,
-        })
+        gallery.append({'series': series.to_dict(), 'styles': style_dicts})
     return gallery
 
 
@@ -108,10 +93,6 @@ def get_style(tenant_id: int, style_id: int) -> tuple[WindowStyle, ProductSeries
         return None
     return style, series
 
-
-# ------------------------------------------------------------------ #
-#  Draft creation (Step 2 → Step 3)
-# ------------------------------------------------------------------ #
 
 def create_draft(tenant_id: int, user_id: int, customer_id: int | None = None) -> Quotation:
     customer = None
@@ -132,10 +113,12 @@ def create_draft(tenant_id: int, user_id: int, customer_id: int | None = None) -
     db.session.add(project)
     db.session.flush()
 
+    tenant = Tenant.query.filter_by(id=tenant_id).first()
     quotation = Quotation(
         tenant_id=tenant_id,
         project_id=project.id,
         design_approval_id=None,
+        currency_code=(tenant.currency_code if tenant and tenant.currency_code else 'INR'),
         quotation_number=Quotation.generate_number(tenant_id),
         quotation_version=1,
         status=QuotationStatus.DRAFT,
@@ -166,20 +149,12 @@ def create_customer_and_draft(tenant_id: int, user_id: int, name: str,
     return create_draft(tenant_id, user_id, customer_id=customer.id)
 
 
-# ------------------------------------------------------------------ #
-#  Totals
-# ------------------------------------------------------------------ #
-
 def recompute_totals(quotation: Quotation) -> Quotation:
     items = quotation.line_items
     subtotal = sum((_d(i.get('amount')) for i in items), Decimal('0'))
     disc_pct = _d(quotation.discount_pct)
     disc_amount = (subtotal * disc_pct / 100).quantize(Decimal('0.01'))
-    taxable = (
-        subtotal - disc_amount
-        + _d(quotation.installation_charge)
-        + _d(quotation.transport_charge)
-    )
+    taxable = subtotal - disc_amount + _d(quotation.installation_charge) + _d(quotation.transport_charge)
     tax_amount = (taxable * _d(quotation.tax_rate)).quantize(Decimal('0.01'))
 
     quotation.subtotal = subtotal.quantize(Decimal('0.01'))
@@ -189,10 +164,6 @@ def recompute_totals(quotation: Quotation) -> Quotation:
     quotation.updated_at = datetime.utcnow()
     return quotation
 
-
-# ------------------------------------------------------------------ #
-#  Line items (Step 3 ⇄ Step 4 loop)
-# ------------------------------------------------------------------ #
 
 def add_line_item(
     tenant_id: int,
@@ -237,23 +208,23 @@ def add_line_item(
 
     items = quotation.line_items
     items.append({
-        'line_id':      (max((i.get('line_id', 0) for i in items), default=0) + 1),
-        'source':       source,
-        'style_id':     style_id,
-        'series':       series_name,
-        'style':        style_name,
-        'label':        (label or style_name or 'Item').strip(),
-        'material':     material,
-        'width_mm':     int(width_mm),
-        'height_mm':    int(height_mm),
-        'area_sqft':    float(area_sqft),
+        'line_id': (max((i.get('line_id', 0) for i in items), default=0) + 1),
+        'source': source,
+        'style_id': style_id,
+        'series': series_name,
+        'style': style_name,
+        'label': (label or style_name or 'Item').strip(),
+        'material': material,
+        'width_mm': int(width_mm),
+        'height_mm': int(height_mm),
+        'area_sqft': float(area_sqft),
         'rate_per_sqft': float(rate),
-        'qty':          int(qty),
-        'unit':         'nos',
-        'unit_total':   float(unit_total),
-        'amount':       float(amount),
-        'notes':        notes or '',
-        'design_json':  design_json,
+        'qty': int(qty),
+        'unit': 'nos',
+        'unit_total': float(unit_total),
+        'amount': float(amount),
+        'notes': notes or '',
+        'design_json': design_json,
     })
 
     quotation.line_items_json = json.dumps(items)
@@ -273,10 +244,6 @@ def remove_line_item(tenant_id: int, quotation_id: int, line_id: int) -> Quotati
     db.session.commit()
     return quotation
 
-
-# ------------------------------------------------------------------ #
-#  Proceed to Quotation (Step 3 → Step 5)
-# ------------------------------------------------------------------ #
 
 def proceed_to_quotation(tenant_id: int, quotation_id: int) -> Quotation:
     quotation = get_draft(tenant_id, quotation_id)

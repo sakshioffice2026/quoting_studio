@@ -41,6 +41,7 @@ class Quotation(db.Model):
     tenant_id            = db.Column(db.Integer, db.ForeignKey('tenants.id'),          nullable=False, index=True)
     project_id           = db.Column(db.Integer, db.ForeignKey('projects.id'),         nullable=False, index=True)
     design_approval_id   = db.Column(db.Integer, db.ForeignKey('design_approvals.id'), nullable=True,  index=True)
+    currency_code        = db.Column(db.String(3), nullable=False, default='INR')
 
     quotation_number     = db.Column(db.String(40), unique=True, nullable=False)
     quotation_version    = db.Column(db.Integer, nullable=False, default=1)
@@ -48,7 +49,6 @@ class Quotation(db.Model):
 
     status               = db.Column(db.String(40), default=QuotationStatus.DRAFT, nullable=False, index=True)
 
-    # Line items: [{opening_id, label, profile_code, qty, unit, rate, amount}, ...]
     line_items_json      = db.Column(db.Text, nullable=True)
 
     subtotal             = db.Column(db.Numeric(12, 2), nullable=True)
@@ -65,26 +65,24 @@ class Quotation(db.Model):
     validity_days        = db.Column(db.Integer, nullable=False, default=30)
     validity_date        = db.Column(db.Date, nullable=True)
 
-    # Proposal charge rows (Section 7 extension — installation/transport/AMC/warranty)
     installation_charge  = db.Column(db.Numeric(12, 2), nullable=False, default=0)
     transport_charge     = db.Column(db.Numeric(12, 2), nullable=False, default=0)
-    other_charges_json   = db.Column(db.Text, nullable=True)  # [{label, amount}, ...]
+    other_charges_json   = db.Column(db.Text, nullable=True)
 
     amc_offered           = db.Column(db.Boolean, nullable=False, default=False)
-    amc_offer_tier        = db.Column(db.String(20), nullable=True)  # AmcTier.BASIC / STANDARD / PREMIUM
+    amc_offer_tier        = db.Column(db.String(20), nullable=True)
     amc_price             = db.Column(db.Numeric(12, 2), nullable=True)
 
     warranty_months       = db.Column(db.Integer, nullable=True, default=12)
     warranty_terms_text   = db.Column(db.Text, nullable=True)
 
-    # Workflow tracking
     prepared_by          = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     sent_by              = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     sent_at              = db.Column(db.DateTime, nullable=True)
 
     accepted_by_name     = db.Column(db.String(200), nullable=True)
     accepted_at          = db.Column(db.DateTime, nullable=True)
-    acceptance_method    = db.Column(db.String(50), nullable=True)  # e-signature / email / portal / in-person
+    acceptance_method    = db.Column(db.String(50), nullable=True)
 
     lost_at              = db.Column(db.DateTime, nullable=True)
     lost_reason          = db.Column(db.Text, nullable=True)
@@ -96,7 +94,6 @@ class Quotation(db.Model):
     created_at           = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at           = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    # Relationships
     project         = db.relationship(
         'Project',
         backref=db.backref('quotations', lazy='dynamic', cascade='all, delete-orphan'),
@@ -111,9 +108,6 @@ class Quotation(db.Model):
         backref=db.backref('revisions', lazy='dynamic'),
     )
 
-    # ------------------------------------------------------------------ #
-    #  Class methods
-    # ------------------------------------------------------------------ #
     @staticmethod
     def generate_number(tenant_id: int) -> str:
         today  = date.today()
@@ -132,9 +126,6 @@ class Quotation(db.Model):
                 pass
         return f"{prefix}-{str(last + 1).zfill(3)}"
 
-    # ------------------------------------------------------------------ #
-    #  Properties
-    # ------------------------------------------------------------------ #
     @property
     def status_label(self) -> str:
         return QuotationStatus.LABELS.get(self.status, self.status)
@@ -163,7 +154,6 @@ class Quotation(db.Model):
 
     @property
     def active_order(self):
-        """First non-cancelled Order raised from this quotation, else None."""
         from .order import Order, OrderStatus
         return (Order.query
                 .filter(Order.quotation_id == self.id,
@@ -198,6 +188,7 @@ class Quotation(db.Model):
             'tenant_id':            self.tenant_id,
             'project_id':           self.project_id,
             'design_approval_id':   self.design_approval_id,
+            'currency_code':        self.currency_code,
             'quotation_number':     self.quotation_number,
             'quotation_version':    self.quotation_version,
             'parent_quotation_id':  self.parent_quotation_id,

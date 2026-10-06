@@ -45,6 +45,7 @@ class Order(db.Model):
 
     promised_delivery_date = db.Column(db.Date, nullable=True)
 
+    currency_code         = db.Column(db.String(3), nullable=True)
     total_amount          = db.Column(db.Numeric(12, 2), nullable=True)
 
     cancelled_at          = db.Column(db.DateTime, nullable=True)
@@ -104,6 +105,18 @@ class Order(db.Model):
     def is_cancelled(self) -> bool:
         return self.status == OrderStatus.CANCELLED
 
+    @property
+    def currency(self):
+        from .tenant import Tenant
+        return Tenant.CURRENCIES.get(
+            self.currency_code or 'INR',
+            Tenant.CURRENCIES['INR']
+        )
+
+    @property
+    def currency_symbol(self) -> str:
+        return self.currency['symbol']
+
     def to_dict(self) -> dict:
         return {
             'id':                      self.id,
@@ -114,6 +127,8 @@ class Order(db.Model):
             'contract_ref':            self.contract_ref,
             'status':                  self.status,
             'status_label':            self.status_label,
+            'currency_code':            self.currency_code or 'INR',
+            'currency_symbol':          self.currency_symbol,
             'order_confirmed_by_name': self.order_confirmed_by_name,
             'order_confirmed_at':      self.order_confirmed_at.isoformat() if self.order_confirmed_at else None,
             'confirmation_method':     self.confirmation_method,

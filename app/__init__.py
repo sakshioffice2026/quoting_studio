@@ -15,23 +15,19 @@ def create_app(config_name=None):
         app.config.get('MAX_CONTENT_LENGTH') or 0, 64 * 1024 * 1024
     )
 
-    # ensure upload sub-directories exist
     for sub in ('photos', 'renders', 'pdfs', 'logos'):
         os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], sub), exist_ok=True)
 
-    # initialise extensions
     db.init_app(app)
     login_manager.init_app(app)
     migrate.init_app(app, db)
     csrf.init_app(app)
 
-    # initialise logging (must come before blueprints so handlers are ready)
     from .logging_config import setup_logging
     setup_logging(app)
 
-    # import models so Alembic can detect them
     with app.app_context():
-        from .models import (  # noqa: F401
+        from .models import (
             Tenant, User, Project, Window, Pane,
             Visualisation, VisualScene, VisualSceneOpening, Quotation, PricingRule,
             OpenerPricingRule, GlazingPricingRule,
@@ -50,7 +46,6 @@ def create_app(config_name=None):
             ProjectType, TemplateQuestion, TemplateResponse, TemplateUpload,
         )
 
-    # register blueprints
     from .routes.auth import auth_bp
     from .routes.customers import customers_bp
     from .routes.leads import leads_bp
@@ -113,10 +108,8 @@ def create_app(config_name=None):
     app.register_blueprint(public_scene_bp)
     app.register_blueprint(api_v1_bp, url_prefix='/api/v1')
 
-    # public customer wizard posts JSON/multipart without a session CSRF token
     csrf.exempt(template_bp)
 
-    # ---- serve uploaded files -------------------------------------
     import os as _os
     from flask import send_from_directory
 
@@ -124,10 +117,8 @@ def create_app(config_name=None):
     def uploaded_file(filename):
         return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-    # ---- global error handlers ------------------------------------
     _register_error_handlers(app)
 
-    # ---- disable caching on dynamic HTML responses -----------------
     @app.after_request
     def _no_cache_dynamic(response):
         if response.mimetype == 'text/html':
@@ -136,7 +127,6 @@ def create_app(config_name=None):
             response.headers['Expires'] = '0'
         return response
 
-    # ---- background payment jobs (overdue + auto-invoicing) -------
     from .services.domain.scheduler_service import start_scheduler
     start_scheduler(app)
 
@@ -176,7 +166,6 @@ def _register_error_handlers(app: Flask) -> None:
 
     @app.errorhandler(500)
     def internal_error(e):
-        # DB session may be broken — roll back before doing anything else
         try:
             from .extensions import db as _db
             _db.session.rollback()
@@ -201,7 +190,6 @@ def _register_error_handlers(app: Flask) -> None:
 
 
 def _req_info() -> str:
-    """Safe one-liner summary of the current request for log messages."""
     try:
         from flask import request
         return f'{request.method} {request.path}'
@@ -210,7 +198,6 @@ def _req_info() -> str:
 
 
 def _is_api_request() -> bool:
-    """True when the request path starts with /api/."""
     try:
         from flask import request
         return request.path.startswith('/api/')

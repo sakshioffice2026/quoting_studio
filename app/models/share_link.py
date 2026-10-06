@@ -10,8 +10,11 @@ class ShareLinkType:
     # Customer-facing visual preview of a quotation (rendered photo, approve /
     # comment only). resource_id = quotation id.
     VISUALISER      = 'VISUALISER'
+    # Combined customer page: visual preview + quotation + payment + progress.
+    # resource_id = quotation id.
+    MASTER_QUOTE    = 'MASTER_QUOTE'
 
-    ALL = [QUOTATION, DESIGN_APPROVAL, VISUALISER]
+    ALL = [QUOTATION, DESIGN_APPROVAL, VISUALISER, MASTER_QUOTE]
 
 
 # Backward-compatible alias (models/__init__.py imports ShareResource)
