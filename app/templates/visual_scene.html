@@ -176,6 +176,12 @@ body { overflow: hidden; }
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/photoreal/layer-map.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/scene-lighting.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/interior-gen.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/shaders.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/renderer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/photoreal-core.js') }}"></script>
 <script>
 (function () {
 'use strict';
@@ -312,6 +318,7 @@ async function refreshOpening(o) {
     json: {options: Object.assign({}, o.options, {glass_tint: o.glass_tint})},
   });
   o.price = res.price;
+  o.design = res.design || null;
   const img = new Image();
   await new Promise(resolve => {
     img.onload = resolve; img.onerror = resolve;
@@ -378,8 +385,28 @@ function getNoise() {
   return noisePat;
 }
 
+function paintOpeningCore(o) {
+  const core = window.PhotorealCore;
+  o._engine = 'canvas';
+  if (!core || !o.design || !o.corners || !photo || !core.isReady()) return false;
+  const res = core.paintOpening({
+    ctx: ctx, width: canvas.width, height: canvas.height,
+    quad: o.corners, design: o.design, photo: photo, wall: o._wall || null,
+    options: {
+      opacity: o.opacity, brightness: o.brightness,
+      intensity: realism, life: 1, glare: -1,
+      reflect: 0.5, yawDeg: 0,
+      seed: ((Number(o.window_id) || 1) * 7919) % 9973 + 1,
+      hideOld: !!hideOld,
+    },
+  });
+  if (res && res.ok) { o._engine = 'webgl'; return true; }
+  return false;
+}
+
 function paintOpening(o, fast) {
   const c = o.corners, R = fast ? 0 : realism;
+  if (R > 0 && paintOpeningCore(o)) return;
   const w = Math.hypot(c.tr.x - c.tl.x, c.tr.y - c.tl.y);
   const h = Math.hypot(c.bl.x - c.tl.x, c.bl.y - c.tl.y);
   const ux = (c.tr.x - c.tl.x) / (w || 1), uy = (c.tr.y - c.tl.y) / (w || 1);
@@ -485,6 +512,12 @@ function render(forExport, fast) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(photo, 0, 0, canvas.width, canvas.height);
   if (showAfter) {
+    const core = window.PhotorealCore;
+    if (!fast && realism > 0 && core && core.isReady()) {
+      openings.forEach(o => { o._wall = (o.img && o.corners) ? core.sampleWall(ctx, o.corners) : null; });
+    } else {
+      openings.forEach(o => { o._wall = null; });
+    }
     openings.forEach(o => { if (o.img) paintOpening(o, fast); });
   }
   if (!forExport && showAfter) drawHandles();
@@ -694,7 +727,7 @@ function loadPhoto(url, w, h) {
     const img = new Image();
     img.onload = () => {
       photo = img;
-      canvas.width = w || img.naturalWidth; canvas.height = h || img.naturalHeight;
+      canvas.width = img.naturalWidth || w; canvas.height = img.naturalHeight || h;
       layer.width = canvas.width; layer.height = canvas.height;
       canvas.style.display = 'block'; $('emptyHint').style.display = 'none';
       resolve();
@@ -729,7 +762,9 @@ $('btnSave').onclick = async () => {
     const png = canvas.toDataURL('image/png');
     showAfter = keep; render();
     await api('/projects/' + PROJECT_ID + '/scene/composite', {method: 'POST', json: {image: png}});
-    msg('Scene saved');
+    const basic = openings.filter(o => o.img && o._engine === 'canvas').length;
+    if (basic && realism > 0) msg('Scene saved (' + basic + ' opening(s) used basic rendering)', true);
+    else msg('Scene saved');
   } catch (e) { msg(e.message, true); }
 };
 $('btnLink').onclick = async () => {

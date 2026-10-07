@@ -10,6 +10,7 @@ from flask import (Blueprint, render_template, request, redirect, url_for,
 from ..extensions import db
 from ..models import Tenant, Window
 from ..models.visualisation import Visualisation
+from ..models.visual_scene import VisualScene
 from ..models.share_link import ShareLinkType
 from ..models.quotation import QuotationStatus
 from ..models.design_approval import DesignApprovalStatus
@@ -33,6 +34,35 @@ def _private_headers(response):
     response.headers['X-Robots-Tag'] = 'noindex, nofollow'
     response.headers['Referrer-Policy'] = 'no-referrer'
     return response
+
+
+def _scene_for_quote(q):
+    """Saved scene composite for a quotation: the linked scene, else the
+    project's latest scene that has a rendered composite."""
+    base = VisualScene.query.filter_by(tenant_id=q.tenant_id)
+    scene = (base.filter_by(quotation_id=q.id)
+             .order_by(VisualScene.id.desc()).first())
+    if scene is None or not scene.rendered_path:
+        scene = (base.filter(VisualScene.project_id == q.project_id,
+                             VisualScene.rendered_path.isnot(None))
+                 .order_by(VisualScene.id.desc()).first())
+    if scene is None or not scene.rendered_path:
+        return None
+    return scene
+
+
+def _scene_info(token: str, q) -> dict:
+    try:
+        scene = _scene_for_quote(q)
+    except Exception:
+        scene = None
+    if scene is None:
+        return {'has': False, 'version': 0, 'url': None}
+    return {
+        'has': True,
+        'version': scene.version or 1,
+        'url': url_for('public_share.master_scene_image', token=token),
+    }
 
 
 def _unavailable(link, reason: str):
@@ -100,6 +130,7 @@ def view(token):
         return render_template(
             'public_share/visualiser.html',
             link=link, quotation=q, project=q.project, tenant=tenant,
+            scene_info=_scene_info(token, q),
             items=_visual_items(q, state), state=state,
             can_respond=q.status not in _VISUAL_CLOSED,
             currency=(tenant.currency_symbol if tenant else _CURRENCY),
@@ -115,6 +146,7 @@ def view(token):
         return render_template(
             'public_share/master_quote.html',
             link=link, quotation=q, project=q.project, tenant=tenant,
+            scene_info=_scene_info(token, q),
             items=_visual_items(q, state), state=state,
             can_respond=q.status not in _VISUAL_CLOSED,
             currency=(tenant.currency_symbol if tenant else _CURRENCY),
@@ -381,6 +413,27 @@ def visual_image(token, line_id):
 
     base = os.path.realpath(current_app.config['UPLOAD_FOLDER'])
     full = os.path.realpath(os.path.join(base, vis.rendered_path))
+    if not full.startswith(base + os.sep) or not os.path.isfile(full):
+        abort(404)
+    return send_file(full, mimetype='image/png')
+
+
+@public_share_bp.route('/<token>/master/scene')
+def master_scene_image(token):
+    link, err = _visual_link(token)
+    if err:
+        return err
+
+    q = quotation_service.get_quotation(link.tenant_id, link.resource_id)
+    if not q:
+        abort(404)
+
+    scene = _scene_for_quote(q)
+    if scene is None:
+        abort(404)
+
+    base = os.path.realpath(current_app.config['UPLOAD_FOLDER'])
+    full = os.path.realpath(os.path.join(base, scene.rendered_path))
     if not full.startswith(base + os.sep) or not os.path.isfile(full):
         abort(404)
     return send_file(full, mimetype='image/png')

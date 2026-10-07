@@ -4,20 +4,30 @@
  *
  *   const r = PhotorealRenderer.get();
  *   if (r.supported) {
- *     r.paint(ctx2d, cw, ch, quad, {
+ *     r.paintTiled(ctx2d, cw, ch, quad, {
  *       design, lighting, reflect, opacity, brightness, intensity,
  *       life, glare, yawDeg, seed, variant, lightOn, sill, interiorBright
  *     });
  *   }
  *
  * quad = { tl:{x,y}, tr:{x,y}, bl:{x,y}, br:{x,y} } in canvas pixel space.
+ *
  * Only the bounding box of the window (+ reveal / shadow / sill margin) is
  * drawn back to the 2D canvas, with alpha. Nothing else on the photo changes.
+ *
+ * The WebGL canvas is capped to a tile (never larger than the GPU limits), and
+ * the window region is rendered tile by tile. Export at native photo size
+ * therefore never falls back because a drawing buffer was too small.
+ * paint() is kept as an alias of paintTiled().
  */
 (function (root) {
   'use strict';
 
   var TEX_LIMIT = 40;
+  var TILE_CAP = 2048;
+  var TILE_MIN = 256;
+  var LAYER_MAX = 2048;
+  var REGION_MAX_PX = 120000000;
 
   function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 
@@ -59,6 +69,8 @@
     this.supported = false;
     this.lost = false;
     this.lastError = null;
+    this.lastFailure = null;
+    this.maxTile = TILE_CAP;
     this._init();
     this.canvas.addEventListener('webglcontextlost', function (e) {
       e.preventDefault();
@@ -117,6 +129,19 @@
       }
       gl.disable(gl.BLEND);
       gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.SCISSOR_TEST);
+
+      /* tile size limited by what this GPU can actually hold */
+      var lim = TILE_CAP;
+      try {
+        var mt = gl.getParameter(gl.MAX_TEXTURE_SIZE) || TILE_CAP;
+        var mr = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || TILE_CAP;
+        var mv = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+        lim = Math.min(lim, mt, mr);
+        if (mv && mv.length) lim = Math.min(lim, mv[0], mv[1]);
+      } catch (e2) { lim = 1024; }
+      this.maxTile = Math.max(TILE_MIN, lim);
+
       this.supported = true;
       this.lastError = null;
     } catch (e) {
@@ -181,13 +206,20 @@
     return new Float32Array([yaw / l, pitch / l, 1 / l]);
   }
 
-  /* ---------- paint one opening ---------- */
-  Renderer.prototype.paint = function (ctx, cw, ch, quad, o) {
-    if (!this.supported || this.lost) return false;
+  Renderer.prototype._fail = function (reason, err) {
+    this.lastFailure = reason;
+    if (err) this.lastError = err;
+    if (root.console) console.warn('[Photoreal] paint skipped: ' + reason, err || '');
+    return false;
+  };
+
+  /* ---------- paint one opening, in capped tiles ---------- */
+  Renderer.prototype.paintTiled = function (ctx, cw, ch, quad, o) {
+    if (!this.supported || this.lost) return this._fail('renderer unavailable');
     o = o || {};
     var gl = this.gl;
     var PL = root.PhotorealLayers, PI = root.PhotorealInterior, PG = root.PhotorealLighting;
-    if (!PL || !PI || !PG || !o.lighting) return false;
+    if (!PL || !PI || !PG || !o.lighting) return this._fail('engine modules or lighting missing');
 
     try {
       var xs = [quad.tl.x, quad.tr.x, quad.bl.x, quad.br.x];
@@ -195,17 +227,35 @@
       var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
       var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
       var qw = maxX - minX, qh = maxY - minY;
-      if (qw < 8 || qh < 8) return false;
+      if (qw < 8 || qh < 8) return this._fail('opening too small');
 
       var mx = qw * 0.46, my = qh * 0.46;
       var bx = Math.max(0, Math.floor(minX - mx)), by = Math.max(0, Math.floor(minY - my));
       var bx2 = Math.min(cw, Math.ceil(maxX + mx)), by2 = Math.min(ch, Math.ceil(maxY + my));
       var bw = bx2 - bx, bh = by2 - by;
-      if (bw < 2 || bh < 2 || bw * bh > 12000000) return false;
+      if (bw < 2 || bh < 2) return this._fail('opening outside canvas');
+      if (bw * bh > REGION_MAX_PX) return this._fail('region too large');
+
+      /* tile size: GPU limit, then whatever the drawing buffer really gives */
+      var T = Math.min(this.maxTile, TILE_CAP);
+      var tw0 = Math.min(bw, T), th0 = Math.min(bh, T);
+      var tries = 0;
+      while (tries < 4) {
+        if (this.canvas.width !== tw0 || this.canvas.height !== th0) {
+          this.canvas.width = tw0; this.canvas.height = th0;
+        }
+        if (gl.drawingBufferWidth >= tw0 && gl.drawingBufferHeight >= th0) break;
+        tw0 = Math.max(TILE_MIN / 2, Math.min(tw0, gl.drawingBufferWidth) >> 1 << 1);
+        th0 = Math.max(TILE_MIN / 2, Math.min(th0, gl.drawingBufferHeight) >> 1 << 1);
+        tries++;
+      }
+      if (gl.drawingBufferWidth < tw0 || gl.drawingBufferHeight < th0) {
+        return this._fail('drawing buffer too small');
+      }
 
       /* layers sized to the on-screen window (limits minification aliasing) */
       var need = Math.max(qw, qh) * 1.5;
-      var maxSize = clamp(Math.ceil(need / 128) * 128, 256, 1400);
+      var maxSize = clamp(Math.ceil(need / 128) * 128, 256, LAYER_MAX);
       var design = o.design || {};
       var layers = PL.build(design, { maxSize: maxSize });
       var interior = PI.build({
@@ -215,24 +265,17 @@
         warmth: o.lighting.warmth
       });
 
-      if (this.canvas.width !== cw || this.canvas.height !== ch) {
-        this.canvas.width = cw; this.canvas.height = ch;
-      }
-      if (gl.drawingBufferWidth < cw || gl.drawingBufferHeight < ch) return false;
-
       var lw = layers.width, lh = layers.height;
       var Hm = solveHomography(
         [[quad.tl.x, quad.tl.y], [quad.tr.x, quad.tr.y], [quad.bl.x, quad.bl.y], [quad.br.x, quad.br.y]],
         [[0, 0], [lw, 0], [0, lh], [lw, lh]]
       );
-      if (!Hm) return false;
+      if (!Hm) return this._fail('degenerate quad');
 
       gl.useProgram(this.prog);
-      gl.viewport(0, 0, cw, ch);
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(bx, ch - (by + bh), bw, bh);
+      gl.viewport(0, 0, tw0, th0);
+      gl.disable(gl.SCISSOR_TEST);
       gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
 
       this._bind(0, 'uLayer', layers.layerCanvas);
       this._bind(1, 'uHeight', layers.heightCanvas);
@@ -245,12 +288,8 @@
       var barW = layers.metrics.barPx / lh;
       var isDoor = !!layers.metrics.isDoor;
 
-      /* column-major mat3 */
-      gl.uniformMatrix3fv(this.loc.uH, false, new Float32Array([
-        Hm[0], Hm[3], Hm[6], Hm[1], Hm[4], Hm[7], Hm[2], Hm[5], Hm[8]
-      ]));
       this._set('uSrc', new Float32Array([lw, lh]));
-      this._set('uCanvasH', ch);
+      this._set('uCanvasH', th0);
       this._set('uTexel', new Float32Array([1 / lw, 1 / lh]));
       this._set('uAspect', lw / lh);
       this._set('uBarW', barW);
@@ -261,7 +300,8 @@
       this._set('uAORad', clamp(barW * 0.3, 0.006, 0.02));
       this._set('uAOStrength', D.aoStrength);
       this._set('uRevealW', D.revealW);
-      var sill = (o.sill != null) ? !!o.sill : !isDoor;
+      var hasCill = !!layers.metrics.hasCill;
+      var sill = (o.sill != null) ? !!o.sill : hasCill;
       this._set('uHasSill', sill && !isDoor ? 1 : 0);
       this._set('uSillSize', D.sillSize);
 
@@ -281,19 +321,36 @@
         if (Object.prototype.hasOwnProperty.call(U, k)) this._set(k, U[k]);
       }
 
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-
+      /* tiles: shift the homography so tile pixel (0,0) = house pixel (tx,ty) */
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(this.canvas, bx, by, bw, bh, bx, by, bw, bh);
+      for (var ty = by; ty < by2; ty += th0) {
+        var th = Math.min(th0, by2 - ty);
+        for (var tx = bx; tx < bx2; tx += tw0) {
+          var tw = Math.min(tw0, bx2 - tx);
+          var h2 = Hm[0] * tx + Hm[1] * ty + Hm[2];
+          var h5 = Hm[3] * tx + Hm[4] * ty + Hm[5];
+          var h8 = Hm[6] * tx + Hm[7] * ty + Hm[8];
+          gl.uniformMatrix3fv(this.loc.uH, false, new Float32Array([
+            Hm[0], Hm[3], Hm[6], Hm[1], Hm[4], Hm[7], h2, h5, h8
+          ]));
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+          ctx.drawImage(this.canvas, 0, 0, tw, th, tx, ty, tw, th);
+        }
+      }
       ctx.restore();
-      gl.disable(gl.SCISSOR_TEST);
+
+      this.lastFailure = null;
       return true;
     } catch (e) {
-      this.lastError = e;
-      if (root.console) console.warn('[Photoreal] paint failed:', e);
-      return false;
+      return this._fail('exception', e);
     }
+  };
+
+  /* kept for existing callers */
+  Renderer.prototype.paint = function (ctx, cw, ch, quad, o) {
+    return this.paintTiled(ctx, cw, ch, quad, o);
   };
 
   Renderer.prototype.dispose = function () {

@@ -213,98 +213,6 @@
     ctx.putImageData(img, x0, y0);
   }
 
-  /* ---------- depth cues ---------- */
-  function contactShadow(ctx, s) {
-    var w = dist(s.tl, s.tr);
-    var blur = Math.max(4, w * 0.035), off = Math.max(2, w * 0.012), BIG = 100000;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    ctx.moveTo(s.tl.x, s.tl.y); ctx.lineTo(s.tr.x, s.tr.y);
-    ctx.lineTo(s.br.x, s.br.y); ctx.lineTo(s.bl.x, s.bl.y); ctx.closePath();
-    ctx.clip('evenodd');
-    ctx.shadowColor = 'rgba(0,0,0,0.38)';
-    ctx.shadowBlur = blur;
-    ctx.shadowOffsetX = BIG + off; ctx.shadowOffsetY = off * 1.4;
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.moveTo(s.tl.x - BIG, s.tl.y); ctx.lineTo(s.tr.x - BIG, s.tr.y);
-    ctx.lineTo(s.br.x - BIG, s.br.y); ctx.lineTo(s.bl.x - BIG, s.bl.y);
-    ctx.closePath(); ctx.fill();
-    ctx.restore();
-  }
-
-  function edgeShade(ctx, p0, p1, c, depth, a) {
-    var mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
-    var nx = c.x - mx, ny = c.y - my, L = Math.hypot(nx, ny) || 1;
-    nx /= L; ny /= L;
-    var g = ctx.createLinearGradient(mx, my, mx + nx * depth, my + ny * depth);
-    g.addColorStop(0, 'rgba(0,0,0,' + a.toFixed(3) + ')');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-    ctx.lineTo(p1.x + nx * depth, p1.y + ny * depth);
-    ctx.lineTo(p0.x + nx * depth, p0.y + ny * depth);
-    ctx.closePath(); ctx.fill();
-  }
-
-  function reveal(ctx, s) {
-    var c = centroid(s), w = dist(s.tl, s.tr);
-    var depth = Math.max(3, w * 0.06);
-    ctx.save();
-    quadPath(ctx, s); ctx.clip();
-    edgeShade(ctx, s.tl, s.tr, c, depth, 0.42);
-    edgeShade(ctx, s.tl, s.bl, c, depth, 0.32);
-    edgeShade(ctx, s.tr, s.br, c, depth * 0.5, 0.12);
-    edgeShade(ctx, s.bl, s.br, c, depth * 0.4, 0.10);
-    ctx.restore();
-  }
-
-  function sill(ctx, s) {
-    var w = dist(s.bl, s.br);
-    if (w < 24) return;
-    var dirX = unit(s.bl, s.br);
-    var down = unit({ x: (s.tl.x + s.tr.x) / 2, y: (s.tl.y + s.tr.y) / 2 },
-                    { x: (s.bl.x + s.br.x) / 2, y: (s.bl.y + s.br.y) / 2 });
-    var th = w * 0.04, over = w * 0.03;
-    var A = { x: s.bl.x - dirX.x * over, y: s.bl.y - dirX.y * over };
-    var B = { x: s.br.x + dirX.x * over, y: s.br.y + dirX.y * over };
-    var C = { x: B.x + down.x * th, y: B.y + down.y * th };
-    var D = { x: A.x + down.x * th, y: A.y + down.y * th };
-    var sh = th * 1.9;
-    var E = { x: C.x + down.x * sh, y: C.y + down.y * sh };
-    var F = { x: D.x + down.x * sh, y: D.y + down.y * sh };
-    ctx.save();
-    var sg = ctx.createLinearGradient(D.x, D.y, F.x, F.y);
-    sg.addColorStop(0, 'rgba(0,0,0,0.30)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = sg;
-    ctx.beginPath(); ctx.moveTo(D.x, D.y); ctx.lineTo(C.x, C.y); ctx.lineTo(E.x, E.y); ctx.lineTo(F.x, F.y);
-    ctx.closePath(); ctx.fill();
-    var fg = ctx.createLinearGradient(A.x, A.y, D.x, D.y);
-    fg.addColorStop(0, '#d9d4c8'); fg.addColorStop(1, '#aaa598');
-    ctx.fillStyle = fg;
-    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.lineTo(C.x, C.y); ctx.lineTo(D.x, D.y);
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
-    ctx.restore();
-  }
-
-  function glare(ctx, s) {
-    ctx.save();
-    quadPath(ctx, s); ctx.clip();
-    var g = ctx.createLinearGradient(s.tl.x, s.tl.y, s.br.x, s.br.y);
-    g.addColorStop(0, 'rgba(255,255,255,0.20)');
-    g.addColorStop(0.35, 'rgba(255,255,255,0.0)');
-    g.addColorStop(1, 'rgba(255,255,255,0.0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(Math.min(s.tl.x, s.bl.x), Math.min(s.tl.y, s.tr.y),
-      Math.max(s.tr.x, s.br.x) - Math.min(s.tl.x, s.bl.x),
-      Math.max(s.bl.y, s.br.y) - Math.min(s.tl.y, s.tr.y));
-    ctx.restore();
-  }
-
   /* ---------- component ---------- */
   function PublicVisualiser(root) {
     this.root = root;
@@ -467,6 +375,7 @@
       var tmp = document.createElement('canvas');
       tmp.width = sc.pw; tmp.height = sc.ph;
       drawPaintedHouse(tmp.getContext('2d'), sc.pw, sc.ph);
+      this._painted = tmp;
       ctx.drawImage(tmp, sc.crop.x, sc.crop.y, sc.crop.w, sc.crop.h, 0, 0, outW, outH);
     }
 
@@ -479,14 +388,48 @@
     var ordered = sc.openings.filter(function (o) { return !o.mine; })
       .concat(sc.openings.filter(function (o) { return o.mine; }));
 
-    ordered.forEach(function (o) {
+    var core = window.PhotorealCore;
+    var useCore = !!(depth && core && core.isReady());
+    var lightPhoto = this.photo || this._painted;
+
+    function quadOf(o) {
+      var q = o.quad;
+      return { tl: map(q.tl), tr: map(q.tr), bl: map(q.bl), br: map(q.br) };
+    }
+
+    /* sample the wall around every opening before anything is painted */
+    var walls = [];
+    if (useCore) {
+      ordered.forEach(function (o, i) { walls[i] = core.sampleWall(ctx, quadOf(o)); });
+    }
+
+    ordered.forEach(function (o, i) {
+      var s = quadOf(o);
+      var opacity = o.opacity == null ? 0.92 : o.opacity;
+      var brightness = o.brightness == null ? 1 : o.brightness;
+
+      if (useCore) {
+        var design = self.data.designs[String(o.window_id)];
+        if (design) {
+          var res = core.paintOpening({
+            ctx: ctx, width: outW, height: outH, quad: s, design: design,
+            photo: lightPhoto, wall: walls[i],
+            options: {
+              opacity: opacity, brightness: brightness,
+              intensity: 0.8, life: 1, glare: -1,
+              reflect: 0.5, yawDeg: 0,
+              seed: ((Number(o.window_id) || 1) * 7919) % 9973 + 1,
+              hideOld: true
+            }
+          });
+          if (res && res.ok) return;
+        }
+      }
+
+      /* fallback: flat perspective warp of the rasterised design */
       var tex = self._tex(o.window_id, o.tint);
       if (!tex) return;
-      var q = o.quad;
-      var s = { tl: map(q.tl), tr: map(q.tr), bl: map(q.bl), br: map(q.br) };
-      if (depth) contactShadow(ctx, s);
-      warp(ctx, outW, outH, tex, s, o.opacity == null ? 0.92 : o.opacity, o.brightness == null ? 1 : o.brightness);
-      if (depth) { reveal(ctx, s); sill(ctx, s); glare(ctx, s); }
+      warp(ctx, outW, outH, tex, s, opacity, brightness);
     });
   };
 
