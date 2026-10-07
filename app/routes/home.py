@@ -33,8 +33,14 @@ def _initials(name):
 
 
 def _money(value):
-    return '${:,.0f}'.format(float(value or 0))
-
+    symbol = '\u20b9'
+    try:
+        tenant = current_user.tenant if current_user.is_authenticated else None
+        if tenant is not None:
+            symbol = tenant.currency_symbol
+    except Exception:
+        pass
+    return '{}{:,.0f}'.format(symbol, float(value or 0))
 
 def _project_of(obj):
     """Project for anything hanging off an order (or a project directly)."""
@@ -298,6 +304,6 @@ def index():
             'home.html',
             greeting=greeting, first_name=first_name, today=now.strftime('%A, %d %B %Y'),
             stages=[], busiest=None, attention=[], attention_total=0,
-            money=dict(pipeline='$0', order_value='$0', collected='$0', outstanding='$0', collected_pct=0),
+            money=dict(pipeline=_money(0), order_value=_money(0), collected=_money(0), outstanding=_money(0), collected_pct=0),
             signals=dict(projects=0, awaiting_customer=0, in_production=0, on_site=0),
         )

@@ -241,7 +241,7 @@ _PDF_TEMPLATE = r"""
       <td>
         {% if line.panes %}{{ line.panes[0].glazing_type }}{% else %}—{% endif %}
       </td>
-      <td class="td-right td-mono">£{{ '%.2f'|format(line.price.total) }}</td>
+      <td class="td-right td-mono">{{ currency }}{{ '%.2f'|format(line.price.total) }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -251,15 +251,15 @@ _PDF_TEMPLATE = r"""
 <div class="totals-block">
   <div class="totals-row">
     <span>Subtotal</span>
-    <span class="amount">£{{ '%.2f'|format(quote.subtotal) }}</span>
+    <span class="amount">{{ currency }}{{ '%.2f'|format(quote.subtotal) }}</span>
   </div>
   <div class="totals-row">
     <span>VAT ({{ (quote.vat_rate * 100)|int }}%)</span>
-    <span class="amount">£{{ '%.2f'|format(vat_amt) }}</span>
+    <span class="amount">{{ currency }}{{ '%.2f'|format(vat_amt) }}</span>
   </div>
   <div class="totals-row total-line">
     <span>Total</span>
-    <span class="amount">£{{ '%.2f'|format(quote.total) }}</span>
+    <span class="amount">{{ currency }}{{ '%.2f'|format(quote.total) }}</span>
   </div>
 </div>
 
@@ -309,6 +309,7 @@ def generate_quote_pdf(quote, project, tenant, window_lines, vat_amt) -> bytes:
             tenant=tenant,
             window_lines=window_lines,
             vat_amt=vat_amt,
+            currency=(tenant.currency_symbol if tenant is not None else ''),
         )
 
         pdf_bytes = HTML(string=html_str).write_pdf()

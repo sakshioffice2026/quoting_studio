@@ -361,7 +361,7 @@
       return `<div class="p3-toggle-row">
         <label class="p3-switch"><input type="checkbox" ${on?'checked':''}
           onchange="QSPhase3._togglePreset('${x.key}',this.checked)"><span class="p3-slider"></span></label>
-        <label>${x.name} <span class="p3-price">£${x.price}</span></label>
+        <label>${x.name} <span class="p3-price">${window.QS_CURRENCY||''}${x.price}</span></label>
         ${x.hasQty?`<input type="number" class="p3-qty" style="margin-left:auto;" min="1"
            value="${(ex[x.key]&&ex[x.key].qty)||1}" ${on?'':'disabled'}
            onchange="QSPhase3._presetQty('${x.key}',this.value)">`:''}
@@ -376,7 +376,7 @@
         <div class="p3-field"><label>Quantity</label><input type="number" value="${c.qty||1}" onchange="QSPhase3._cxField(${i},'qty',this.value)"></div>
       </div>
       <div class="p3-row2">
-        <div class="p3-field"><label>Price (£)</label><input type="number" value="${c.price||0}" onchange="QSPhase3._cxField(${i},'price',this.value)"></div>
+        <div class="p3-field"><label>Price (${window.QS_CURRENCY||''})</label><input type="number" value="${c.price||0}" onchange="QSPhase3._cxField(${i},'price',this.value)"></div>
         <div class="p3-field"><label>Supplier Name</label><input value="${c.supplier||''}" onchange="QSPhase3._cxField(${i},'supplier',this.value)"></div>
       </div>
       <div class="p3-field"><label>Supplier Quote Ref.</label><input value="${c.quoteRef||''}" onchange="QSPhase3._cxField(${i},'quoteRef',this.value)"></div>

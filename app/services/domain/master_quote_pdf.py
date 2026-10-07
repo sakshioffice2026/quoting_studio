@@ -76,7 +76,27 @@ def _build_context(quotation, project, tenant, symbol):
                 row["item_material"] = f"{base} \u00b7 {colour}" if base and base != "-" else str(colour)
     except Exception as exc:
         logger.warning("Colour not added to master quote PDF: %s", exc)
+    _add_preview_links(quotation, context)
     return context
+
+
+def _add_preview_links(quotation, context):
+    """Attach each item's live visualiser link (…/projects/<id>/windows/<id>/visualise)."""
+    try:
+        from flask import has_request_context, url_for
+        if not has_request_context():
+            return
+        for item, row in zip(quotation.line_items, context["item_rows"]):
+            row["preview_url"] = None
+            try:
+                window_id = int(item.get("window_id"))
+            except (TypeError, ValueError):
+                continue
+            row["preview_url"] = url_for(
+                "visualiser.view", project_id=quotation.project_id,
+                window_id=window_id, _external=True)
+    except Exception as exc:
+        logger.warning("Live preview links not added to master quote PDF: %s", exc)
 
 
 def _qr_data_uri(url):
@@ -88,6 +108,23 @@ def _qr_data_uri(url):
         return 'data:image/svg+xml;base64,' + base64.b64encode(buf.getvalue()).decode()
     except Exception:
         return None
+
+def _resolve_sections(quotation, sections=None) -> dict:
+    """Effective on/off map of sections for this quotation (required ones always on)."""
+    from .master_sections_service import defaults, get_sections
+    if sections is not None:
+        merged = defaults()
+        merged.update({k: bool(v) for k, v in dict(sections).items()})
+        from .master_sections_service import REQUIRED
+        for key in REQUIRED:
+            merged[key] = True
+        return merged
+    try:
+        return get_sections(quotation.tenant_id, quotation.id)
+    except Exception as exc:
+        logger.warning("Section config not applied to master quote PDF: %s", exc)
+        return defaults()
+
 
 logger = logging.getLogger(__name__)
 
@@ -311,24 +348,13 @@ _TEMPLATE_SRC = r"""
   {% if s.project_address %}<div>{{ s.project_address }}</div>{% endif %}
 </div>
 
-{% if visual_url %}
-<div class="visual-cta">
-  <div>
-    <div class="label">View your design</div>
-    <div style="font-size:10pt;font-weight:700;">See your windows and doors on your home, approve or request changes online</div>
-    <a href="{{ visual_url }}" style="color:#C97B3D;font-size:8.5pt;word-break:break-all;">{{ visual_url }}</a>
-  </div>
-  {% if qr %}<img src="{{ qr }}" style="width:72pt;height:72pt;">{% endif %}
-</div>
-{% endif %}
-
 {# ---------- Proposal ---------- #}
-{% if copy.executive_summary %}
+{% if sec.scope and copy.executive_summary %}
 <h2>Overview</h2>
 <p class="para">{{ copy.executive_summary }}</p>
 {% endif %}
 
-{% if copy.scope_of_work %}
+{% if sec.scope and copy.scope_of_work %}
 <h2>Scope of work</h2>
 <p class="para">{{ copy.scope_of_work }}</p>
 {% endif %}
@@ -343,7 +369,9 @@ _TEMPLATE_SRC = r"""
     {% for r in item_rows %}
     <tr>
       <td>{{ r.item_no }}</td>
-      <td><strong>{{ r.item_label }}</strong></td>
+      <td><strong>{{ r.item_label }}</strong>
+        {% if sec.visual and r.preview_url %}<br><a href="{{ r.preview_url }}" style="color:#C97B3D;font-size:8pt;">Live preview &rarr; {{ r.item_label }}</a>{% endif %}
+      </td>
       <td>{{ r.item_material }}</td>
       <td>{{ r.item_size }}</td>
       <td class="num">{{ r.item_qty }}</td>
@@ -374,6 +402,7 @@ _TEMPLATE_SRC = r"""
 </div>
 
 {# ---------- Payment stages ---------- #}
+{% if sec.payment_stages %}
 <div class="section">
   <h2>Payment stages</h2>
   <table>
@@ -397,8 +426,10 @@ _TEMPLATE_SRC = r"""
   <div class="note">Planned schedule. Final invoices are raised after the order is confirmed.</div>
   {% endif %}
 </div>
+{% endif %}
 
 {# ---------- Manufacturing jobs ---------- #}
+{% if sec.manufacturing %}
 <div class="section">
   <h2>Manufacturing jobs</h2>
   <table>
@@ -427,14 +458,15 @@ _TEMPLATE_SRC = r"""
   <div class="note">Jobs are created once the order is confirmed and the advance is received.</div>
   {% endif %}
 </div>
+{% endif %}
 
 {# ---------- Commercial notes / next steps ---------- #}
-{% if copy.commercial_notes %}
+{% if sec.scope and copy.commercial_notes %}
 <h2>Commercial notes</h2>
 <p class="para">{{ copy.commercial_notes }}</p>
 {% endif %}
 
-{% if copy.next_steps %}
+{% if sec.scope and copy.next_steps %}
 <h2>Next steps</h2>
 <ol class="steps">
   {% for step in copy.next_steps %}<li>{{ step }}</li>{% endfor %}
@@ -442,6 +474,7 @@ _TEMPLATE_SRC = r"""
 {% endif %}
 
 {# ---------- Terms ---------- #}
+{% if sec.terms %}
 <div class="section terms">
   <h2>Terms</h2>
   {% if s.payment_terms and s.payment_terms != '-' %}<p><strong>Payment terms:</strong> {{ s.payment_terms }}</p>{% endif %}
@@ -449,6 +482,7 @@ _TEMPLATE_SRC = r"""
   {% if s.warranty_months %}<p><strong>Warranty:</strong> {{ s.warranty_months }} months{% if s.warranty_terms %} — {{ s.warranty_terms }}{% endif %}</p>{% endif %}
   {% if s.amc_tier and s.amc_tier != 'Not offered' %}<p><strong>AMC:</strong> {{ s.amc_tier }}{% if s.amc_price %} ({{ s.amc_price }}){% endif %}</p>{% endif %}
 </div>
+{% endif %}
 
 </body>
 </html>
@@ -469,19 +503,23 @@ def generate_master_quote_pdf(
     use_llm: bool = False,
     currency_symbol: str | None = None,
     visual_url: str | None = None,
+    sections: dict | None = None,
 ) -> bytes:
     """Return the Master Quotation as PDF bytes.
 
     use_llm defaults to False so the customer download is fast and
     deterministic; the built-in fallback copy is used for the narrative.
+    sections overrides the stored section switches when given.
     """
     if not currency_symbol:
         currency_symbol = tenant.currency_symbol if tenant is not None else "\u20b9"
-    visual_url = visual_url or _resolve_visual_url(quotation)
+    sec = _resolve_sections(quotation, sections)
+    visual_url = None
     context = _build_context(quotation, project, tenant, currency_symbol)
     copy_data = generate_proposal_copy(context["llm_input"], use_llm=use_llm)
 
     html = _TEMPLATE.render(
+        sec=sec,
         s=context["scalars"],
         item_rows=context["item_rows"],
         charge_rows=context["charge_rows"],
@@ -497,7 +535,7 @@ def generate_master_quote_pdf(
     except (ImportError, OSError) as exc:
         logger.warning("WeasyPrint unavailable (%s); using reportlab for master quote %s",
                        exc, quotation.quotation_number)
-        return _generate_with_reportlab(quotation, project, tenant, use_llm, currency_symbol, visual_url)
+        return _generate_with_reportlab(quotation, project, tenant, use_llm, currency_symbol, visual_url, sec)
 
     pdf_bytes = HTML(string=html).write_pdf()
     logger.info("Master quote PDF rendered: %s size=%d bytes",
@@ -509,8 +547,11 @@ def generate_master_quote_pdf(
 #  reportlab fallback (pure Python, no GTK/Pango needed — works on Windows)
 # ------------------------------------------------------------------ #
 
-def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency_symbol: str, visual_url: str | None = None) -> bytes:
+def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency_symbol: str, visual_url: str | None = None, sec: dict | None = None) -> bytes:
     import io
+    sec = sec if sec is not None else _resolve_sections(quotation)
+    if not sec.get("visual"):
+        visual_url = None
     from xml.sax.saxutils import escape
 
     from reportlab.lib import colors
@@ -597,17 +638,12 @@ def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency
     story.append(Paragraph(f"<b>{text(s.get('customer_name') or 'Customer')}</b>", styles["Heading2"]))
     if s.get("project_address"):
         story.append(Paragraph(text(s["project_address"]), meta))
-    if visual_url:
-        story.append(Spacer(1, 6))
-        story.append(Paragraph(
-            '<b>View your design online:</b> <link href="' + text(visual_url) + '" color="#C97B3D">'
-            + text(visual_url) + '</link>', body))
 
     # ---- Proposal narrative ----
-    if copy_data.get("executive_summary"):
+    if sec.get("scope") and copy_data.get("executive_summary"):
         story.append(Paragraph("Overview", h2))
         story.append(para(copy_data["executive_summary"]))
-    if copy_data.get("scope_of_work"):
+    if sec.get("scope") and copy_data.get("scope_of_work"):
         story.append(Paragraph("Scope of work", h2))
         story.append(para(copy_data["scope_of_work"]))
 
@@ -618,6 +654,14 @@ def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency
         item_rows.append([r["item_no"], r["item_label"], r["item_material"],
                           r["item_size"], r["item_qty"], r["item_amount"]])
     story.append(build_table(item_rows, [8, 52, 30, 32, 12, 44], right_cols=(4, 5)))
+
+    if sec.get("visual"):
+        for r in context["item_rows"]:
+            if r.get("preview_url"):
+                story.append(Paragraph(
+                    f'Live preview - {text(r["item_label"])}: '
+                    f'<link href="{text(r["preview_url"])}" color="#C97B3D">{text(r["preview_url"])}</link>',
+                    note))
 
     if context["charge_rows"]:
         story.append(Spacer(1, 6))
@@ -645,50 +689,53 @@ def _generate_with_reportlab(quotation, project, tenant, use_llm: bool, currency
     story.append(totals_table)
 
     # ---- Payment stages ----
-    story.append(Paragraph("Payment stages", h2))
-    pay_rows = [["Stage", "Share", "Amount", "Received", "Due", "Status"]]
-    for p in payment["rows"]:
-        pay_rows.append([p["stage"], p["percent"], p["amount"], p["received"], p["due"], p["status"]])
-    story.append(build_table(pay_rows, [34, 18, 36, 36, 28, 26], right_cols=(1, 2, 3)))
-    if payment["planned"]:
-        story.append(Paragraph(
-            "Planned schedule. Final invoices are raised after the order is confirmed.", note))
+    if sec.get("payment_stages"):
+        story.append(Paragraph("Payment stages", h2))
+        pay_rows = [["Stage", "Share", "Amount", "Received", "Due", "Status"]]
+        for p in payment["rows"]:
+            pay_rows.append([p["stage"], p["percent"], p["amount"], p["received"], p["due"], p["status"]])
+        story.append(build_table(pay_rows, [34, 18, 36, 36, 28, 26], right_cols=(1, 2, 3)))
+        if payment["planned"]:
+            story.append(Paragraph(
+                "Planned schedule. Final invoices are raised after the order is confirmed.", note))
 
     # ---- Manufacturing jobs ----
-    story.append(Paragraph("Manufacturing jobs", h2))
-    job_rows = [["Job", "Item", "Size", "Stage", "Status", "Planned", "Completed"]]
-    for j in manufacturing["rows"]:
-        job_rows.append([j["job"], j["item"], j["size"], j["stage"],
-                         j["status"], j["planned"], j["done"]])
-    story.append(build_table(job_rows, [28, 36, 28, 22, 22, 21, 21]))
-    story.append(Paragraph("Process: " + " > ".join(manufacturing["stages"]), note))
-    if manufacturing["planned"]:
-        story.append(Paragraph(
-            "Jobs are created once the order is confirmed and the advance is received.", note))
+    if sec.get("manufacturing"):
+        story.append(Paragraph("Manufacturing jobs", h2))
+        job_rows = [["Job", "Item", "Size", "Stage", "Status", "Planned", "Completed"]]
+        for j in manufacturing["rows"]:
+            job_rows.append([j["job"], j["item"], j["size"], j["stage"],
+                             j["status"], j["planned"], j["done"]])
+        story.append(build_table(job_rows, [28, 36, 28, 22, 22, 21, 21]))
+        story.append(Paragraph("Process: " + " > ".join(manufacturing["stages"]), note))
+        if manufacturing["planned"]:
+            story.append(Paragraph(
+                "Jobs are created once the order is confirmed and the advance is received.", note))
 
     # ---- Commercial notes / next steps ----
-    if copy_data.get("commercial_notes"):
+    if sec.get("scope") and copy_data.get("commercial_notes"):
         story.append(Paragraph("Commercial notes", h2))
         story.append(para(copy_data["commercial_notes"]))
-    if copy_data.get("next_steps"):
+    if sec.get("scope") and copy_data.get("next_steps"):
         story.append(Paragraph("Next steps", h2))
         for index, step in enumerate(copy_data["next_steps"], start=1):
             story.append(para(f"{index}. {step}"))
 
     # ---- Terms ----
-    story.append(Paragraph("Terms", h2))
-    if s.get("payment_terms") and s["payment_terms"] != "-":
-        story.append(Paragraph(f"<b>Payment terms:</b> {text(s['payment_terms'])}", body))
-    if s.get("validity_date"):
-        story.append(Paragraph(f"<b>Validity:</b> until {text(s['validity_date'])}", body))
-    if s.get("warranty_months"):
-        warranty = f"{text(s['warranty_months'])} months"
-        if s.get("warranty_terms"):
-            warranty += f" - {text(s['warranty_terms'])}"
-        story.append(Paragraph(f"<b>Warranty:</b> {warranty}", body))
-    if s.get("amc_tier") and s["amc_tier"] != "Not offered":
-        amc = text(s["amc_tier"]) + (f" ({text(s['amc_price'])})" if s.get("amc_price") else "")
-        story.append(Paragraph(f"<b>AMC:</b> {amc}", body))
+    if sec.get("terms"):
+        story.append(Paragraph("Terms", h2))
+        if s.get("payment_terms") and s["payment_terms"] != "-":
+            story.append(Paragraph(f"<b>Payment terms:</b> {text(s['payment_terms'])}", body))
+        if s.get("validity_date"):
+            story.append(Paragraph(f"<b>Validity:</b> until {text(s['validity_date'])}", body))
+        if s.get("warranty_months"):
+            warranty = f"{text(s['warranty_months'])} months"
+            if s.get("warranty_terms"):
+                warranty += f" - {text(s['warranty_terms'])}"
+            story.append(Paragraph(f"<b>Warranty:</b> {warranty}", body))
+        if s.get("amc_tier") and s["amc_tier"] != "Not offered":
+            amc = text(s["amc_tier"]) + (f" ({text(s['amc_price'])})" if s.get("amc_price") else "")
+            story.append(Paragraph(f"<b>AMC:</b> {amc}", body))
 
     number = s.get("quotation_number", "")
 

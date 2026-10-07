@@ -6,6 +6,7 @@
 <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
 <script src="{{ url_for('static', filename='js/drawing-engine.js') }}"></script>
 <script src="{{ url_for('static', filename='js/drawing-phase2.js') }}"></script>
+<script>window.QS_CURRENCY = {{ currency_symbol|tojson }};</script>
 <script src="{{ url_for('static', filename='js/drawing-phase3.js') }}"></script>
 <style>
 body { overflow:hidden; }
@@ -1212,11 +1213,11 @@ async function fetchPricing(){
         design:{hardware:model.hardware||{},extras:model.extras||{},customExtras:model.customExtras||[],panes:cells}})});
     if(!r.ok)return;
     const d=await r.json();
-    document.getElementById('pFrame').textContent='£'+(d.frame_glass??d.frame??0);
-    document.getElementById('pHw').textContent='£'+(d.hardware??0);
-    const exEl=document.getElementById('pExtras'); if(exEl) exEl.textContent='£'+(d.extras??0);
-    document.getElementById('pFit').textContent='£'+(d.fitting??0);
-    document.getElementById('pTotal').textContent='£'+(d.total??0);
+    document.getElementById('pFrame').textContent={{ currency_symbol|tojson }}+(d.frame_glass??d.frame??0);
+    document.getElementById('pHw').textContent={{ currency_symbol|tojson }}+(d.hardware??0);
+    const exEl=document.getElementById('pExtras'); if(exEl) exEl.textContent={{ currency_symbol|tojson }}+(d.extras??0);
+    document.getElementById('pFit').textContent={{ currency_symbol|tojson }}+(d.fitting??0);
+    document.getElementById('pTotal').textContent={{ currency_symbol|tojson }}+(d.total??0);
   }catch(e){}
 }
 

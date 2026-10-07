@@ -1,132 +1,463 @@
 {% extends 'base.html' %}
 {% from '_ui_macros.html' import pill, stage_tracker %}
-{% from '_visual_feedback_panel.html' import visual_feedback_panel, visual_feedback_script %}
-{% from '_share_link_button.html' import share_link_button, share_link_script %}
 {% block title %}{{ quotation.quotation_number }} — FenestraOne{% endblock %}
 
 {% block body %}
 <div class="dash-layout">
   {% include '_nav_sidebar.html' %}
+
   <div class="dash-content">
+
     {% set tone_map = {
       'QUOTE-DRAFT': 'neutral', 'QUOTE-PENDING_DISCOUNT_APPROVAL': 'warn', 'QUOTE-SENT': 'info',
       'QUOTE-NEGOTIATION': 'warn', 'QUOTE-ACCEPTED': 'success', 'QUOTE-LOST': 'danger', 'QUOTE-EXPIRED': 'danger'
     } %}
     {% set ns = namespace(step=8 if quotation.status == QuotationStatus.ACCEPTED else 7) %}
 
+    {# =================== 1. HEADER CARD =================== #}
     <div class="ui-card lead-header-card">
       <div class="lead-header-top">
         <div class="lead-header-title">
           <h1>{{ quotation.project.display_name if quotation.project else 'Quotation' }}</h1>
           <span class="customer-chip">{{ quotation.quotation_number }} · v{{ quotation.quotation_version }}</span>
         </div>
-        <div class="lead-header-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
-          {% if quotation.project %}<a href="{{ url_for('projects.detail', project_id=quotation.project_id) }}" class="btn btn-secondary btn-sm">Project</a>{% endif %}
-          {% if quotation.is_editable %}<a href="{{ url_for('quotation.index', merge=quotation.id) }}" class="btn btn-secondary btn-sm">⇄ Merge with other drafts</a>{% endif %}
-          {% if quotation.status in (QuotationStatus.SENT, QuotationStatus.NEGOTIATION, QuotationStatus.ACCEPTED) %}{{ share_link_button('master_quote', quotation.id) }}{{ share_link_script() }}{% endif %}
-          <a href="{{ url_for('proposal.download_master_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Master Quote (PDF)</a>
+        <div class="lead-header-actions" style="display:flex; gap:8px;">
+          {% if quotation.project %}
+          <a href="{{ url_for('projects.detail', project_id=quotation.project_id) }}" class="btn btn-secondary btn-sm">Project</a>
+          {% endif %}
+          {% if quotation.is_editable %}
+          <a href="#edit-quotation" class="btn btn-secondary btn-sm">✎ Edit</a>
+          {% if not quotation.parent_quotation_id and not quotation.design_approval_id %}
+          <a href="{{ url_for('quotation_flow.builder', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">Edit Items</a>
+          {% endif %}
+          {% endif %}
+          {% if quotation.status != QuotationStatus.ACCEPTED %}
+          <form method="POST" action="{{ url_for('quotation.delete', quotation_id=quotation.id) }}" style="display:inline;" onsubmit="return confirm('Delete quotation {{ quotation.quotation_number }}? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary btn-sm" style="color:#B91C1C;">🗑 Delete</button>
+          </form>
+          {% endif %}
+          <a href="{{ url_for('quotation.download_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Download PDF</a>
           <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>
       </div>
+
       <div class="lead-header-pills">
         {{ pill(quotation.status_label, tone_map.get(quotation.status, 'neutral')) }}
-        {% if quotation.is_expired and quotation.status != QuotationStatus.EXPIRED %}{{ pill('Expired', 'danger') }}
-        {% elif quotation.days_until_expiry is not none and quotation.days_until_expiry <= 3 and quotation.status == QuotationStatus.SENT %}{{ pill(quotation.days_until_expiry ~ 'd left', 'warn') }}{% endif %}
-        {% if quotation.parent_quotation_id %}{{ pill('Supersedes #' ~ quotation.parent_quotation_id, 'neutral') }}{% endif %}
+        {% if quotation.is_expired and quotation.status != QuotationStatus.EXPIRED %}
+          {{ pill('Expired', 'danger') }}
+        {% elif quotation.days_until_expiry is not none and quotation.days_until_expiry <= 3 and quotation.status == QuotationStatus.SENT %}
+          {{ pill(quotation.days_until_expiry ~ 'd left', 'warn') }}
+        {% endif %}
+        {% if quotation.parent_quotation_id %}
+          {{ pill('Supersedes #' ~ quotation.parent_quotation_id, 'neutral') }}
+        {% endif %}
       </div>
+
       {{ stage_tracker(ns.step, quotation.status == QuotationStatus.LOST) }}
     </div>
 
+    {# =================== 2. KEY NUMBERS =================== #}
     <div class="info-card-row">
-      <div class="info-card"><div class="info-card-label">Subtotal</div><div class="info-card-value">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.subtotal|float) if quotation.subtotal else '—' }}</div></div>
-      <div class="info-card"><div class="info-card-label">Discount ({{ quotation.discount_pct or 0 }}%)</div><div class="info-card-value">{% if quotation.discount_amount %}− {{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.discount_amount|float) }}{% else %}—{% endif %}{% if not quotation.discount_approved and quotation.discount_pct and quotation.discount_pct > 0 %}<span class="info-card-note">Pending approval</span>{% endif %}</div></div>
-      <div class="info-card"><div class="info-card-label">Tax ({{ (quotation.tax_rate|float * 100)|round(0)|int }}%)</div><div class="info-card-value">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.tax_amount|float) if quotation.tax_amount else '—' }}</div></div>
-      <div class="info-card info-card-highlight"><div class="info-card-label">Grand Total</div><div class="info-card-value">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.grand_total|float) if quotation.grand_total else '—' }}</div></div>
-      <div class="info-card"><div class="info-card-label">Valid Until</div><div class="info-card-value" style="{{ 'color:var(--error);' if quotation.is_expired }}">{{ quotation.validity_date.strftime('%d %b %Y') if quotation.validity_date else '—' }}</div></div>
+      <div class="info-card">
+        <div class="info-card-label">Subtotal</div>
+        <div class="info-card-value">{{ quotation.currency_symbol ~ '{:,.2f}'.format(quotation.subtotal|float) if quotation.subtotal else '—' }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Discount ({{ quotation.discount_pct or 0 }}%)</div>
+        <div class="info-card-value">
+          {% if quotation.discount_amount %}− {{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.discount_amount|float) }}{% else %}—{% endif %}
+          {% if not quotation.discount_approved and quotation.discount_pct and quotation.discount_pct > 0 %}
+            <span class="info-card-note">Pending approval</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Tax ({{ (quotation.tax_rate|float * 100)|round(0)|int }}%)</div>
+        <div class="info-card-value">{{ quotation.currency_symbol ~ '{:,.2f}'.format(quotation.tax_amount|float) if quotation.tax_amount else '—' }}</div>
+      </div>
+      <div class="info-card info-card-highlight">
+        <div class="info-card-label">Grand Total</div>
+        <div class="info-card-value">{{ quotation.currency_symbol ~ '{:,.2f}'.format(quotation.grand_total|float) if quotation.grand_total else '—' }}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Valid Until</div>
+        <div class="info-card-value" style="{{ 'color:var(--error);' if quotation.is_expired }}">
+          {{ quotation.validity_date.strftime('%d %b %Y') if quotation.validity_date else '—' }}
+        </div>
+      </div>
     </div>
 
-    {% if master_sections is defined and master_sections %}
+    {# =================== 2b. INSTALLATION / TRANSPORT / AMC / WARRANTY =================== #}
+    {% if quotation.installation_charge or quotation.transport_charge or quotation.amc_offered or quotation.other_charges or quotation.warranty_months %}
     <div class="ui-card">
-      <div class="ui-card-title">Master Quotation — what the customer sees</div>
-      <p class="muted" style="margin:6px 0 12px;">
-        Tick the sections to show in the customer link and PDF.
-        {% if master_has_override %}<strong>Custom for this quotation.</strong>{% else %}Using the default template.{% endif %}
-      </p>
-      <form method="post" action="{{ url_for('quotation.save_master_sections', quotation_id=quotation.id) }}">
+      <div class="ui-card-title">Installation, Transport, AMC &amp; Warranty</div>
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Details</th>
+              <th style="text-align:right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if quotation.installation_charge %}
+            <tr>
+              <td style="font-weight:600;">Installation Charges</td>
+              <td class="muted">Fitting &amp; on-site installation</td>
+              <td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.installation_charge|float) }}</td>
+            </tr>
+            {% endif %}
+            {% if quotation.transport_charge %}
+            <tr>
+              <td style="font-weight:600;">Transport Charges</td>
+              <td class="muted">Delivery to site</td>
+              <td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.transport_charge|float) }}</td>
+            </tr>
+            {% endif %}
+            {% for charge in quotation.other_charges %}
+            <tr>
+              <td style="font-weight:600;">{{ charge.label }}</td>
+              <td class="muted">—</td>
+              <td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(charge.amount|float) }}</td>
+            </tr>
+            {% endfor %}
+            {% if quotation.amc_offered %}
+            <tr>
+              <td style="font-weight:600;">AMC — {{ quotation.amc_offer_tier or '—' }}</td>
+              <td class="muted">Annual maintenance contract</td>
+              <td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.amc_price|float) if quotation.amc_price else '—' }}</td>
+            </tr>
+            {% endif %}
+            {% if quotation.warranty_months %}
+            <tr>
+              <td style="font-weight:600;">Warranty</td>
+              <td class="muted">{{ quotation.warranty_terms_text or (quotation.warranty_months ~ ' months standard warranty') }}</td>
+              <td class="num-cell">Included</td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    {# =================== 3. TIMELINE / TERMS CARD =================== #}
+    {% if quotation.payment_terms_template or quotation.sent_at or quotation.accepted_at or quotation.lost_at or quotation.negotiation_notes %}
+    <div class="ui-card">
+      <div class="ui-card-title">Timeline &amp; Terms</div>
+      <div class="info-grid">
+        {% if quotation.payment_terms_template %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Payment terms</div><div class="info-grid-value">{{ quotation.payment_terms_template }}</div></div></div>
+        {% endif %}
+        {% if quotation.sent_at %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Sent</div><div class="info-grid-value">{{ quotation.sent_at.strftime('%d %b %Y, %H:%M') }}</div></div></div>
+        {% endif %}
+        {% if quotation.accepted_at %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Accepted</div><div class="info-grid-value">{{ quotation.accepted_at.strftime('%d %b %Y, %H:%M') }} by {{ quotation.accepted_by_name }} ({{ quotation.acceptance_method }})</div></div></div>
+        {% endif %}
+        {% if quotation.lost_at %}
+        <div class="info-grid-item"><div><div class="info-grid-label">Lost</div><div class="info-grid-value">{{ quotation.lost_at.strftime('%d %b %Y, %H:%M') }} — {{ quotation.lost_reason }}</div></div></div>
+        {% endif %}
+        {% if quotation.negotiation_notes %}
+        <div class="info-grid-item" style="grid-column:1/-1;"><div><div class="info-grid-label">Negotiation notes</div><div class="info-grid-value">{{ quotation.negotiation_notes }}</div></div></div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# =================== 4. LINE ITEMS =================== #}
+    {% set items = quotation.line_items %}
+    {% if items %}
+    {% set is_indicative = items[0].indicative is defined and items[0].indicative %}
+    <div class="ui-card">
+      <div class="ui-card-title">
+        Line Items
+        {% if is_indicative %}
+          <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px;">— Indicative budget estimate (no design yet)</span>
+        {% endif %}
+      </div>
+      <div style="overflow-x:auto;">
+        {% if is_indicative %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Description</th>
+              <th>Product Range / Notes</th>
+              <th style="text-align:right;">Qty</th>
+              <th>Unit</th>
+              <th style="text-align:right;">Unit Rate</th>
+              <th style="text-align:right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td class="mono muted" style="font-size:11px;">{{ loop.index }}</td>
+              <td style="font-weight:600;">{{ item.label or '—' }}</td>
+              <td style="color:var(--muted);font-size:13px;">{{ item.note or '—' }}</td>
+              <td class="num-cell">{{ item.qty or 1 }}</td>
+              <td>{{ item.unit or '—' }}</td>
+              <td class="num-cell">{{ quotation.currency_symbol ~ '{:,.2f}'.format(item.unit_total|float) if item.unit_total else '—' }}</td>
+              <td class="num-cell" style="font-weight:700;color:var(--copper);">{{ quotation.currency_symbol ~ '{:,.2f}'.format(item.amount|float) if item.amount else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Label</th><th>Material</th><th>Size (W×H mm)</th>
+              <th style="text-align:right;">Frame</th><th style="text-align:right;">Hardware</th>
+              <th style="text-align:right;">Extras</th><th style="text-align:right;">Fitting</th>
+              <th style="text-align:right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td class="mono muted" style="font-size:11px;">{{ loop.index }}</td>
+              <td style="font-weight:600;">{{ item.label or '—' }}</td>
+              <td>{{ item.material or '—' }}</td>
+              <td class="mono" style="font-size:12px;">{{ item.width_mm }}×{{ item.height_mm }}</td>
+              <td class="num-cell">{{ quotation.currency_symbol ~ '{:,.2f}'.format(item.frame|float) if item.frame else '—' }}</td>
+              <td class="num-cell">{{ quotation.currency_symbol ~ '{:,.2f}'.format(item.hardware|float) if item.hardware else '—' }}</td>
+              <td class="num-cell">{{ quotation.currency_symbol ~ '{:,.2f}'.format(item.extras|float) if item.extras else '—' }}</td>
+              <td class="num-cell">{{ quotation.currency_symbol ~ '{:,.2f}'.format(item.fitting|float) if item.fitting else '—' }}</td>
+              <td class="num-cell" style="font-weight:700; color:var(--copper);">{{ quotation.currency_symbol ~ '{:,.2f}'.format(item.amount|float) if item.amount else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# =================== 4b. EDIT QUOTATION =================== #}
+    {% if quotation.is_editable %}
+    <div class="ui-card" id="edit-quotation">
+      <div class="ui-card-title" style="margin-bottom:10px;">Edit Quotation</div>
+      <form method="POST" action="{{ url_for('quotation.edit', quotation_id=quotation.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
-          {% for s in master_sections %}
-          <label style="display:flex;gap:8px;align-items:flex-start;padding:10px;border:1px solid #E5E7EB;border-radius:8px;{{ 'opacity:.75;' if s.required }}">
-            <input type="checkbox" name="sections" value="{{ s.key }}" {{ 'checked' if s.enabled }} {{ 'disabled' if s.required }} style="margin-top:3px;">
-            {% if s.required %}<input type="hidden" name="sections" value="{{ s.key }}">{% endif %}
-            <span><strong>{{ s.label }}</strong>{% if s.required %} <span class="muted">(always shown)</span>{% endif %}<br><span class="muted" style="font-size:12px;">{{ s.help }}</span></span>
-          </label>
-          {% endfor %}
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+          <div class="form-group">
+            <label class="form-label" for="e_discount_pct">Discount (%)</label>
+            <input type="number" step="0.01" min="0" max="100" class="form-control" id="e_discount_pct" name="discount_pct" value="{{ quotation.discount_pct or 0 }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_validity_days">Validity (days)</label>
+            <input type="number" min="1" class="form-control" id="e_validity_days" name="validity_days" value="{{ quotation.validity_days or 30 }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_payment_terms">Payment terms</label>
+            <input type="text" class="form-control" id="e_payment_terms" name="payment_terms_template" value="{{ quotation.payment_terms_template or '' }}" placeholder="e.g. 50% advance, 50% on delivery">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_installation">Installation charge ($)</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="e_installation" name="installation_charge" value="{{ quotation.installation_charge or 0 }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_transport">Transport charge ($)</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="e_transport" name="transport_charge" value="{{ quotation.transport_charge or 0 }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_warranty">Warranty (months)</label>
+            <input type="number" min="0" class="form-control" id="e_warranty" name="warranty_months" value="{{ quotation.warranty_months or 0 }}">
+          </div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-          <button type="submit" name="action" value="quotation" class="btn btn-primary btn-sm">Save for this quotation</button>
-          <button type="submit" name="action" value="default" class="btn btn-secondary btn-sm">Save as default for all</button>
-          {% if master_has_override %}<button type="submit" name="action" value="reset" class="btn btn-secondary btn-sm">Use default template</button>{% endif %}
+
+        <div class="form-group">
+          <label class="form-label" for="e_warranty_text">Warranty terms</label>
+          <textarea class="form-control" id="e_warranty_text" name="warranty_terms_text" rows="2">{{ quotation.warranty_terms_text or '' }}</textarea>
         </div>
+
+        <div class="form-group">
+          <label class="form-label">Other charges</label>
+          <div id="e_other_rows">
+            {% for c in quotation.other_charges %}
+            <div class="e-other-row" style="display:flex; gap:8px; margin-bottom:6px;">
+              <input type="text" class="form-control" name="other_charge_label[]" value="{{ c.label }}" placeholder="Label">
+              <input type="number" step="0.01" class="form-control" name="other_charge_amount[]" value="{{ c.amount }}" placeholder="Amount" style="max-width:160px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="this.parentNode.remove()">✕</button>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="e_add_other">+ Add charge</button>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; align-items:end;">
+          <div class="form-group">
+            <label class="form-label" style="display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" name="amc_offered" value="1" {{ 'checked' if quotation.amc_offered }}> Offer AMC
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_amc_tier">AMC tier</label>
+            <select class="form-control" id="e_amc_tier" name="amc_offer_tier">
+              <option value="">—</option>
+              {% for tier in ['Basic', 'Standard', 'Premium'] %}
+              <option value="{{ tier }}" {{ 'selected' if quotation.amc_offer_tier == tier }}>{{ tier }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="e_amc_price">AMC price ($)</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="e_amc_price" name="amc_price" value="{{ quotation.amc_price or 0 }}">
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+      </form>
+    </div>
+    <script>
+    (function () {
+      var rows = document.getElementById('e_other_rows');
+      document.getElementById('e_add_other').addEventListener('click', function () {
+        var div = document.createElement('div');
+        div.className = 'e-other-row';
+        div.style.cssText = 'display:flex; gap:8px; margin-bottom:6px;';
+        div.innerHTML =
+          '<input type="text" class="form-control" name="other_charge_label[]" placeholder="Label">' +
+          '<input type="number" step="0.01" class="form-control" name="other_charge_amount[]" placeholder="Amount" style="max-width:160px;">' +
+          '<button type="button" class="btn btn-secondary btn-sm" onclick="this.parentNode.remove()">✕</button>';
+        rows.appendChild(div);
+      });
+    })();
+    </script>
+    {% endif %}
+
+    {# =================== 5. ACTION CARDS =================== #}
+
+    {% if quotation.status == QuotationStatus.PENDING_DISCOUNT_APPROVAL %}
+    <div class="ui-card action-panel-warning" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px;">Discount Approval Required</div>
+      <p class="action-note">A discount of {{ quotation.discount_pct }}% exceeds the auto-approval limit. A manager must approve before this quotation can be sent.</p>
+      <form method="POST" action="{{ url_for('quotation.approve_discount', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-sm">Approve Discount</button>
       </form>
     </div>
     {% endif %}
 
-    {% if quotation.installation_charge or quotation.transport_charge or quotation.amc_offered or quotation.other_charges or quotation.warranty_months %}
-    <div class="ui-card"><div class="ui-card-title">Installation, Transport, AMC &amp; Warranty</div><div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Item</th><th>Details</th><th style="text-align:right;">Amount</th></tr></thead><tbody>
-      {% if quotation.installation_charge %}<tr><td style="font-weight:600;">Installation Charges</td><td class="muted">Fitting &amp; on-site installation</td><td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.installation_charge|float) }}</td></tr>{% endif %}
-      {% if quotation.transport_charge %}<tr><td style="font-weight:600;">Transport Charges</td><td class="muted">Delivery to site</td><td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.transport_charge|float) }}</td></tr>{% endif %}
-      {% for charge in quotation.other_charges %}<tr><td style="font-weight:600;">{{ charge.label }}</td><td class="muted">—</td><td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(charge.amount|float) }}</td></tr>{% endfor %}
-      {% if quotation.amc_offered %}<tr><td style="font-weight:600;">AMC — {{ quotation.amc_offer_tier or '—' }}</td><td class="muted">Annual maintenance contract</td><td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(quotation.amc_price|float) if quotation.amc_price else '—' }}</td></tr>{% endif %}
-      {% if quotation.warranty_months %}<tr><td style="font-weight:600;">Warranty</td><td class="muted">{{ quotation.warranty_terms_text or (quotation.warranty_months ~ ' months standard warranty') }}</td><td class="num-cell">Included</td></tr>{% endif %}
-    </tbody></table></div></div>
+    {% if quotation.status == QuotationStatus.DRAFT %}
+    <div class="action-grid">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.send_to_customer', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ui-card-title" style="margin-bottom:6px;">Send to Customer</div>
+        <p class="action-note">This will lock the quotation and mark it as sent. Valid until {{ quotation.validity_date.strftime('%d %b %Y') if quotation.validity_date else 'N/A' }}.</p>
+        <button type="submit" class="btn btn-primary btn-sm">Send Quotation →</button>
+      </form>
+
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}" onsubmit="return confirm('Mark this quotation as lost?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ui-card-title" style="margin-bottom:6px;">Mark as Lost</div>
+        <div class="form-group">
+          <label class="form-label" for="lost_reason_draft">Reason</label>
+          <textarea class="form-control" id="lost_reason_draft" name="lost_reason" rows="2" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Mark Lost</button>
+      </form>
+    </div>
     {% endif %}
 
-    {% if quotation.payment_terms_template or quotation.sent_at or quotation.accepted_at or quotation.lost_at or quotation.negotiation_notes %}
-    <div class="ui-card"><div class="ui-card-title">Timeline &amp; Terms</div><div class="info-grid">
-      {% if quotation.payment_terms_template %}<div class="info-grid-item"><div><div class="info-grid-label">Payment terms</div><div class="info-grid-value">{{ quotation.payment_terms_template }}</div></div></div>{% endif %}
-      {% if quotation.sent_at %}<div class="info-grid-item"><div><div class="info-grid-label">Sent</div><div class="info-grid-value">{{ quotation.sent_at.strftime('%d %b %Y, %H:%M') }}</div></div></div>{% endif %}
-      {% if quotation.accepted_at %}<div class="info-grid-item"><div><div class="info-grid-label">Accepted</div><div class="info-grid-value">{{ quotation.accepted_at.strftime('%d %b %Y, %H:%M') }} by {{ quotation.accepted_by_name }} ({{ quotation.acceptance_method }})</div></div></div>{% endif %}
-      {% if quotation.lost_at %}<div class="info-grid-item"><div><div class="info-grid-label">Lost</div><div class="info-grid-value">{{ quotation.lost_at.strftime('%d %b %Y, %H:%M') }} — {{ quotation.lost_reason }}</div></div></div>{% endif %}
-      {% if quotation.negotiation_notes %}<div class="info-grid-item" style="grid-column:1/-1;"><div><div class="info-grid-label">Negotiation notes</div><div class="info-grid-value">{{ quotation.negotiation_notes }}</div></div></div>{% endif %}
-    </div></div>
+    {% if quotation.status == QuotationStatus.SENT %}
+    <div class="action-grid">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_negotiation', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ui-card-title" style="margin-bottom:6px;">Enter Negotiation</div>
+        <div class="form-group">
+          <label class="form-label" for="notes">Notes</label>
+          <textarea class="form-control" id="notes" name="notes" rows="2"></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Mark as Negotiation</button>
+      </form>
+
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.accept', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ui-card-title" style="margin-bottom:6px;">Accept Quotation</div>
+        <div class="form-group">
+          <label class="form-label" for="acceptance_method">Method</label>
+          <select class="form-control" id="acceptance_method" name="acceptance_method">
+            <option value="email">Email</option>
+            <option value="e-signature">E-Signature</option>
+            <option value="portal">Portal</option>
+            <option value="in-person">In Person</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Accept &amp; Proceed →</button>
+      </form>
+
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}" onsubmit="return confirm('Mark this quotation as lost?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ui-card-title" style="margin-bottom:6px;">Mark as Lost</div>
+        <div class="form-group">
+          <label class="form-label" for="lost_reason_sent">Reason</label>
+          <textarea class="form-control" id="lost_reason_sent" name="lost_reason" rows="2" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Mark Lost</button>
+      </form>
+    </div>
     {% endif %}
 
-    {% set items = quotation.line_items %}
-    {% if items %}
-    {% set is_indicative = items[0].indicative is defined and items[0].indicative %}
-    <div class="ui-card"><div class="ui-card-title">Line Items{% if is_indicative %}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px;">— Indicative budget estimate (no design yet)</span>{% endif %}</div><div style="overflow-x:auto;">
-      {% if is_indicative %}<table class="data-table"><thead><tr><th>#</th><th>Description</th><th>Product Range / Notes</th><th style="text-align:right;">Qty</th><th>Unit</th><th style="text-align:right;">Unit Rate</th><th style="text-align:right;">Amount</th></tr></thead><tbody>
-      {% for item in items %}<tr><td class="mono muted" style="font-size:11px;">{{ loop.index }}</td><td style="font-weight:600;">{{ item.label or '—' }}</td><td style="color:var(--muted);font-size:13px;">{{ item.note or '—' }}</td><td class="num-cell">{{ item.qty or 1 }}</td><td>{{ item.unit or '—' }}</td><td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(item.unit_total|float) if item.unit_total else '—' }}</td><td class="num-cell" style="font-weight:700;color:var(--copper);">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(item.amount|float) if item.amount else '—' }}</td></tr>{% endfor %}
-      </tbody></table>
-      {% else %}<table class="data-table"><thead><tr><th>#</th><th>Label</th><th>Material</th><th>Size (W×H mm)</th><th style="text-align:right;">Frame</th><th style="text-align:right;">Hardware</th><th style="text-align:right;">Extras</th><th style="text-align:right;">Fitting</th><th style="text-align:right;">Amount</th></tr></thead><tbody>
-      {% for item in items %}<tr><td class="mono muted" style="font-size:11px;">{{ loop.index }}</td><td style="font-weight:600;">{{ item.label or '—' }}</td><td>{{ item.material or '—' }}</td><td class="mono" style="font-size:12px;">{{ item.width_mm }}×{{ item.height_mm }}</td><td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(item.frame|float) if item.frame else '—' }}</td><td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(item.hardware|float) if item.hardware else '—' }}</td><td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(item.extras|float) if item.extras else '—' }}</td><td class="num-cell">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(item.fitting|float) if item.fitting else '—' }}</td><td class="num-cell" style="font-weight:700; color:var(--copper);">{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(item.amount|float) if item.amount else '—' }}</td></tr>{% endfor %}
-      </tbody></table>{% endif %}
-    </div></div>
+    {% if quotation.status == QuotationStatus.NEGOTIATION %}
+    <div class="action-grid">
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.accept', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ui-card-title" style="margin-bottom:6px;">Accept Quotation</div>
+        <div class="form-group">
+          <label class="form-label" for="acceptance_method_neg">Method</label>
+          <select class="form-control" id="acceptance_method_neg" name="acceptance_method">
+            <option value="email">Email</option>
+            <option value="e-signature">E-Signature</option>
+            <option value="portal">Portal</option>
+            <option value="in-person">In Person</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Accept &amp; Proceed →</button>
+      </form>
+
+      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}" onsubmit="return confirm('Mark this quotation as lost?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ui-card-title" style="margin-bottom:6px;">Mark as Lost</div>
+        <div class="form-group">
+          <label class="form-label" for="lost_reason_neg">Reason</label>
+          <textarea class="form-control" id="lost_reason_neg" name="lost_reason" rows="2" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-sm">Mark Lost</button>
+      </form>
+    </div>
     {% endif %}
 
-    {% if quotation.status == QuotationStatus.PENDING_DISCOUNT_APPROVAL %}<div class="ui-card action-panel-warning" style="max-width:600px;"><div class="ui-card-title" style="margin-bottom:6px;">Discount Approval Required</div><p class="action-note">A discount of {{ quotation.discount_pct }}% exceeds the auto-approval limit. A manager must approve before this quotation can be sent.</p><form method="POST" action="{{ url_for('quotation.approve_discount', quotation_id=quotation.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-primary btn-sm">Approve Discount</button></form></div>{% endif %}
+    {% if quotation.status == QuotationStatus.ACCEPTED %}
+    <div class="ui-card action-panel-success" style="max-width:600px;">
+      <div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Quotation Accepted</div>
+      {% set active_order = quotation.active_order %}
+      {% if active_order %}
+      <p class="action-note" style="margin-bottom:12px;">Order <strong>{{ active_order.order_number }}</strong> already raised for this quotation.</p>
+      <a href="{{ url_for('order.detail', order_id=active_order.id) }}" class="btn btn-primary btn-sm">View Order →</a>
+      {% else %}
+      <p class="action-note">Proceed to <strong>Order Acceptance</strong> to raise the sales order and collect the advance payment.</p>
+      <form method="POST" action="{{ url_for('order.create', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label class="form-label" for="contract_ref">Contract reference (optional)</label>
+          <input type="text" class="form-control" id="contract_ref" name="contract_ref">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="promised_delivery_date">Promised delivery date (optional)</label>
+          <input type="date" class="form-control" id="promised_delivery_date" name="promised_delivery_date">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Raise Order →</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
 
-    {% if quotation.status == QuotationStatus.DRAFT %}<div class="action-grid">
-      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.send_to_customer', quotation_id=quotation.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="ui-card-title" style="margin-bottom:6px;">Send to Customer</div><p class="action-note">This will lock the quotation and mark it as sent. Valid until {{ quotation.validity_date.strftime('%d %b %Y') if quotation.validity_date else 'N/A' }}.</p><button type="submit" class="btn btn-primary btn-sm">Send Quotation →</button></form>
-      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}" onsubmit="return confirm('Mark this quotation as lost?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="ui-card-title" style="margin-bottom:6px;">Mark as Lost</div><div class="form-group"><label class="form-label" for="lost_reason_draft">Reason</label><textarea class="form-control" id="lost_reason_draft" name="lost_reason" rows="2" required></textarea></div><button type="submit" class="btn btn-secondary btn-sm">Mark Lost</button></form>
-    </div>{% endif %}
-
-    {% if quotation.status == QuotationStatus.SENT %}<div class="action-grid">
-      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_negotiation', quotation_id=quotation.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="ui-card-title" style="margin-bottom:6px;">Enter Negotiation</div><div class="form-group"><label class="form-label" for="notes">Notes</label><textarea class="form-control" id="notes" name="notes" rows="2"></textarea></div><button type="submit" class="btn btn-secondary btn-sm">Mark as Negotiation</button></form>
-      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.accept', quotation_id=quotation.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="ui-card-title" style="margin-bottom:6px;">Accept Quotation</div><div class="form-group"><label class="form-label" for="acceptance_method">Method</label><select class="form-control" id="acceptance_method" name="acceptance_method"><option value="email">Email</option><option value="e-signature">E-Signature</option><option value="portal">Portal</option><option value="in-person">In Person</option></select></div><button type="submit" class="btn btn-primary btn-sm">Accept &amp; Proceed →</button></form>
-      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}" onsubmit="return confirm('Mark this quotation as lost?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="ui-card-title" style="margin-bottom:6px;">Mark as Lost</div><div class="form-group"><label class="form-label" for="lost_reason_sent">Reason</label><textarea class="form-control" id="lost_reason_sent" name="lost_reason" rows="2" required></textarea></div><button type="submit" class="btn btn-secondary btn-sm">Mark Lost</button></form>
-    </div>{% endif %}
-
-    {% if quotation.status == QuotationStatus.NEGOTIATION %}<div class="action-grid">
-      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.accept', quotation_id=quotation.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="ui-card-title" style="margin-bottom:6px;">Accept Quotation</div><div class="form-group"><label class="form-label" for="acceptance_method_neg">Method</label><select class="form-control" id="acceptance_method_neg" name="acceptance_method"><option value="email">Email</option><option value="e-signature">E-Signature</option><option value="portal">Portal</option><option value="in-person">In Person</option></select></div><button type="submit" class="btn btn-primary btn-sm">Accept &amp; Proceed →</button></form>
-      <form method="POST" class="ui-card action-panel" action="{{ url_for('quotation.mark_lost', quotation_id=quotation.id) }}" onsubmit="return confirm('Mark this quotation as lost?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="ui-card-title" style="margin-bottom:6px;">Mark as Lost</div><div class="form-group"><label class="form-label" for="lost_reason_neg">Reason</label><textarea class="form-control" id="lost_reason_neg" name="lost_reason" rows="2" required></textarea></div><button type="submit" class="btn btn-secondary btn-sm">Mark Lost</button></form>
-    </div>{% endif %}
-
-    {% if quotation.status == QuotationStatus.ACCEPTED %}<div class="ui-card action-panel-success" style="max-width:600px;"><div class="ui-card-title" style="margin-bottom:6px; color:var(--success);">✓ Quotation Accepted</div>{% set active_order = quotation.active_order %}{% if active_order %}<p class="action-note" style="margin-bottom:12px;">Order <strong>{{ active_order.order_number }}</strong> already raised for this quotation.</p><a href="{{ url_for('order.detail', order_id=active_order.id) }}" class="btn btn-primary btn-sm">View Order →</a>{% else %}<p class="action-note">Proceed to <strong>Order Acceptance</strong> to raise the sales order and collect the advance payment.</p><form method="POST" action="{{ url_for('order.create', quotation_id=quotation.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="form-group"><label class="form-label" for="contract_ref">Contract reference (optional)</label><input type="text" class="form-control" id="contract_ref" name="contract_ref"></div><div class="form-group"><label class="form-label" for="promised_delivery_date">Promised delivery date (optional)</label><input type="date" class="form-control" id="promised_delivery_date" name="promised_delivery_date"></div><button type="submit" class="btn btn-primary btn-sm">Raise Order →</button></form>{% endif %}</div>{% endif %}
-
-    {% set proposal_rows = quotation.proposals.order_by(None).all()|sort(attribute='revision_no', reverse=True) %}
-    <div class="ui-card" style="margin-top:16px;"><div class="ui-card-title" style="margin-bottom:10px;">Proposal History</div>{% if proposal_rows %}<div style="overflow-x:auto;"><table class="table" style="width:100%;"><thead><tr><th>Revision</th><th>Quotation Version</th><th>Template</th><th>Total</th><th>Created</th><th>Files</th></tr></thead><tbody>{% for p in proposal_rows %}<tr><td>r{{ p.revision_no }}</td><td>v{{ p.quotation_version or '—' }}</td><td>{{ p.template_name or '—' }}</td><td>{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(p.grand_total|float) if p.grand_total else '—' }}</td><td>{{ p.created_at.strftime('%d %b %Y %H:%M') if p.created_at else '—' }}</td><td style="display:flex; gap:6px; flex-wrap:wrap;">{% if p.docx_path %}<a href="{{ url_for('proposal.history_docx', quotation_id=quotation.id, proposal_id=p.id) }}" class="btn btn-secondary btn-sm">DOCX</a>{% endif %}{% if p.pdf_path %}<a href="{{ url_for('proposal.history_pdf', quotation_id=quotation.id, proposal_id=p.id) }}" class="btn btn-secondary btn-sm">PDF</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="action-note">No proposals generated yet. Use “Proposal (DOCX)” above to create the first one.</p>{% endif %}</div>
   </div>
 </div>
 {% endblock %}
