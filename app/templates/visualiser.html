@@ -1,0 +1,2704 @@
+{% extends 'base.html' %}
+{% block title %}Visualiser — {{ window.label }} — {{ project.display_name }}{% endblock %}
+
+{% block head %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<style>
+.src-tab.active { background:var(--copper);color:#fff;border-color:var(--copper); }
+</style>
+<style>
+body { overflow: hidden; }
+.app-main { height: calc(100vh - 52px); overflow: hidden; }
+
+.ed-framebar {
+  display:flex;align-items:center;justify-content:space-between;
+  padding:9px 16px;background:var(--navy);flex-shrink:0;border-bottom:1px solid #0D141C;
+}
+.ed-crumb { font-family:var(--font-mono);font-size:12px;color:#B7C0CE; }
+.ed-crumb a { color:#B7C0CE; }
+
+.vis-body { display:flex;flex:1;overflow:hidden;height:calc(100vh - 52px - 44px - 24px); }
+
+.photo-area { flex:1;position:relative;background:#1A1A1A;overflow:hidden; }
+#houseCanvas { display:block;width:100%;height:100%; }
+
+.photo-hint {
+  position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  background:rgba(27,36,48,.78);color:rgba(255,255,255,.9);
+  font-size:11px;font-family:var(--font-mono);padding:5px 13px;
+  border-radius:20px;pointer-events:none;white-space:nowrap;
+}
+.before-after-strip {
+  position:absolute;bottom:14px;left:14px;display:flex;gap:6px;
+}
+.ba-pill {
+  font-size:11px;font-family:var(--font-mono);padding:5px 11px;border-radius:4px;cursor:pointer;
+  border:none;font-weight:600;
+}
+
+.vis-panel {
+  width:266px;background:#FCFBF8;border-left:1px solid var(--line);
+  display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;
+}
+.panel-scroll { flex:1;overflow-y:auto;padding:14px; }
+.panel-scroll::-webkit-scrollbar { width:3px; }
+.panel-scroll::-webkit-scrollbar-thumb { background:var(--line); }
+
+.sec-head {
+  font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--steel);font-weight:600;margin:0 0 9px;
+}
+.upload-zone {
+  border:1.5px dashed var(--line);border-radius:6px;padding:18px;
+  text-align:center;cursor:pointer;margin-bottom:12px;transition:border-color .15s;
+}
+.upload-zone:hover { border-color:var(--copper);background:rgba(201,123,61,.03); }
+.upload-zone p { font-size:12px;color:var(--steel);margin:4px 0 0; }
+
+.slider-field { margin-bottom:14px; }
+.slider-field label {
+  font-size:11px;color:#566;font-weight:500;
+  display:flex;justify-content:space-between;margin-bottom:5px;
+}
+input[type=range] { width:100%;accent-color:var(--copper); }
+
+.corner-grid { display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:12px; }
+.corner-cell {
+  font-size:10px;font-family:var(--font-mono);background:white;
+  border:1px solid var(--line);padding:5px 7px;border-radius:4px;color:#566;
+}
+
+.src-box {
+  font-size:12px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:4px;background:white;color:#566;margin-bottom:12px;
+  font-family:var(--font-mono);font-size:11px;
+}
+.divider { height:1px;background:var(--line);margin:12px 0; }
+
+.status-bar {
+  height:24px;background:var(--navy);display:flex;align-items:center;
+  padding:0 16px;gap:18px;flex-shrink:0;
+}
+.st-item { font-family:var(--font-mono);font-size:10px;color:#5A6A80; }
+.st-item.on { color:#9AE6C7; }
+
+#houseCanvas.pannable { cursor:grab; }
+#houseCanvas.panning  { cursor:grabbing; }
+#houseCanvas.dragging-corner { cursor:crosshair; }
+#houseCanvas.draw-mode { cursor:crosshair; }
+#houseCanvas.moving-window { cursor:move; }
+
+#btnDraw.active, #btnFree.active, #btnLife.active { background:var(--copper);color:#fff;border-color:var(--copper); }
+.life-row { display:flex;align-items:center;gap:7px;font-size:11px;color:#566;margin-bottom:10px;cursor:pointer; }
+
+.zoom-controls {
+  position:absolute;bottom:14px;right:14px;display:flex;align-items:center;
+  gap:2px;background:rgba(27,36,48,.85);border-radius:8px;padding:4px;
+  z-index:5;box-shadow:0 2px 10px rgba(0,0,0,.25);
+}
+.zoom-btn {
+  width:26px;height:26px;border:none;border-radius:5px;background:transparent;
+  color:#fff;font-size:15px;font-weight:600;cursor:pointer;display:flex;
+  align-items:center;justify-content:center;line-height:1;
+}
+.zoom-btn:hover { background:rgba(255,255,255,.15); }
+.zoom-pct {
+  font-family:var(--font-mono);font-size:11px;color:#fff;min-width:42px;
+  text-align:center;cursor:pointer;user-select:none;
+}
+.zoom-pct:hover { color:var(--copper); }
+.zoom-sep { width:1px;height:16px;background:rgba(255,255,255,.2);margin:0 3px; }
+
+.pan-hint {
+  position:absolute;top:12px;right:14px;
+  background:rgba(27,36,48,.78);color:rgba(255,255,255,.85);
+  font-size:10px;font-family:var(--font-mono);padding:5px 11px;
+  border-radius:20px;pointer-events:none;white-space:nowrap;opacity:0;
+  transition:opacity .2s;
+}
+.pan-hint.show { opacity:1; }
+
+#magnifier {
+  position:absolute;width:120px;height:120px;border-radius:50%;
+  border:3px solid var(--copper);box-shadow:0 4px 16px rgba(0,0,0,.4);
+  pointer-events:none;display:none;overflow:hidden;z-index:10;
+  background:#111;
+}
+#magnifier canvas { position:absolute;top:0;left:0; }
+#magnifier .mag-cross {
+  position:absolute;top:50%;left:50%;width:16px;height:16px;
+  transform:translate(-50%,-50%);pointer-events:none;
+}
+#magnifier .mag-cross::before, #magnifier .mag-cross::after {
+  content:'';position:absolute;background:var(--copper);
+}
+#magnifier .mag-cross::before { left:50%;top:0;width:1px;height:100%;transform:translateX(-50%); }
+#magnifier .mag-cross::after  { top:50%;left:0;height:1px;width:100%;transform:translateY(-50%); }
+</style>
+{% endblock %}
+
+{% block body %}
+<div style="display:flex;flex-direction:column;width:100%;height:100%;">
+
+  <!-- Frame bar -->
+  <div class="ed-framebar">
+    <div class="ed-crumb">
+      <a href="{{ url_for('projects.detail', project_id=project.id) }}">{{ project.display_name }}</a>
+      &nbsp;/&nbsp;
+      <a href="{{ url_for('editor.edit', project_id=project.id, window_id=window.id) }}">{{ window.label }}</a>
+      &nbsp;/&nbsp;Visualiser
+    </div>
+    <div class="flex gap-8">
+      <button class="btn btn-ghost btn-sm" id="btnDraw" onclick="toggleDrawMode()"
+              title="Click-drag on the photo to place a new window opening">✏ Draw window</button>
+      <button class="btn btn-ghost btn-sm" onclick="resetCorners()">Reset placement</button>
+      <button class="btn btn-ghost btn-sm" id="btnFree" onclick="toggleFreeCorners()"
+              title="Off: simple move + resize. On: drag each corner freely for angled walls">◇ Perspective</button>
+      <button class="btn btn-ghost btn-sm" onclick="straightenCorners()"
+              title="Square the placement from the current top-left / bottom-right">⊞ Straighten</button>
+      <button class="btn btn-ghost btn-sm" id="btnLife" onclick="toggleLife()"
+              title="One click: realistic glass, depth, sill, lighting and grain matched to your photo">✨ Bring to Life</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleBeforeAfter()" id="btnBA">Before / After</button>
+      <a href="{{ url_for('editor.edit', project_id=project.id, window_id=window.id) }}"
+         class="btn btn-ghost btn-sm">← Editor</a>
+      <button class="btn btn-ghost btn-sm" onclick="saveVisual()">Save PNG</button>
+      <button class="btn btn-primary btn-sm" id="btnSaveVersion" onclick="saveVersion()"
+              title="Save this render as a new version and refresh the quotation price">Save version</button>
+    </div>
+  </div>
+
+  <!-- Main body -->
+  <div class="vis-body">
+
+    <!-- Canvas -->
+    <div class="photo-area">
+      <canvas id="houseCanvas" class="pannable"></canvas>
+      <div class="photo-hint" id="photoHint">Drag the window to move · drag a handle to resize (Shift = free) · scroll to zoom</div>
+      <div class="pan-hint" id="panHint">⎵ Space + drag, or middle-click drag, to pan</div>
+      <div class="before-after-strip">
+        <button class="ba-pill" id="btnBefore"
+          style="background:rgba(255,255,255,.85);color:var(--navy);">Before</button>
+        <button class="ba-pill" id="btnAfter"
+          style="background:var(--navy);color:white;">After ●</button>
+      </div>
+      <div class="zoom-controls">
+        <button class="zoom-btn" onclick="zoomBy(0.83)" title="Zoom out">−</button>
+        <span class="zoom-pct" id="zoomPct" onclick="resetView()" title="Click to reset view">100%</span>
+        <button class="zoom-btn" onclick="zoomBy(1.2)" title="Zoom in">+</button>
+        <span class="zoom-sep"></span>
+        <button class="zoom-btn" style="font-size:11px;" onclick="fitToScreen()" title="Fit to screen">⛶</button>
+      </div>
+      <div id="magnifier"><canvas width="240" height="240"></canvas><div class="mag-cross"></div></div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="vis-panel">
+      <div class="panel-scroll">
+
+        <div class="sec-head">Background photo</div>
+        <div class="upload-zone" onclick="document.getElementById('photoUpload').click()">
+          <div style="font-size:22px;opacity:.4;">📷</div>
+          <p>Click to upload house photo</p>
+          <p style="font-size:10px;color:#AAA;margin-top:3px;">JPG / PNG / WEBP</p>
+        </div>
+        <input type="file" id="photoUpload" accept="image/*" style="display:none"
+               onchange="handlePhotoUpload(event)">
+
+        <div class="sec-head">Openings</div>
+        <div id="openingList" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;">
+          <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;"
+                  onclick="addOpening()">+ Add opening</button>
+          <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;"
+                  onclick="removeOpening()">Remove</button>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;margin-bottom:8px;"
+                onclick="autoPlaceAll()">⚡ Auto-place all units</button>
+        <select id="openingDesign" class="form-control"
+                style="font-size:12px;margin-bottom:6px;"
+                onchange="setOpeningDesign(this.value)">
+          {% for w in all_windows %}
+          <option value="{{ w.id }}" {{ 'selected' if w.id == window.id }}>
+            {{ w.label }} — {{ w.width_mm }}×{{ w.height_mm }}mm
+          </option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;margin-bottom:12px;"
+                onclick="applyDesignToAll()">Apply this design to all openings</button>
+
+        <div class="divider"></div>
+
+        <div class="sec-head">Design source</div>
+        <div class="src-box" id="srcLabel">Loading window render…</div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <button class="btn btn-ghost btn-sm src-tab active" id="btnSrc2d"
+                  style="flex:1;justify-content:center;" onclick="setSourceMode('2d')">2D render</button>
+          <button class="btn btn-ghost btn-sm src-tab" id="btnSrc3d"
+                  style="flex:1;justify-content:center;" onclick="setSourceMode('3d')">3D model</button>
+        </div>
+        <div class="slider-field" id="yawRow" style="display:none;">
+          <label>3D view angle <span id="yawVal">0°</span></label>
+          <input type="range" min="-40" max="40" value="0" id="yawSlider"
+                 oninput="onYawInput(this.value)">
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="sec-head">Adjustments</div>
+        <div class="slider-field">
+          <label>Opacity <span id="opVal">92%</span></label>
+          <input type="range" min="10" max="100" value="92" id="opacitySlider"
+                 oninput="onOpacityInput(this.value)">
+        </div>
+        <div class="slider-field">
+          <label>Brightness <span id="brVal">100%</span></label>
+          <input type="range" min="40" max="160" value="100" id="brightnessSlider"
+                 oninput="onBrightnessInput(this.value)">
+        </div>
+        <div class="slider-field">
+          <label>Shadow <span id="shVal">40%</span></label>
+          <input type="range" min="0" max="100" value="40" id="shadowSlider"
+                 oninput="document.getElementById('shVal').textContent=this.value+'%';render();">
+        </div>
+        <div class="slider-field">
+          <label>Glass reflection <span id="rfVal">50%</span></label>
+          <input type="range" min="0" max="100" value="50" id="reflectSlider"
+                 oninput="document.getElementById('rfVal').textContent=this.value+'%';render();">
+        </div>
+        <button class="btn btn-secondary" style="width:100%;justify-content:center;margin-bottom:12px;"
+                onclick="matchDaylight()">☀ Match daylight</button>
+
+        <div class="divider"></div>
+
+        <div class="sec-head">Bring to Life</div>
+        <button class="btn btn-secondary" style="width:100%;justify-content:center;margin-bottom:10px;"
+                onclick="toggleLife()">✨ Bring to Life</button>
+        <div class="slider-field">
+          <label>Realism <span id="lifeVal">70%</span></label>
+          <input type="range" min="0" max="100" value="70" id="lifeSlider"
+                 oninput="onLifeInput(this.value)">
+        </div>
+        <label class="life-row">
+          <input type="checkbox" id="lifeHideOld" checked onchange="onLifeHideOld(this.checked)">
+          Hide existing window behind the new one
+        </label>
+
+        <div class="divider"></div>
+
+        <div class="sec-head">Corner positions (px)</div>
+        <div class="corner-grid">
+          <div class="corner-cell" id="cTL">TL —</div>
+          <div class="corner-cell" id="cTR">TR —</div>
+          <div class="corner-cell" id="cBL">BL —</div>
+          <div class="corner-cell" id="cBR">BR —</div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="sec-head">Open another window</div>
+        <select id="windowSwap" class="form-control"
+                style="font-size:12px;margin-bottom:12px;"
+                onchange="swapWindow(this.value)">
+          {% for w in all_windows %}
+          <option value="{{ w.id }}" {{ 'selected' if w.id == window.id }}>
+            {{ w.label }} — {{ w.width_mm }}×{{ w.height_mm }}mm
+          </option>
+          {% endfor %}
+        </select>
+
+        <div class="divider"></div>
+        <button class="btn btn-secondary" style="width:100%;justify-content:center;"
+                onclick="saveVisual()">⬇ Download PNG</button>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="st-item on"  id="stRender">○ Loading render…</div>
+    <div class="st-item"     id="stPhoto">○ No photo</div>
+    <div class="st-item"     id="stVisSave">○ Not saved</div>
+    <div class="st-item" style="margin-left:auto;">Window #{{ window.id }}</div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ================================================================
+   CONFIG
+   ================================================================ */
+const QS_WINDOW_ID  = {{ window.id }};
+const QS_PROJECT_ID = {{ project.id }};
+const CSRF_TOKEN    = document.querySelector('meta[name="csrf-token"]').content;
+const API           = '/api/v1';
+
+/* ================================================================
+   STATE
+   ================================================================ */
+let houseCanvas, houseCtx;
+let bgImage       = null;   // house photo (Image object)
+let srcTexCanvas  = null;   // window render texture (offscreen Canvas)
+let corners       = null;   // {tl,tr,bl,br} each {x,y} — WORLD space (unaffected by zoom/pan)
+let defaultCorners= null;   // remembered layout for double-click-to-reset
+let dragging      = null;   // which corner key is being dragged
+let lastCorner    = 'br';   // last touched corner — arrow keys nudge it
+let showOverlay   = true;   // before/after
+let openings      = [];     // [{id, design_window_id, corners, opacity, brightness}]
+let activeIdx     = 0;      // which opening the handles/sliders control
+const MAX_OPENINGS = 12;
+const RENDER_URLS  = {{ (render_urls | tojson) if render_urls else '{}' }};
+const _texCache    = {};    // window_id -> canvas | 'loading' | 'none'
+const DESIGNS      = {{ (designs | tojson) if designs else '{}' }};
+
+/* Draw a window / door texture from its design JSON when no saved render exists */
+function rasterDesign(d) {
+  d = d || {};
+  const W = d.width || 1200, H = d.height || 1400;
+  const s = 1400 / Math.max(W, H);
+  const cw = Math.max(60, Math.round(W * s)), ch = Math.max(60, Math.round(H * s));
+  const cv = document.createElement('canvas');
+  cv.width = cw; cv.height = ch;
+  const g = cv.getContext('2d');
+  const shape  = d.shape || 'rectangle';
+  const isDoor = d.unitType === 'door';
+  const bar    = (d.frame && d.frame.thickness) || 68;
+  const col    = (d.frame && d.frame.color) || '#2B2F33';
+  const rise   = (d.archRise != null) ? d.archRise : Math.min(W * 0.25, 400);
+  const panes  = (d.panes && d.panes.length) ? d.panes
+               : [{ x: 0, y: 0, w: 1, h: 1, infill: 'glass', glazingBars: [] }];
+
+  function path(inset) {
+    const x0 = inset * s, x1 = (W - inset) * s, y0 = inset * s;
+    const y1 = (H - (isDoor ? 0 : inset)) * s;
+    const w = x1 - x0, cx = x0 + w / 2, spring = y0 + rise * s;
+    const p = new Path2D();
+    if (shape === 'circular') {
+      p.ellipse(cx, (y0 + y1) / 2, Math.max(w / 2, 0.01), Math.max((y1 - y0) / 2, 0.01), 0, 0, Math.PI * 2);
+      return p;
+    }
+    if (shape === 'arched') {
+      p.moveTo(x0, y1); p.lineTo(x0, spring);
+      p.ellipse(cx, spring, Math.max(w / 2, 0.01), Math.max(spring - y0, 0.01), 0, Math.PI, Math.PI * 2, false);
+      p.lineTo(x1, y1); p.closePath();
+      return p;
+    }
+    if (shape === 'gothic') {
+      const ctrl = y0 * 0.6 + spring * 0.4;
+      p.moveTo(x0, y1); p.lineTo(x0, spring);
+      p.quadraticCurveTo(x0, ctrl, cx, y0);
+      p.quadraticCurveTo(x1, ctrl, x1, spring);
+      p.lineTo(x1, y1); p.closePath();
+      return p;
+    }
+    p.rect(x0, y0, w, y1 - y0);
+    return p;
+  }
+
+  const outer = path(0), inner = path(bar);
+  const ring = new Path2D();
+  ring.addPath(outer); ring.addPath(inner);
+  g.fillStyle = col;
+  g.fill(ring, 'evenodd');
+
+  g.save();
+  g.clip(inner);
+  g.fillStyle = col;
+  g.fillRect(0, 0, cw, ch);
+  const mb = bar * 0.6, half = mb / 2, eps = 0.001;
+  panes.forEach(p => {
+    const insL = (p.x <= eps) ? bar : half;
+    const insT = (p.y <= eps) ? bar : half;
+    const insR = (p.x + p.w >= 1 - eps) ? bar : half;
+    const insB = (p.y + p.h >= 1 - eps) ? (isDoor ? 0 : bar) : half;
+    const x = (p.x * W + insL) * s, y = (p.y * H + insT) * s;
+    const w = (p.w * W - insL - insR) * s, h = (p.h * H - insT - insB) * s;
+    if (w <= 0 || h <= 0) return;
+    if (p.infill === 'panel') {
+      g.fillStyle = col;
+      g.fillRect(x, y, w, h);
+      g.fillStyle = 'rgba(255,255,255,.10)';
+      g.fillRect(x, y, w, h);
+      g.strokeStyle = 'rgba(0,0,0,.35)';
+      g.lineWidth = 2;
+      g.strokeRect(x + w * 0.1, y + h * 0.06, w * 0.8, h * 0.88);
+    } else {
+      const gr = g.createLinearGradient(x, y, x + w, y + h);
+      gr.addColorStop(0, 'rgba(170,210,225,.75)');
+      gr.addColorStop(1, 'rgba(110,160,185,.75)');
+      g.fillStyle = gr;
+      g.fillRect(x, y, w, h);
+      g.strokeStyle = 'rgba(0,0,0,.25)';
+      g.lineWidth = 1;
+      g.strokeRect(x, y, w, h);
+    }
+    (p.glazingBars || []).forEach(gb => {
+      const t = Math.max(2, (gb.thickness || 18) * s);
+      g.fillStyle = col;
+      if (gb.type === 'vertical') g.fillRect(x + w * gb.pos - t / 2, y, t, h);
+      else                        g.fillRect(x, y + h * gb.pos - t / 2, w, t);
+    });
+  });
+  g.restore();
+  g.strokeStyle = 'rgba(0,0,0,.45)';
+  g.lineWidth = 1.5;
+  g.stroke(outer);
+  return cv;
+}
+
+/* -------- zoom / pan state -------- */
+let zoom          = 1;
+let panX          = 0, panY = 0;
+const ZOOM_MIN    = 0.25, ZOOM_MAX = 5;
+let isPanning     = false;
+let panLast       = null;   // {x,y} raw canvas px, last pan pointer position
+let spaceHeld     = false;
+const pointers    = new Map(); // active pointer id -> {x,y} for pinch-zoom
+
+/* -------- draw-window mode -------- */
+let drawMode      = false;  // when true, click-drag places a fresh rectangle
+let drawing       = false;  // currently mid-drag while in draw mode
+let drawStart     = null;   // {x,y} world coords of drag start
+let drawCurrent   = null;   // {x,y} world coords of current drag point
+
+/* -------- move whole window (drag-and-drop placement) -------- */
+let movingWindow    = false;
+let moveStartRaw    = null;      // raw canvas px where the move-drag started
+let moveStartCorners= null;      // snapshot of all 4 corners (world) at drag start
+
+/* -------- easy resize mode (default) vs free-corner perspective mode -------- */
+let freeCorners   = false;       // false = simple move/resize handles, true = 4 independent corners
+let resizing      = null;        // {h, box, start} while a resize handle is being dragged
+let _touchPointer = false;       // true when the current pointer is a finger (bigger hit areas)
+
+/* ================================================================
+   INIT
+   ================================================================ */
+window.addEventListener('load', () => {
+  houseCanvas = document.getElementById('houseCanvas');
+  houseCtx    = houseCanvas.getContext('2d');
+
+  const wrap = houseCanvas.parentElement;
+  houseCanvas.width  = wrap.clientWidth;
+  houseCanvas.height = wrap.clientHeight;
+
+  resetCorners();
+  openings = [_makeOpening(corners, QS_WINDOW_ID)];
+  activeIdx = 0;
+  renderOpeningList();
+  drawPaintedHouse(houseCtx, houseCanvas.width, houseCanvas.height);
+
+  houseCanvas.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup',   onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
+  houseCanvas.addEventListener('wheel', onWheel, { passive: false });
+  houseCanvas.addEventListener('dblclick', onDblClick);
+  houseCanvas.addEventListener('contextmenu', e => { if (spaceHeld || isPanning) e.preventDefault(); });
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Escape' && drawMode) { toggleDrawMode(); return; }
+    if (e.code === 'Space' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
+      spaceHeld = true;
+      document.getElementById('panHint').classList.add('show');
+      houseCanvas.classList.add('pannable');
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', e => {
+    if (e.code === 'Space') {
+      spaceHeld = false;
+      document.getElementById('panHint').classList.remove('show');
+    }
+  });
+  window.addEventListener('resize',    onWindowResize);
+
+  loadState();
+});
+
+function onWindowResize() {
+  const wrap = houseCanvas.parentElement;
+  const oldW = houseCanvas.width, oldH = houseCanvas.height;
+  const newW = wrap.clientWidth,  newH = wrap.clientHeight;
+  if (!newW || !newH || !oldW || !oldH) return;
+  const sx = newW / oldW, sy = newH / oldH;
+  houseCanvas.width  = newW;
+  houseCanvas.height = newH;
+  const scaleSet = (set) => {
+    if (!set) return;
+    for (const k of ['tl','tr','bl','br']) {
+      set[k] = { x: set[k].x * sx, y: set[k].y * sy };
+    }
+  };
+  openings.forEach(o => { if (o.corners !== corners) scaleSet(o.corners); });
+  scaleSet(corners);
+  scaleSet(defaultCorners);
+  panX *= sx;
+  panY *= sy;
+  updateCornerLabels();
+  render();
+  if (corners) scheduleVis();
+}
+
+/* ================================================================
+   VIEW TRANSFORM (zoom / pan) — corners stay in WORLD space always,
+   these helpers convert between raw canvas pixels and world coords.
+   ================================================================ */
+function rawXY(evt) {
+  const rect = houseCanvas.getBoundingClientRect();
+  return {
+    x: (evt.clientX - rect.left) * (houseCanvas.width  / rect.width),
+    y: (evt.clientY - rect.top)  * (houseCanvas.height / rect.height),
+  };
+}
+function toWorld(pt)  { return { x: (pt.x - panX) / zoom, y: (pt.y - panY) / zoom }; }
+function toScreen(pt) { return { x: pt.x * zoom + panX,   y: pt.y * zoom + panY   }; }
+
+function setZoom(newZoom, pivotRaw) {
+  newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, newZoom));
+  const pivot = pivotRaw || { x: houseCanvas.width/2, y: houseCanvas.height/2 };
+  const worldBefore = toWorld(pivot);
+  zoom = newZoom;
+  panX = pivot.x - worldBefore.x * zoom;
+  panY = pivot.y - worldBefore.y * zoom;
+  document.getElementById('zoomPct').textContent = Math.round(zoom * 100) + '%';
+  render();
+}
+function zoomBy(factor) { setZoom(zoom * factor); }
+function resetView() { zoom = 1; panX = 0; panY = 0; document.getElementById('zoomPct').textContent = '100%'; render(); }
+function fitToScreen() {
+  if (!corners) { resetView(); return; }
+  const pts = ['tl','tr','bl','br'].map(k => corners[k]);
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const bw = maxX - minX, bh = maxY - minY;
+  if (bw < 1 || bh < 1) { resetView(); return; }
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+  const pad = 0.25;
+  const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
+    Math.min(cw / (bw * (1 + 2 * pad)), ch / (bh * (1 + 2 * pad)))));
+  zoom = z;
+  panX = cw / 2 - ((minX + maxX) / 2) * z;
+  panY = ch / 2 - ((minY + maxY) / 2) * z;
+  document.getElementById('zoomPct').textContent = Math.round(zoom * 100) + '%';
+  render();
+}
+
+function onWheel(evt) {
+  evt.preventDefault();
+  const pivot = rawXY(evt);
+  const factor = evt.deltaY < 0 ? 1.1 : 0.9;
+  _wheelUntil = performance.now() + 220;
+  clearTimeout(_wheelT);
+  _wheelT = setTimeout(render, 240);
+  setZoom(zoom * factor, pivot);
+}
+
+/* ================================================================
+   DRAW-WINDOW MODE — click-drag on the photo to place a brand new
+   rectangular opening instead of nudging the existing handles.
+   ================================================================ */
+function toggleDrawMode() {
+  drawMode = !drawMode;
+  document.getElementById('btnDraw').classList.toggle('active', drawMode);
+  houseCanvas.classList.toggle('draw-mode', drawMode);
+  document.getElementById('photoHint').textContent = drawMode
+    ? 'Click and drag on the photo to draw the window opening'
+    : _defaultHint();
+  if (!drawMode) { drawing = false; drawStart = null; drawCurrent = null; render(); }
+}
+
+/* ================================================================
+   LOAD SAVED STATE FROM API
+   ================================================================ */
+async function loadState() {
+  try {
+    const res = await fetch(`${API}/windows/${QS_WINDOW_ID}/visualisation`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+
+    // load render texture
+    const RENDER_URL = {{ (render_url | tojson) if render_url else 'null' }};
+    if (RENDER_URL) await loadRenderTexture(RENDER_URL);
+    else if (DESIGNS[QS_WINDOW_ID]) {
+      srcTexCanvas = rasterDesign(DESIGNS[QS_WINDOW_ID]);
+      _tex2d = srcTexCanvas;
+      document.getElementById('srcLabel').textContent = '{{ window.label }} — from design ✓';
+      setStatus('stRender', '● Design loaded', true);
+    }
+    else { document.getElementById('srcLabel').textContent='No render — open editor and click → Visualise'; setStatus('stRender','○ No render',false); }
+
+    if (d.exists) _restoreOpenings(d);
+    ensureAllPlaced();
+    if (d.exists) {
+      // restore saved photo
+      if (d.photo_url) {
+        const img = new Image();
+        img.onload = () => { bgImage = img; render(); setStatus('stPhoto', '● Photo loaded', true); };
+        img.onerror = () => render();
+        img.src = d.photo_url;
+        return;
+      }
+    }
+    render();
+  } catch(e) {
+    console.warn('[QS] loadState failed:', e);
+    render();
+  }
+}
+
+/* ================================================================
+   MULTIPLE OPENINGS — several windows on one photo, each with its own
+   design, corners, opacity and brightness
+   ================================================================ */
+function _newOpeningId() { return Math.random().toString(36).slice(2, 8); }
+
+function _cloneCorners(c) { return JSON.parse(JSON.stringify(c)); }
+
+function _makeOpening(c, designId) {
+  return {
+    id: _newOpeningId(),
+    design_window_id: designId || QS_WINDOW_ID,
+    corners: c,
+    opacity: 0.92,
+    brightness: 1,
+  };
+}
+
+function _openingTex(op) {
+  const id = op.design_window_id || QS_WINDOW_ID;
+  if (id === QS_WINDOW_ID) return srcTexCanvas;
+  const cached = _texCache[id];
+  if (cached && cached !== 'loading' && cached !== 'none') return cached;
+  if (cached) return null;
+  const url = RENDER_URLS[id];
+  if (!url) {
+    if (DESIGNS[id]) { _texCache[id] = rasterDesign(DESIGNS[id]); return _texCache[id]; }
+    _texCache[id] = 'none'; return null;
+  }
+  _texCache[id] = 'loading';
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    c.getContext('2d').drawImage(img, 0, 0);
+    _texCache[id] = c;
+    render();
+  };
+  img.onerror = () => {
+    _texCache[id] = DESIGNS[id] ? rasterDesign(DESIGNS[id]) : 'none';
+    render();
+  };
+  img.src = url;
+  return null;
+}
+
+function _paintAll(ctx, cw, ch, mapPt, full) {
+  if (!showOverlay) return;
+
+  const lifeActive = _life.on && (full || !_isInteracting()) && !_glFailed;
+  let stats = null;
+  const walls = [];
+  if (lifeActive) {
+    stats = _sceneStats();
+    openings.forEach((op, i) => {
+      const c = op.corners;
+      const q = c ? { tl: mapPt(c.tl), tr: mapPt(c.tr), bl: mapPt(c.bl), br: mapPt(c.br) } : null;
+      walls[i] = q
+        ? ((window.PhotorealCore && window.PhotorealCore.isReady())
+            ? window.PhotorealCore.sampleWall(ctx, q)
+            : _ringColor(ctx, q))
+        : null;
+    });
+  }
+
+  openings.forEach((op, i) => {
+    const tex = _openingTex(op);
+    if (!tex || !op.corners) return;
+    const c = op.corners;
+    const s = { tl: mapPt(c.tl), tr: mapPt(c.tr), bl: mapPt(c.bl), br: mapPt(c.br) };
+    const savedTex = srcTexCanvas, savedOp = _curOp, savedBr = _curBr;
+    srcTexCanvas = tex; _curOp = op.opacity; _curBr = op.brightness;
+    try {
+      if (lifeActive) {
+        _paintLifeOpening(ctx, cw, ch, s, op, tex, stats, walls[i]);
+      } else {
+        _drawWindowShadow(ctx, s);
+        _applyHomographyWarp(ctx, cw, ch, s);
+      }
+    } finally {
+      srcTexCanvas = savedTex; _curOp = savedOp; _curBr = savedBr;
+    }
+  });
+}
+
+/* ================================================================
+   BRING TO LIFE — one-click photo-real upgrade of the overlay:
+   dark interior behind the glass, sky reflection and glints, frame
+   shading and rebate shadows, reveal depth, stone sill, hiding of the
+   old window, colour grading and grain matched to the photo.
+   Heavy work runs only when idle (never while dragging) and is cached.
+   ================================================================ */
+const _life = {
+  on: false, t: 0, glare: -1, intensity: 0.7, hideOld: true,
+  raf: null, cache: new Map(), scratch: null,
+  stats: null, statsFor: null, statsSeq: 0,
+};
+let _wheelUntil = 0, _wheelT = null, _texSeq = 0;
+
+function _isInteracting() {
+  return !!(dragging || resizing || movingWindow || isPanning || drawing ||
+            pointers.size > 0 || performance.now() < _wheelUntil);
+}
+
+function _clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+function _ss(a, b, x) { const t = _clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+function _texId(tex) { if (!tex.__qid) tex.__qid = ++_texSeq; return tex.__qid; }
+function _dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+function _unit(a, b) { const d = _dist(a, b) || 1; return { x: (b.x - a.x) / d, y: (b.y - a.y) / d }; }
+function _centroid(s) {
+  return { x: (s.tl.x + s.tr.x + s.bl.x + s.br.x) / 4, y: (s.tl.y + s.tr.y + s.bl.y + s.br.y) / 4 };
+}
+function _scaleQuad(s, c, k) {
+  const f = p => ({ x: c.x + (p.x - c.x) * k, y: c.y + (p.y - c.y) * k });
+  return { tl: f(s.tl), tr: f(s.tr), bl: f(s.bl), br: f(s.br) };
+}
+function _quadPath(ctx, s) {
+  ctx.beginPath();
+  ctx.moveTo(s.tl.x, s.tl.y); ctx.lineTo(s.tr.x, s.tr.y);
+  ctx.lineTo(s.br.x, s.br.y); ctx.lineTo(s.bl.x, s.bl.y);
+  ctx.closePath();
+}
+function _rgb(a) { return 'rgb(' + a.map(v => Math.round(v)).join(',') + ')'; }
+
+function toggleLife() {
+  _life.on = !_life.on;
+  const btn = document.getElementById('btnLife');
+  if (btn) btn.classList.toggle('active', _life.on);
+  if (_life.raf) { cancelAnimationFrame(_life.raf); _life.raf = null; }
+  _life.glare = -1;
+  if (!_life.on) { _life.t = 0; render(); return; }
+
+  _life.t = 0;
+  const start = performance.now(), dur = 1100;
+  const step = (now) => {
+    const p = Math.min(1, (now - start) / dur);
+    const e = _ss(0, 0.6, p);
+    _life.t = e;
+    _life.glare = p < 1 ? (0.1 + p * 0.9) * 1.3 - 0.15 : -1;
+    render();
+    if (p < 1 && _life.on) _life.raf = requestAnimationFrame(step);
+    else { _life.t = _life.on ? 1 : 0; _life.glare = -1; _life.raf = null; render(); }
+  };
+  _life.raf = requestAnimationFrame(step);
+}
+
+function onLifeInput(v) {
+  document.getElementById('lifeVal').textContent = v + '%';
+  _life.intensity = v / 100;
+  render();
+}
+
+function onLifeHideOld(on) {
+  _life.hideOld = !!on;
+  render();
+}
+
+/* photo statistics: average colour, sky colour, light direction, grain */
+function _sceneStats() {
+  const src = bgImage || 'painted';
+  if (_life.stats && _life.statsFor === src) return _life.stats;
+
+  const W = 240;
+  const H = Math.max(60, Math.round(W * houseCanvas.height / houseCanvas.width));
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  drawBackground(g, W, H);
+  const d = g.getImageData(0, 0, W, H).data;
+
+  let r = 0, gg = 0, b = 0, n = 0;
+  let sr = 0, sg = 0, sb = 0, sn = 0;
+  let lL = 0, cL = 0, lR = 0, cR = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      const R = d[i], G = d[i + 1], B = d[i + 2];
+      const l = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+      r += R; gg += G; b += B; n++;
+      if (y < H * 0.12) { sr += R; sg += G; sb += B; sn++; }
+      if (x < W / 3) { lL += l; cL++; }
+      else if (x > 2 * W / 3) { lR += l; cR++; }
+    }
+  }
+  r /= n; gg /= n; b /= n;
+  const lumMean = (0.2126 * r + 0.7152 * gg + 0.0722 * b) || 1;
+  const gainOf = v => 1 + (_clamp(v / lumMean, 0.85, 1.15) - 1) * 0.6;
+  const sky = sn ? [sr / sn, sg / sn, sb / sn] : [150, 185, 215];
+
+  let grain = 1.2;
+  if (bgImage) {
+    try {
+      const P = 192;
+      const pw = Math.min(P, bgImage.width), ph = Math.min(P, bgImage.height);
+      const pc = document.createElement('canvas');
+      pc.width = pw; pc.height = ph;
+      const pg = pc.getContext('2d', { willReadFrequently: true });
+      pg.drawImage(bgImage, Math.max(0, (bgImage.width - pw) / 2), Math.max(0, (bgImage.height - ph) / 2),
+                   pw, ph, 0, 0, pw, ph);
+      const pd = pg.getImageData(0, 0, pw, ph).data;
+      const diffs = [];
+      for (let y = 0; y < ph; y += 2) {
+        for (let x = 0; x < pw - 1; x += 2) {
+          const i = (y * pw + x) * 4, j = i + 4;
+          const a = 0.2126 * pd[i] + 0.7152 * pd[i + 1] + 0.0722 * pd[i + 2];
+          const e = 0.2126 * pd[j] + 0.7152 * pd[j + 1] + 0.0722 * pd[j + 2];
+          diffs.push(Math.abs(a - e));
+        }
+      }
+      diffs.sort((p, q) => p - q);
+      grain = _clamp((diffs[Math.floor(diffs.length / 2)] || 1) * 0.9, 0.6, 5);
+    } catch (e) { grain = 1.2; }
+  }
+
+  _life.stats = {
+    gain: [gainOf(r), gainOf(gg), gainOf(b)],
+    sky,
+    lightX: (cL && cR && lL / cL >= lR / cR) ? -1 : 1,   // -1 = light from the left
+    grain,
+    id: ++_life.statsSeq,
+  };
+  _life.statsFor = src;
+  return _life.stats;
+}
+
+/* wall colour just outside the window, sampled before anything is painted */
+function _ringColor(ctx, s) {
+  const cw = ctx.canvas.width, ch = ctx.canvas.height;
+  const xs = [s.tl.x, s.tr.x, s.bl.x, s.br.x], ys = [s.tl.y, s.tr.y, s.bl.y, s.br.y];
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const m = 8 + (x1 - x0) * 0.08, P = 6;
+  const spots = [
+    { x: x0 - m,          y: (y0 + y1) / 2, k: 'l' },
+    { x: x1 + m,          y: (y0 + y1) / 2, k: 'r' },
+    { x: (x0 + x1) / 2,   y: y0 - m,        k: 't' },
+    { x: (x0 + x1) / 2,   y: y1 + m,        k: 'b' },
+  ];
+  const got = {};
+  spots.forEach(p => {
+    const px = Math.round(_clamp(p.x - P / 2, 0, Math.max(0, cw - P)));
+    const py = Math.round(_clamp(p.y - P / 2, 0, Math.max(0, ch - P)));
+    try {
+      const d = ctx.getImageData(px, py, P, P).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+      if (n) got[p.k] = [r / n, g / n, b / n];
+    } catch (e) { /* tainted or out of range */ }
+  });
+  const list = Object.keys(got).map(k => got[k]);
+  if (!list.length) return { top: [190, 180, 160], bot: [190, 180, 160], mid: [190, 180, 160] };
+  const med = ch2 => { const a = list.map(c => c[ch2]).sort((p, q) => p - q); return a[Math.floor(a.length / 2)]; };
+  const mid = [med(0), med(1), med(2)];
+  return { top: got.t || mid, bot: got.b || mid, mid };
+}
+
+/* dark room behind the glass, plus a wall patch that hides the old window */
+function _lifeBase(ctx, s, wall, alpha) {
+  if (alpha <= 0.001) return;
+  const c = _centroid(s);
+  const ys = [s.tl.y, s.tr.y, s.bl.y, s.br.y];
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (_life.hideOld && wall) {
+    const g = ctx.createLinearGradient(0, y0, 0, y1);
+    g.addColorStop(0, _rgb(wall.top));
+    g.addColorStop(1, _rgb(wall.bot));
+    ctx.fillStyle = g;
+    _quadPath(ctx, _scaleQuad(s, c, 1.07));
+    ctx.fill();
+  }
+  const room = ctx.createLinearGradient(0, y0, 0, y1);
+  room.addColorStop(0, '#2d2924');
+  room.addColorStop(0.55, '#1d1a16');
+  room.addColorStop(1, '#0f0d0b');
+  ctx.fillStyle = room;
+  _quadPath(ctx, s);
+  ctx.fill();
+  ctx.restore();
+}
+
+/* warp the window and process the pixels: glass vs frame, grade, grain */
+function _lifeLayer(cw, ch, s, op, tex, st) {
+  const f = v => Math.round(v);
+  const key = [
+    cw, ch, _texId(tex), op.opacity.toFixed(2), op.brightness.toFixed(2),
+    f(s.tl.x), f(s.tl.y), f(s.tr.x), f(s.tr.y), f(s.bl.x), f(s.bl.y), f(s.br.x), f(s.br.y),
+    _life.intensity.toFixed(2), document.getElementById('reflectSlider').value, st.id,
+  ].join('|');
+  const hit = _life.cache.get(key);
+  if (hit) return hit;
+
+  const xs = [s.tl.x, s.tr.x, s.bl.x, s.br.x], ys = [s.tl.y, s.tr.y, s.bl.y, s.br.y];
+  const bx = Math.max(0, Math.floor(Math.min(...xs)) - 2);
+  const by = Math.max(0, Math.floor(Math.min(...ys)) - 2);
+  const bw = Math.min(cw, Math.ceil(Math.max(...xs)) + 2) - bx;
+  const bh = Math.min(ch, Math.ceil(Math.max(...ys)) + 2) - by;
+  if (bw < 2 || bh < 2 || bw * bh > 8000000) return null;
+
+  let sc = _life.scratch;
+  if (!sc || sc.width !== cw || sc.height !== ch) {
+    sc = document.createElement('canvas');
+    sc.width = cw; sc.height = ch;
+    _life.scratch = sc;
+  }
+  const sctx = sc.getContext('2d', { willReadFrequently: true });
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  sctx.clearRect(0, 0, cw, ch);
+  _applyHomographyWarp(sctx, cw, ch, s);
+  if (_glFailed) return null;
+
+  const img = sctx.getImageData(bx, by, bw, bh);
+  const d = img.data, n = bw * bh;
+  const opacity = Math.max(0.1, op.opacity);
+  const inten = _life.intensity;
+  const refl = +document.getElementById('reflectSlider').value / 100;
+  const lx = st.lightX;
+
+  const glass = new Uint8Array(n);
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const aN = d[i + 3] / 255 / opacity;
+    if (aN > 0.04 && aN < 0.9) glass[p] = 1;
+  }
+
+  let seed = 1234567;
+  const rnd = () => {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    return ((seed >>> 0) % 10000) / 10000;
+  };
+
+  for (let y = 0; y < bh; y++) {
+    for (let x = 0; x < bw; x++) {
+      const p = y * bw + x, i = p * 4;
+      if (d[i + 3] < 4) continue;
+      let r = d[i], g = d[i + 1], b = d[i + 2];
+      const u = x / bw, v = y / bh;
+
+      if (glass[p]) {
+        const sm = (0.34 - 0.20 * v) * inten * (0.35 + refl);
+        r += (st.sky[0] - r) * sm;
+        g += (st.sky[1] - g) * sm;
+        b += (st.sky[2] - b) * sm;
+        const diag = u * 0.8 + (1 - v) * 0.6;
+        const streak = (_ss(0.30, 0.42, diag) * (1 - _ss(0.46, 0.62, diag)) * 0.16 +
+                        _ss(0.66, 0.72, diag) * (1 - _ss(0.74, 0.86, diag)) * 0.08) * refl * inten * 255;
+        r += streak; g += streak; b += streak;
+        d[i + 3] = Math.min(255, d[i + 3] + 30 * inten);
+      } else {
+        let k = 1 + (0.5 - u) * (-lx) * 0.12 * inten + (0.5 - v) * 0.06 * inten;
+        const ax = x - lx * 2, ay = y + 2;
+        if (ax >= 0 && ax < bw && ay < bh && glass[ay * bw + ax]) {
+          k *= 1 - 0.14 * inten;                     // face turned away from the light
+        } else {
+          const qx = x + lx * 2, qy = y - 2;
+          if (qx >= 0 && qx < bw && qy >= 0 && glass[qy * bw + qx]) k *= 1 + 0.08 * inten;
+        }
+        r *= k; g *= k; b *= k;
+      }
+
+      r *= st.gain[0]; g *= st.gain[1]; b *= st.gain[2];
+      const nz = (rnd() - 0.5) * 2 * st.grain * inten;
+      d[i]     = _clamp(r + nz, 0, 255);
+      d[i + 1] = _clamp(g + nz, 0, 255);
+      d[i + 2] = _clamp(b + nz, 0, 255);
+    }
+  }
+
+  const out = document.createElement('canvas');
+  out.width = bw; out.height = bh;
+  const octx = out.getContext('2d');
+  octx.putImageData(img, 0, 0);
+
+  let finalCanvas = out;
+  if (inten > 0.05 && 'filter' in octx) {                 // match the photo's softness
+    const soft = document.createElement('canvas');
+    soft.width = bw; soft.height = bh;
+    const sg = soft.getContext('2d');
+    sg.filter = 'blur(' + (0.45 * inten).toFixed(2) + 'px)';
+    sg.drawImage(out, 0, 0);
+    finalCanvas = soft;
+  }
+
+  const res = { canvas: finalCanvas, x: bx, y: by };
+  if (_life.cache.size > 30) _life.cache.clear();
+  _life.cache.set(key, res);
+  return res;
+}
+
+function _edgeShade(ctx, p0, p1, c, depth, a) {
+  const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+  let nx = c.x - mx, ny = c.y - my;
+  const L = Math.hypot(nx, ny) || 1;
+  nx /= L; ny /= L;
+  const g = ctx.createLinearGradient(mx, my, mx + nx * depth, my + ny * depth);
+  g.addColorStop(0, 'rgba(0,0,0,' + a.toFixed(3) + ')');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+  ctx.lineTo(p1.x + nx * depth, p1.y + ny * depth);
+  ctx.lineTo(p0.x + nx * depth, p0.y + ny * depth);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/* depth: soft shadow of the wall opening falling inside the frame edge */
+function _lifeReveal(ctx, s, st, alpha) {
+  if (alpha <= 0.001) return;
+  const c = _centroid(s);
+  const w = _dist(s.tl, s.tr);
+  const depth = Math.max(3, w * 0.06) * (0.6 + 0.8 * _life.intensity);
+  const k = alpha * _life.intensity;
+  ctx.save();
+  _quadPath(ctx, s);
+  ctx.clip();
+  _edgeShade(ctx, s.tl, s.tr, c, depth, 0.50 * k);
+  if (st.lightX < 0) {
+    _edgeShade(ctx, s.tl, s.bl, c, depth, 0.40 * k);
+    _edgeShade(ctx, s.tr, s.br, c, depth * 0.5, 0.14 * k);
+  } else {
+    _edgeShade(ctx, s.tr, s.br, c, depth, 0.40 * k);
+    _edgeShade(ctx, s.tl, s.bl, c, depth * 0.5, 0.14 * k);
+  }
+  _edgeShade(ctx, s.bl, s.br, c, depth * 0.4, 0.10 * k);
+  ctx.restore();
+}
+
+/* stone sill under the window with a shadow cast onto the wall */
+function _lifeSill(ctx, s, wall, alpha) {
+  if (alpha <= 0.001) return;
+  const w = _dist(s.bl, s.br);
+  if (w < 24) return;
+  const dirX = _unit(s.bl, s.br);
+  const down = _unit({ x: (s.tl.x + s.tr.x) / 2, y: (s.tl.y + s.tr.y) / 2 },
+                     { x: (s.bl.x + s.br.x) / 2, y: (s.bl.y + s.br.y) / 2 });
+  const th = w * 0.045 * (0.6 + 0.6 * _life.intensity);
+  const over = w * 0.035;
+  const A = { x: s.bl.x - dirX.x * over, y: s.bl.y - dirX.y * over };
+  const B = { x: s.br.x + dirX.x * over, y: s.br.y + dirX.y * over };
+  const C = { x: B.x + down.x * th, y: B.y + down.y * th };
+  const D = { x: A.x + down.x * th, y: A.y + down.y * th };
+  const m = wall ? wall.mid : [200, 195, 185];
+  const stone = [Math.min(255, m[0] * 1.10 + 12), Math.min(255, m[1] * 1.10 + 12), Math.min(255, m[2] * 1.10 + 12)];
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // shadow thrown on the wall under the sill
+  const sh = th * 1.9;
+  const E = { x: C.x + down.x * sh, y: C.y + down.y * sh };
+  const F = { x: D.x + down.x * sh, y: D.y + down.y * sh };
+  const sg = ctx.createLinearGradient(D.x, D.y, F.x, F.y);
+  sg.addColorStop(0, 'rgba(0,0,0,' + (0.34 * _life.intensity).toFixed(3) + ')');
+  sg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath();
+  ctx.moveTo(D.x, D.y); ctx.lineTo(C.x, C.y); ctx.lineTo(E.x, E.y); ctx.lineTo(F.x, F.y);
+  ctx.closePath(); ctx.fill();
+
+  // sill slab
+  const fg = ctx.createLinearGradient(A.x, A.y, D.x, D.y);
+  fg.addColorStop(0, _rgb(stone));
+  fg.addColorStop(1, _rgb([stone[0] * 0.78, stone[1] * 0.78, stone[2] * 0.78]));
+  ctx.fillStyle = fg;
+  ctx.beginPath();
+  ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.lineTo(C.x, C.y); ctx.lineTo(D.x, D.y);
+  ctx.closePath(); ctx.fill();
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+  ctx.restore();
+}
+
+/* the "wow" moment: a glint sweeping across the glass */
+function _lifeGlare(ctx, s, p) {
+  ctx.save();
+  _quadPath(ctx, s);
+  ctx.clip();
+  const g = ctx.createLinearGradient(s.tl.x, s.tl.y, s.br.x, s.br.y);
+  const a = _clamp(p - 0.15, 0, 1), b = _clamp(p, 0, 1), c = _clamp(p + 0.15, 0, 1);
+  g.addColorStop(0, 'rgba(255,255,255,0)');
+  g.addColorStop(a, 'rgba(255,255,255,0)');
+  g.addColorStop(b, 'rgba(255,255,255,0.38)');
+  g.addColorStop(c, 'rgba(255,255,255,0)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(Math.min(s.tl.x, s.bl.x) - 4, Math.min(s.tl.y, s.tr.y) - 4,
+               Math.max(s.tr.x, s.br.x) - Math.min(s.tl.x, s.bl.x) + 8,
+               Math.max(s.bl.y, s.br.y) - Math.min(s.tl.y, s.tr.y) + 8);
+  ctx.restore();
+}
+
+const _photoreal = {
+  enabled: true, variant: 'auto', lightOn: true, interiorBright: 0.85, sill: undefined,
+  photoId: null, photoCanvas: null,
+};
+
+function _lifeSlider(id, def) {
+  const el = document.getElementById(id);
+  return el ? (+el.value) : def;
+}
+
+function _lifeHash(str) {
+  let h = 2166136261 >>> 0;
+  str = String(str || '');
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return (h % 9973) + 1;
+}
+
+/* clean photo for scene analysis (the uploaded photo, or the painted placeholder house) */
+function _lifePhoto(stats) {
+  if (bgImage) return bgImage;
+  if (_photoreal.photoId === stats.id && _photoreal.photoCanvas) return _photoreal.photoCanvas;
+  try {
+    const W = 240;
+    const H = Math.max(60, Math.round(W * houseCanvas.height / houseCanvas.width));
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    drawBackground(c.getContext('2d'), W, H);
+    _photoreal.photoId = stats.id; _photoreal.photoCanvas = c;
+    return c;
+  } catch (e) { return null; }
+}
+
+function _paintLifeOpening(ctx, cw, ch, s, op, tex, stats, wall) {
+  const core = window.PhotorealCore;
+  const designId = op.design_window_id || QS_WINDOW_ID;
+  const design = (typeof DESIGNS !== 'undefined') ? DESIGNS[designId] : null;
+
+  if (_photoreal.enabled && core && design && core.isReady()) {
+    const t = _life.t;
+    if (t < 0.999) _applyHomographyWarp(ctx, cw, ch, s);   // flat sticker fades out as detail fades in
+    const res = core.paintOpening({
+      ctx, width: cw, height: ch, quad: s, design,
+      photo: _lifePhoto(stats), stats, wall,
+      options: {
+        variant: _photoreal.variant,
+        lightOn: _photoreal.lightOn,
+        interiorBright: _photoreal.interiorBright,
+        sill: _photoreal.sill,
+        reflect: _lifeSlider('reflectSlider', 50) / 100,
+        yawDeg: _lifeSlider('yawSlider', 0),
+        opacity: op.opacity != null ? op.opacity : 0.92,
+        brightness: op.brightness != null ? op.brightness : 1,
+        intensity: _life.intensity,
+        life: t,
+        glare: _life.glare,
+        seed: _lifeHash(op.id || designId),
+        hideOld: !!_life.hideOld,
+      },
+    });
+    if (res && res.ok) return;
+  }
+  _paintLifeOpeningCanvas(ctx, cw, ch, s, op, tex, stats, wall);
+}
+_paintLifeOpening.__photoreal = true;
+
+/* canvas-only fallback (no WebGL, or a module failed to load) */
+function _paintLifeOpeningCanvas(ctx, cw, ch, s, op, tex, stats, wall) {
+  const t = _life.t;
+  _lifeBase(ctx, s, wall, t);
+  _drawWindowShadow(ctx, s);
+
+  const layer = _lifeLayer(cw, ch, s, op, tex, stats);
+  if (!layer) {                                   // could not process: plain overlay
+    _applyHomographyWarp(ctx, cw, ch, s);
+    return;
+  }
+  if (t < 0.999) _applyHomographyWarp(ctx, cw, ch, s);
+  ctx.save();
+  ctx.globalAlpha = t;
+  ctx.drawImage(layer.canvas, layer.x, layer.y);
+  ctx.restore();
+
+  _lifeReveal(ctx, s, stats, t);
+  _lifeSill(ctx, s, wall, t);
+  if (_life.glare >= 0) _lifeGlare(ctx, s, _life.glare);
+}
+
+function renderOpeningList() {
+  const box = document.getElementById('openingList');
+  if (!box) return;
+  box.innerHTML = '';
+  openings.forEach((op, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn btn-ghost btn-sm src-tab' + (i === activeIdx ? ' active' : '');
+    b.style.minWidth = '34px';
+    b.style.justifyContent = 'center';
+    b.textContent = String(i + 1);
+    b.title = 'Select opening ' + (i + 1);
+    b.onclick = () => selectOpening(i);
+    box.appendChild(b);
+  });
+}
+
+function _syncPanelToActive() {
+  const op = openings[activeIdx];
+  if (!op) return;
+  const opPct = Math.round(op.opacity * 100);
+  const brPct = Math.round(op.brightness * 100);
+  document.getElementById('opacitySlider').value = opPct;
+  document.getElementById('opVal').textContent   = opPct + '%';
+  document.getElementById('brightnessSlider').value = brPct;
+  document.getElementById('brVal').textContent      = brPct + '%';
+  const sel = document.getElementById('openingDesign');
+  if (sel) sel.value = String(op.design_window_id || QS_WINDOW_ID);
+  renderOpeningList();
+  updateCornerLabels();
+}
+
+function selectOpening(i) {
+  if (i < 0 || i >= openings.length) return;
+  if (openings[activeIdx]) openings[activeIdx].corners = corners;
+  activeIdx      = i;
+  corners        = openings[i].corners;
+  defaultCorners = _cloneCorners(corners);
+  lastCorner     = 'br';
+  _syncPanelToActive();
+  render();
+}
+
+const UNIT_IDS = {{ (all_windows | map(attribute='id') | list | tojson) }};
+
+/* grid layout for a list of unit ids: uniform scale, bottoms aligned per row */
+function _gridLayout() {
+  const ids = UNIT_IDS.slice(0, MAX_OPENINGS);
+  const out = {};
+  if (!ids.length) return out;
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+  const n = ids.length;
+  const cols = Math.min(n, Math.max(1, Math.ceil(Math.sqrt(n * cw / ch))));
+  const rows = Math.ceil(n / cols);
+  const mx = cw * 0.06, my = ch * 0.08;
+  const cellW = (cw - 2 * mx) / cols, cellH = (ch - 2 * my) / rows;
+  let sc = Infinity;
+  ids.forEach(id => {
+    const d = DESIGNS[id] || {};
+    const W = d.width || 1200, H = d.height || 1400;
+    sc = Math.min(sc, (cellW * 0.8) / W, (cellH * 0.8) / H);
+  });
+  ids.forEach((id, i) => {
+    const d = DESIGNS[id] || {};
+    const W = d.width || 1200, H = d.height || 1400;
+    const r = Math.floor(i / cols), c = i % cols;
+    const cx = mx + cellW * (c + 0.5);
+    const bottom = my + cellH * (r + 1) - cellH * 0.1;
+    const w = W * sc, h = H * sc;
+    out[id] = {
+      tl: { x: cx - w / 2, y: bottom - h }, tr: { x: cx + w / 2, y: bottom - h },
+      bl: { x: cx - w / 2, y: bottom },     br: { x: cx + w / 2, y: bottom },
+    };
+  });
+  return out;
+}
+
+/* place every window and door of the project on the photo automatically */
+function autoPlaceAll() {
+  const layout = _gridLayout();
+  const ids = UNIT_IDS.slice(0, MAX_OPENINGS);
+  if (!ids.length) return;
+  const prev = {};
+  openings.forEach(o => { prev[o.design_window_id] = o; });
+  openings = ids.map(id => {
+    const op = _makeOpening(layout[id], id);
+    if (prev[id]) { op.opacity = prev[id].opacity; op.brightness = prev[id].brightness; }
+    return op;
+  });
+  const idx = ids.indexOf(QS_WINDOW_ID);
+  activeIdx      = idx >= 0 ? idx : 0;
+  corners        = openings[activeIdx].corners;
+  defaultCorners = _cloneCorners(corners);
+  _syncPanelToActive();
+  render();
+  scheduleVis();
+}
+
+/* on load: make sure every unit has an opening (manual moves are kept) */
+function ensureAllPlaced() {
+  if (!UNIT_IDS.length) return;
+  const have = new Set(openings.map(o => o.design_window_id));
+  const missing = UNIT_IDS.filter(id => !have.has(id));
+  if (!missing.length) return;
+  if (openings.length <= 1) { autoPlaceAll(); return; }
+  const layout = _gridLayout();
+  missing.slice(0, Math.max(0, MAX_OPENINGS - openings.length)).forEach(id => {
+    if (layout[id]) openings.push(_makeOpening(layout[id], id));
+  });
+  _syncPanelToActive();
+  render();
+  scheduleVis();
+}
+
+function addOpening() {
+  if (openings.length >= MAX_OPENINGS) return;
+  const base = corners
+    ? _cloneCorners(corners)
+    : { tl: {x: 100, y: 100}, tr: {x: 300, y: 100}, bl: {x: 100, y: 350}, br: {x: 300, y: 350} };
+  const off = 40;
+  for (const k of ['tl','tr','bl','br']) { base[k].x += off; base[k].y += off; }
+  const cur = openings[activeIdx];
+  const op  = _makeOpening(base, cur ? cur.design_window_id : QS_WINDOW_ID);
+  if (cur) { op.opacity = cur.opacity; op.brightness = cur.brightness; }
+  openings.push(op);
+  selectOpening(openings.length - 1);
+  scheduleVis();
+}
+
+function removeOpening() {
+  if (openings.length <= 1) return;
+  openings.splice(activeIdx, 1);
+  activeIdx = Math.min(activeIdx, openings.length - 1);
+  corners = openings[activeIdx].corners;
+  defaultCorners = _cloneCorners(corners);
+  _syncPanelToActive();
+  scheduleVis();
+}
+
+function setOpeningDesign(v) {
+  const op = openings[activeIdx];
+  if (!op) return;
+  op.design_window_id = parseInt(v, 10) || QS_WINDOW_ID;
+  _openingTex(op);
+  scheduleVis();
+}
+
+function applyDesignToAll() {
+  const cur = openings[activeIdx];
+  if (!cur) return;
+  openings.forEach(o => { o.design_window_id = cur.design_window_id; });
+  _openingTex(cur);
+  scheduleVis();
+}
+
+function onOpacityInput(v) {
+  document.getElementById('opVal').textContent = v + '%';
+  if (openings[activeIdx]) openings[activeIdx].opacity = v / 100;
+  scheduleVis();
+}
+
+function onBrightnessInput(v) {
+  document.getElementById('brVal').textContent = v + '%';
+  if (openings[activeIdx]) openings[activeIdx].brightness = v / 100;
+  scheduleVis();
+}
+
+function _openingsPayload() {
+  return openings.map(o => ({
+    id: o.id,
+    design_window_id: o.design_window_id,
+    corners: {
+      tl: [o.corners.tl.x, o.corners.tl.y],
+      tr: [o.corners.tr.x, o.corners.tr.y],
+      bl: [o.corners.bl.x, o.corners.bl.y],
+      br: [o.corners.br.x, o.corners.br.y],
+    },
+    opacity: o.opacity,
+    brightness: o.brightness,
+  }));
+}
+
+function _restoreOpenings(d) {
+  const toC = (c) => ({
+    tl: { x: c.tl[0], y: c.tl[1] }, tr: { x: c.tr[0], y: c.tr[1] },
+    bl: { x: c.bl[0], y: c.bl[1] }, br: { x: c.br[0], y: c.br[1] },
+  });
+  let list = [];
+  try {
+    if (Array.isArray(d.openings) && d.openings.length) {
+      list = d.openings.map(o => ({
+        id: o.id || _newOpeningId(),
+        design_window_id: o.design_window_id || QS_WINDOW_ID,
+        corners: toC(o.corners),
+        opacity: o.opacity != null ? o.opacity : 0.92,
+        brightness: o.brightness != null ? o.brightness : 1,
+      }));
+    } else if (d.corners) {
+      list = [{
+        id: _newOpeningId(),
+        design_window_id: QS_WINDOW_ID,
+        corners: toC(d.corners),
+        opacity: d.opacity != null ? d.opacity : 0.92,
+        brightness: d.brightness != null ? d.brightness : 1,
+      }];
+    }
+  } catch (e) {
+    console.warn('[QS] restoreOpenings failed:', e);
+    list = [];
+  }
+  if (!list.length) return;
+  openings       = list;
+  activeIdx      = 0;
+  corners        = openings[0].corners;
+  defaultCorners = _cloneCorners(corners);
+  _syncPanelToActive();
+}
+
+/* ================================================================
+   SOURCE MODE — 2D editor render  /  3D model (GLB via Three.js)
+   ================================================================ */
+const FRAME_HEX = '{{ window.frame_colour_hex | default("#555a60") }}';
+let _tex2d = null, _tex3d = null, _srcMode = '2d';
+let _m3d = null, _yawTimer = null;
+
+function _m3dInit() {
+  if (_m3d) return _m3d;
+  const cnv = document.createElement('canvas');
+  const renderer = new THREE.WebGLRenderer({
+    canvas: cnv, antialias: true, alpha: true, preserveDrawingBuffer: true,
+  });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputEncoding = (typeof THREE.sRGBEncoding !== 'undefined') ? THREE.sRGBEncoding : 3001;
+
+  const scene = new THREE.Scene();
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  scene.add(new THREE.HemisphereLight(0xcfd8e3, 0x5a6472, 0.65));
+  const key = new THREE.DirectionalLight(0xffffff, 0.85);
+  key.position.set(0.6, 1, 1.2).normalize();
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0xaec8d8, 0.45);
+  fill.position.set(-1, 0.2, 0.5).normalize();
+  scene.add(fill);
+
+  _m3d = { renderer, scene, cnv, group: null,
+           size: new THREE.Vector3(1000, 1000, 70), center: new THREE.Vector3() };
+  return _m3d;
+}
+
+function _m3dLoad() {
+  const m = _m3dInit();
+  if (m.group) return Promise.resolve(m);
+  return new Promise((resolve, reject) => {
+    const url = `${API}/windows/${QS_WINDOW_ID}/3d/glb?method=auto`;
+    new THREE.GLTFLoader().load(url, (gltf) => {
+      const g  = gltf.scene;
+      const fc = new THREE.Color(FRAME_HEX);
+      g.traverse(o => {
+        if (!o.isMesh) return;
+        const isGlass = /glass/i.test(o.name) ||
+          (o.material && o.material.transparent && o.material.opacity < 0.85);
+        if (isGlass) {
+          o.material = new THREE.MeshPhysicalMaterial({
+            color: 0x6ab3c8, metalness: 0.05, roughness: 0.06,
+            transparent: true, opacity: 0.30, side: THREE.DoubleSide,
+          });
+        } else {
+          o.material = new THREE.MeshStandardMaterial({
+            color: fc, metalness: 0.18, roughness: 0.55,
+            emissive: fc.clone().multiplyScalar(0.10), side: THREE.DoubleSide,
+          });
+        }
+      });
+      const box = new THREE.Box3().setFromObject(g);
+      box.getSize(m.size);
+      box.getCenter(m.center);
+      m.scene.add(g);
+      m.group = g;
+      resolve(m);
+    }, undefined, reject);
+  });
+}
+
+async function build3DTexture() {
+  const m   = await _m3dLoad();
+  const yaw = (+document.getElementById('yawSlider').value) * Math.PI / 180;
+  const c   = m.center;
+  const w = m.size.x, h = m.size.y, dep = m.size.z;
+
+  // projected width grows with depth when the view is rotated (shows the reveal)
+  const pw = Math.abs(w * Math.cos(yaw)) + Math.abs(dep * Math.sin(yaw));
+  const H  = 1400;
+  const W  = Math.min(2400, Math.max(200, Math.round(H * pw / h)));
+
+  m.renderer.setSize(W, H, false);
+  const dist = Math.max(w, h, dep) * 3;
+  const cam  = new THREE.OrthographicCamera(-pw / 2, pw / 2, h / 2, -h / 2, -dist * 4, dist * 4);
+  cam.position.set(c.x + dist * Math.sin(yaw), c.y, c.z + dist * Math.cos(yaw));
+  cam.lookAt(c);
+  cam.updateProjectionMatrix();
+
+  m.renderer.render(m.scene, cam);
+
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  out.getContext('2d').drawImage(m.cnv, 0, 0);
+  if (_tex3d) _glForget(_tex3d);
+  _tex3d = out;
+  return out;
+}
+
+async function setSourceMode(mode) {
+  const label = document.getElementById('srcLabel');
+  if (mode === '3d') {
+    setStatus('stRender', '○ Building 3D…', false);
+    label.textContent = '3D model — building…';
+    try {
+      srcTexCanvas = await build3DTexture();
+      label.textContent = '{{ window.label }} — 3D model ✓';
+      setStatus('stRender', '● 3D render loaded', true);
+      _srcMode = '3d';
+    } catch (e) {
+      console.error('[QS] 3D source failed:', e);
+      label.textContent = '3D unavailable — using 2D render';
+      setStatus('stRender', _tex2d ? '● Render loaded' : '○ No render', !!_tex2d);
+      if (_tex2d) srcTexCanvas = _tex2d;
+      _srcMode = '2d';
+    }
+  } else {
+    _srcMode = '2d';
+    if (_tex2d) {
+      srcTexCanvas = _tex2d;
+      label.textContent = '{{ window.label }} — synced ✓';
+      setStatus('stRender', '● Render loaded', true);
+    } else {
+      label.textContent = 'No render — open editor and click → Visualise';
+      setStatus('stRender', '○ No render', false);
+    }
+  }
+  document.getElementById('btnSrc2d').classList.toggle('active', _srcMode === '2d');
+  document.getElementById('btnSrc3d').classList.toggle('active', _srcMode === '3d');
+  document.getElementById('yawRow').style.display = _srcMode === '3d' ? 'block' : 'none';
+  render();
+}
+
+function onYawInput(v) {
+  document.getElementById('yawVal').textContent = v + '°';
+  clearTimeout(_yawTimer);
+  _yawTimer = setTimeout(async () => {
+    if (_srcMode !== '3d') return;
+    try { srcTexCanvas = await build3DTexture(); render(); }
+    catch (e) { console.error('[QS] 3D rebuild failed:', e); }
+  }, 120);
+}
+
+function loadRenderTexture(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      srcTexCanvas = document.createElement('canvas');
+      srcTexCanvas.width  = img.width;
+      srcTexCanvas.height = img.height;
+      srcTexCanvas.getContext('2d').drawImage(img, 0, 0);
+      _tex2d = srcTexCanvas;
+      document.getElementById('srcLabel').textContent = '{{ window.label }} — synced ✓';
+      setStatus('stRender', '● Render loaded', true);
+      resolve();
+    };
+    img.onerror = () => {
+      if (DESIGNS[QS_WINDOW_ID]) {
+        srcTexCanvas = rasterDesign(DESIGNS[QS_WINDOW_ID]);
+        _tex2d = srcTexCanvas;
+        document.getElementById('srcLabel').textContent = '{{ window.label }} — from design ✓';
+        setStatus('stRender', '● Design loaded', true);
+      } else {
+        document.getElementById('srcLabel').textContent = 'No render — open editor and click → Visualise';
+        setStatus('stRender', '○ No render', false);
+      }
+      resolve();
+    };
+    img.src = url;
+  });
+}
+
+/* ================================================================
+   CORNER MANAGEMENT
+   ================================================================ */
+function straightenCorners(){
+  /* square the quad using current TL and BR — quick perspective reset that
+     keeps position/size, useful after rough dragging */
+  const tl=corners.tl, br=corners.br;
+  corners.tr = { x: br.x, y: tl.y };
+  corners.bl = { x: tl.x, y: br.y };
+  updateCornerLabels(); render(); scheduleVis();
+}
+
+document.addEventListener('keydown', (e)=>{
+  /* arrow-nudge the last touched corner: 1px, Shift = 10px */
+  if(!corners[lastCorner]) return;
+  const step = (e.shiftKey ? 10 : 1) / zoom;
+  let dx=0, dy=0;
+  if(e.key==='ArrowLeft')  dx=-step;
+  else if(e.key==='ArrowRight') dx=step;
+  else if(e.key==='ArrowUp')    dy=-step;
+  else if(e.key==='ArrowDown')  dy=step;
+  else return;
+  if(e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  e.preventDefault();
+  if (!freeCorners) {
+    for (const k of ['tl','tr','bl','br']) { corners[k].x += dx; corners[k].y += dy; }
+  } else {
+    corners[lastCorner].x += dx;
+    corners[lastCorner].y += dy;
+  }
+  updateCornerLabels(); render(); scheduleVis();
+});
+
+function resetCorners() {
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+  const mx = cw * 0.30, my = ch * 0.25;
+  const mw = cw * 0.40, mh = ch * 0.45;
+  corners = {
+    tl: { x: mx,      y: my      },
+    tr: { x: mx + mw, y: my      },
+    bl: { x: mx,      y: my + mh },
+    br: { x: mx + mw, y: my + mh },
+  };
+  defaultCorners = JSON.parse(JSON.stringify(corners));
+  render();
+}
+
+function updateCornerLabels() {
+  for (const k of ['tl','tr','bl','br']) {
+    const el = document.getElementById('c' + k.toUpperCase());
+    if (el && corners[k]) {
+      el.textContent = `${k.toUpperCase()} ${Math.round(corners[k].x)}, ${Math.round(corners[k].y)}`;
+    }
+  }
+}
+
+/* ================================================================
+   POINTER HANDLING — corner drag / pan / pinch-zoom (mouse + touch)
+   ================================================================ */
+function hitCorner(raw) {
+  if (!freeCorners || !corners) return null;
+  const R = _touchPointer ? 24 : 16;
+  for (const k of ['tl','tr','br','bl']) {
+    const s = toScreen(corners[k]);
+    const dx = s.x - raw.x, dy = s.y - raw.y;
+    if (Math.sqrt(dx*dx + dy*dy) < R) return k;
+  }
+  return null;
+}
+
+/* ================================================================
+   EASY MODE — 8 handles on a clean bounding box:
+   corners resize (aspect locked, Shift = free, Alt = from centre),
+   edge handles stretch one side, dragging inside moves the window.
+   ================================================================ */
+const _HANDLES = [
+  { id: 'nw', fx: 0,  fy: 0  }, { id: 'ne', fx: 1,  fy: 0  },
+  { id: 'se', fx: 1,  fy: 1  }, { id: 'sw', fx: 0,  fy: 1  },
+  { id: 'n',  fx: .5, fy: 0  }, { id: 'e',  fx: 1,  fy: .5 },
+  { id: 's',  fx: .5, fy: 1  }, { id: 'w',  fx: 0,  fy: .5 },
+];
+const _HCURSOR = {
+  nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize',
+  n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
+};
+
+function _bbox(cs) {
+  const xs = [cs.tl.x, cs.tr.x, cs.bl.x, cs.br.x];
+  const ys = [cs.tl.y, cs.tr.y, cs.bl.y, cs.br.y];
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
+function _handlePoints() {
+  if (!corners) return [];
+  const b = _bbox(corners);
+  const sw = (b.x1 - b.x0) * zoom, sh = (b.y1 - b.y0) * zoom;
+  const showEdges = sw > 70 && sh > 70;      // tiny windows: corners only
+  return _HANDLES
+    .filter(h => showEdges || (h.fx !== .5 && h.fy !== .5))
+    .map(h => {
+      const p = toScreen({ x: b.x0 + (b.x1 - b.x0) * h.fx, y: b.y0 + (b.y1 - b.y0) * h.fy });
+      return { id: h.id, fx: h.fx, fy: h.fy, x: p.x, y: p.y };
+    });
+}
+
+function hitHandle(raw) {
+  if (freeCorners || !corners) return null;
+  const R = _touchPointer ? 24 : 14;
+  for (const h of _handlePoints()) {
+    if (Math.hypot(h.x - raw.x, h.y - raw.y) <= R) return h;
+  }
+  return null;
+}
+
+function _resizeBox(b, h, p, lock, fromCenter) {
+  const MIN = 24 / zoom;
+  let { x0, y0, x1, y1 } = b;
+  const w = (x1 - x0) || 1, ht = (y1 - y0) || 1;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const movesX = h.fx !== .5, movesY = h.fy !== .5;
+
+  if (fromCenter) {
+    if (movesX) { const hw = Math.max(Math.abs(p.x - cx), MIN / 2); x0 = cx - hw; x1 = cx + hw; }
+    if (movesY) { const hh = Math.max(Math.abs(p.y - cy), MIN / 2); y0 = cy - hh; y1 = cy + hh; }
+  } else {
+    if (movesX) { if (h.fx === 0) x0 = Math.min(p.x, x1 - MIN); else x1 = Math.max(p.x, x0 + MIN); }
+    if (movesY) { if (h.fy === 0) y0 = Math.min(p.y, y1 - MIN); else y1 = Math.max(p.y, y0 + MIN); }
+  }
+
+  if (lock && movesX && movesY) {                // keep the original proportions
+    const s  = Math.max((x1 - x0) / w, (y1 - y0) / ht);
+    const nw = w * s, nh = ht * s;
+    if (fromCenter) { x0 = cx - nw / 2; x1 = cx + nw / 2; y0 = cy - nh / 2; y1 = cy + nh / 2; }
+    else {
+      if (h.fx === 0) x0 = x1 - nw; else x1 = x0 + nw;
+      if (h.fy === 0) y0 = y1 - nh; else y1 = y0 + nh;
+    }
+  }
+  return { x0, y0, x1, y1 };
+}
+
+function _applyBox(start, ob, nb) {
+  const w = (ob.x1 - ob.x0) || 1, h = (ob.y1 - ob.y0) || 1;
+  for (const k of ['tl','tr','bl','br']) {
+    corners[k] = {
+      x: nb.x0 + (start[k].x - ob.x0) / w * (nb.x1 - nb.x0),
+      y: nb.y0 + (start[k].y - ob.y0) / h * (nb.y1 - nb.y0),
+    };
+  }
+}
+
+function updateHoverCursor(raw) {
+  if (drawMode) { houseCanvas.style.cursor = ''; return; }
+  let c = '';
+  if (!spaceHeld) {
+    const h = hitHandle(raw);
+    if (h) c = _HCURSOR[h.id];
+    else if (hitCorner(raw)) c = 'crosshair';
+    else if (corners && pointInQuad(raw)) c = 'move';
+  }
+  houseCanvas.style.cursor = c;
+}
+
+function _defaultHint() {
+  return freeCorners
+    ? 'Perspective mode — drag any corner freely · drag inside to move · scroll to zoom'
+    : 'Drag the window to move · drag a handle to resize (Shift = free) · scroll to zoom';
+}
+
+function toggleFreeCorners() {
+  freeCorners = !freeCorners;
+  if (!freeCorners && corners) {           // back to a clean rectangle
+    const b = _bbox(corners);
+    corners.tl = { x: b.x0, y: b.y0 }; corners.tr = { x: b.x1, y: b.y0 };
+    corners.bl = { x: b.x0, y: b.y1 }; corners.br = { x: b.x1, y: b.y1 };
+    scheduleVis();
+  }
+  document.getElementById('btnFree').classList.toggle('active', freeCorners);
+  if (!drawMode) document.getElementById('photoHint').textContent = _defaultHint();
+  updateCornerLabels(); render();
+}
+
+/* point-in-quad test (ray casting) — used to detect a click inside the
+   window overlay so the whole thing can be dragged as one unit */
+function pointInQuad(raw, cs) {
+  cs = cs || corners;
+  if (!cs) return false;
+  const poly = ['tl','tr','br','bl'].map(k => toScreen(cs[k]));
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    const intersect = ((yi > raw.y) !== (yj > raw.y)) &&
+      (raw.x < (xj - xi) * (raw.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function onPointerDown(evt) {
+  _touchPointer = evt.pointerType === 'touch';
+  const raw = rawXY(evt);
+  pointers.set(evt.pointerId, raw);
+  houseCanvas.setPointerCapture(evt.pointerId);
+
+  // two active pointers → pinch-zoom / two-finger pan, cancel any corner drag
+  if (pointers.size === 2) {
+    dragging = null;
+    resizing = null;
+    movingWindow = false;
+    houseCanvas.classList.remove('dragging-corner', 'moving-window');
+    return;
+  }
+
+  if (drawMode) {
+    drawing     = true;
+    drawStart   = toWorld(raw);
+    drawCurrent = drawStart;
+    render();
+    return;
+  }
+
+  if (evt.button === 1 || spaceHeld) {          // middle-click or space+drag → pan
+    isPanning = true;
+    panLast   = raw;
+    houseCanvas.classList.add('panning');
+    return;
+  }
+
+  if (!hitCorner(raw) && !hitHandle(raw) && !(corners && pointInQuad(raw))) {
+    for (let i = openings.length - 1; i >= 0; i--) {
+      if (i !== activeIdx && pointInQuad(raw, openings[i].corners)) { selectOpening(i); break; }
+    }
+  }
+
+  const grab = hitHandle(raw);
+  if (grab) {                                     // easy mode: resize handle
+    resizing = { h: grab, box: _bbox(corners), start: _cloneCorners(corners) };
+    houseCanvas.style.cursor = _HCURSOR[grab.id];
+    render();
+    return;
+  }
+
+  const hit = hitCorner(raw);
+  if (hit) {
+    dragging   = hit;
+    lastCorner = hit;
+    houseCanvas.classList.add('dragging-corner');
+    showMagnifier(raw);
+  } else if (corners && pointInQuad(raw)) {       // click inside the overlay → drag whole window
+    movingWindow     = true;
+    moveStartRaw     = raw;
+    moveStartCorners = JSON.parse(JSON.stringify(corners));
+    houseCanvas.classList.add('moving-window');
+    houseCanvas.style.cursor = 'move';
+  } else if (evt.pointerType !== 'touch' || pointers.size === 1) {
+    isPanning = true;                            // drag empty space → pan
+    panLast   = raw;
+    houseCanvas.style.cursor = '';
+    houseCanvas.classList.add('panning');
+  }
+}
+
+function onPointerMove(evt) {
+  if (!pointers.has(evt.pointerId) && evt.pointerType !== 'mouse') return;
+  const raw = rawXY(evt);
+  if (pointers.has(evt.pointerId)) pointers.set(evt.pointerId, raw);
+
+  // pinch-zoom with two touch points
+  if (pointers.size === 2) {
+    const pts = [...pointers.values()];
+    const dist  = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    const mid   = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    if (onPointerMove._pinchDist) {
+      setZoom(zoom * (dist / onPointerMove._pinchDist), mid);
+    }
+    onPointerMove._pinchDist = dist;
+    return;
+  }
+  onPointerMove._pinchDist = null;
+
+  if (!drawing && !dragging && !movingWindow && !resizing && !isPanning) {
+    updateHoverCursor(raw);                       // show resize / move cursor on hover
+    return;
+  }
+
+  if (resizing) {
+    const p    = toWorld(raw);
+    const lock = resizing.h.fx !== .5 && resizing.h.fy !== .5 && !evt.shiftKey;
+    const nb   = _resizeBox(resizing.box, resizing.h, p, lock, evt.altKey);
+    _applyBox(resizing.start, resizing.box, nb);
+    updateCornerLabels(); render(); scheduleVis();
+    return;
+  }
+
+  if (drawing) {
+    drawCurrent = toWorld(raw);
+    render();
+    return;
+  }
+
+  if (dragging) {
+    corners[dragging] = toWorld(raw);
+    updateCornerLabels(); render(); scheduleVis();
+    showMagnifier(raw);
+    return;
+  }
+  if (movingWindow && moveStartRaw && moveStartCorners) {
+    const dx = (raw.x - moveStartRaw.x) / zoom;
+    const dy = (raw.y - moveStartRaw.y) / zoom;
+    for (const k of ['tl','tr','bl','br']) {
+      corners[k] = { x: moveStartCorners[k].x + dx, y: moveStartCorners[k].y + dy };
+    }
+    updateCornerLabels(); render(); scheduleVis();
+    return;
+  }
+  if (isPanning && panLast) {
+    panX += raw.x - panLast.x;
+    panY += raw.y - panLast.y;
+    panLast = raw;
+    render();
+  }
+}
+
+function onPointerUp(evt) {
+  pointers.delete(evt.pointerId);
+  onPointerMove._pinchDist = null;
+
+  if (drawing) {
+    drawing = false;
+    if (drawStart && drawCurrent) {
+      const x0 = Math.min(drawStart.x, drawCurrent.x), x1 = Math.max(drawStart.x, drawCurrent.x);
+      const y0 = Math.min(drawStart.y, drawCurrent.y), y1 = Math.max(drawStart.y, drawCurrent.y);
+      if (x1 - x0 > 8 / zoom && y1 - y0 > 8 / zoom) {   // ignore accidental taps/tiny drags
+        corners = {
+          tl: { x: x0, y: y0 }, tr: { x: x1, y: y0 },
+          bl: { x: x0, y: y1 }, br: { x: x1, y: y1 },
+        };
+        defaultCorners = JSON.parse(JSON.stringify(corners));
+        lastCorner = 'br';
+        updateCornerLabels();
+        scheduleVis();
+      }
+    }
+    drawStart = null; drawCurrent = null;
+    toggleDrawMode();   // auto-exit draw mode after placing one rectangle
+    return;
+  }
+
+  if (pointers.size < 2 && (dragging || movingWindow || resizing)) scheduleVis();
+  dragging  = null;
+  resizing  = null;
+  isPanning = false;
+  panLast   = null;
+  movingWindow     = false;
+  moveStartRaw     = null;
+  moveStartCorners = null;
+  houseCanvas.classList.remove('panning', 'dragging-corner', 'moving-window');
+  houseCanvas.style.cursor = '';
+  hideMagnifier();
+  render();
+}
+
+function onDblClick(evt) {
+  const raw = rawXY(evt);
+  const hit = hitCorner(raw);
+  if (hit && defaultCorners) {
+    corners[hit] = { ...defaultCorners[hit] };
+    lastCorner = hit;
+    updateCornerLabels(); render(); scheduleVis();
+  }
+}
+
+/* -------- magnifier loupe for precise corner placement -------- */
+function showMagnifier(raw) {
+  const mag = document.getElementById('magnifier');
+  const mc  = mag.querySelector('canvas');
+  const mctx = mc.getContext('2d');
+  const zoomFactor = 3;
+  const half = mc.width / zoomFactor / 2;
+
+  mctx.imageSmoothingEnabled = false;
+  mctx.clearRect(0, 0, mc.width, mc.height);
+  mctx.drawImage(houseCanvas,
+    raw.x - half, raw.y - half, half * 2, half * 2,
+    0, 0, mc.width, mc.height);
+
+  const wrap = houseCanvas.parentElement.getBoundingClientRect();
+  const rect = houseCanvas.getBoundingClientRect();
+  const sx = raw.x * (rect.width / houseCanvas.width) + (rect.left - wrap.left);
+  const sy = raw.y * (rect.height / houseCanvas.height) + (rect.top - wrap.top);
+  mag.style.left = (sx - mag.offsetWidth / 2) + 'px';
+  mag.style.top  = (sy - mag.offsetHeight - 30) + 'px';
+  mag.style.display = 'block';
+}
+function hideMagnifier() {
+  document.getElementById('magnifier').style.display = 'none';
+}
+
+/* ================================================================
+   RENDER
+   ================================================================ */
+function drawBackground(ctx, cw, ch) {
+  if (bgImage) {
+    const scale = Math.max(cw / bgImage.width, ch / bgImage.height);
+    const dw = bgImage.width * scale, dh = bgImage.height * scale;
+    ctx.drawImage(bgImage, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+  } else {
+    drawPaintedHouse(ctx, cw, ch);
+  }
+}
+
+function render() {
+  if (!houseCanvas || !houseCtx) return;
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+
+  houseCtx.setTransform(1, 0, 0, 1, 0, 0);
+  houseCtx.clearRect(0, 0, cw, ch);
+
+  // background — drawn through the zoom/pan transform (plain vector/image draw,
+  // safe to use ctx transform here since no pixel readback happens on it)
+  houseCtx.setTransform(zoom, 0, 0, zoom, panX, panY);
+  drawBackground(houseCtx, cw, ch);
+  houseCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+  if (openings[activeIdx]) openings[activeIdx].corners = corners;
+
+  // window overlays — pixel-level compositing ignores ctx transform, so
+  // corners are converted to screen space before warping
+  _paintAll(houseCtx, cw, ch, p => toScreen(p));
+
+  drawHandles();
+  drawDrawPreview();
+  updateCornerLabels();
+}
+
+function drawDrawPreview() {
+  if (!drawing || !drawStart || !drawCurrent) return;
+  const a = toScreen(drawStart), b = toScreen(drawCurrent);
+  const ctx = houseCtx;
+  ctx.save();
+  ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+  ctx.strokeRect(Math.min(a.x,b.x), Math.min(a.y,b.y), Math.abs(b.x-a.x), Math.abs(b.y-a.y));
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(201,123,61,.12)';
+  ctx.fillRect(Math.min(a.x,b.x), Math.min(a.y,b.y), Math.abs(b.x-a.x), Math.abs(b.y-a.y));
+  ctx.restore();
+}
+
+/* ================================================================
+   WEBGL HOMOGRAPHY WARP (GPU) — CPU version kept as automatic fallback
+   ================================================================ */
+let _gl = null, _glCanvas = null, _glProg = null, _glTex = null;
+let _glTexSrc = null, _glLoc = null, _glFailed = false;
+const _glTexCache = new Map();   // source canvas -> WebGLTexture
+
+function _glForget(canvas) {
+  const tex = _glTexCache.get(canvas);
+  if (tex && _gl && !_gl.isContextLost()) _gl.deleteTexture(tex);
+  _glTexCache.delete(canvas);
+}
+
+/* per-opening warp parameters (null = fall back to the sliders) */
+let _curOp = null, _curBr = null;
+
+function _glCompile(gl, type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(sh) || 'shader compile failed');
+  }
+  return sh;
+}
+
+function _glInit() {
+  if (_glFailed) return false;
+  if (_gl && !_gl.isContextLost()) return true;
+  try {
+    _glCanvas = document.createElement('canvas');
+    _glCanvas.width = 2; _glCanvas.height = 2;
+    _gl = _glCanvas.getContext('webgl', {
+      premultipliedAlpha: true, alpha: true, antialias: false,
+      preserveDrawingBuffer: false,
+    });
+    if (!_gl) throw new Error('WebGL not available');
+    const gl = _gl;
+
+    const vsSrc = 'attribute vec2 aPos; void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }';
+    const fsSrc = [
+      '#ifdef GL_FRAGMENT_PRECISION_HIGH',
+      'precision highp float;',
+      '#else',
+      'precision mediump float;',
+      '#endif',
+      'uniform sampler2D uTex;',
+      'uniform mat3 uH;',
+      'uniform vec2 uSrc;',
+      'uniform float uCanvasH;',
+      'uniform float uOpacity;',
+      'uniform float uBright;',
+      'uniform float uReflect;',
+      'void main(){',
+      '  vec3 p = uH * vec3(gl_FragCoord.x, uCanvasH - gl_FragCoord.y, 1.0);',
+      '  vec2 s = p.xy / p.z;',
+      '  if (s.x < 0.0 || s.y < 0.0 || s.x > uSrc.x || s.y > uSrc.y) discard;',
+      '  vec2 uv = s / uSrc;',
+      '  vec4 t = texture2D(uTex, uv);',
+      '  vec2 e = min(uv, vec2(1.0) - uv);',
+      '  float feather = smoothstep(0.0, 0.004, min(e.x, e.y));',
+      '  float diag = uv.x * 0.8 + (1.0 - uv.y) * 0.6;',
+      '  float b1 = smoothstep(0.30, 0.42, diag) * (1.0 - smoothstep(0.46, 0.62, diag));',
+      '  float b2 = smoothstep(0.66, 0.72, diag) * (1.0 - smoothstep(0.74, 0.86, diag));',
+      '  float sheen = (b1 * 0.18 + b2 * 0.08) * uReflect;',
+      '  vec3 col = t.rgb * uBright + vec3(sheen) * t.a;',
+      '  float a = t.a * uOpacity * feather;',
+      '  if (a < 0.004) discard;',
+      '  gl_FragColor = vec4(min(col, vec3(t.a)) * uOpacity * feather, a);',
+      '}',
+    ].join('\n');
+
+    _glProg = gl.createProgram();
+    gl.attachShader(_glProg, _glCompile(gl, gl.VERTEX_SHADER, vsSrc));
+    gl.attachShader(_glProg, _glCompile(gl, gl.FRAGMENT_SHADER, fsSrc));
+    gl.linkProgram(_glProg);
+    if (!gl.getProgramParameter(_glProg, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(_glProg) || 'program link failed');
+    }
+    gl.useProgram(_glProg);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(_glProg, 'aPos');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    _glLoc = {
+      tex:     gl.getUniformLocation(_glProg, 'uTex'),
+      H:       gl.getUniformLocation(_glProg, 'uH'),
+      src:     gl.getUniformLocation(_glProg, 'uSrc'),
+      canvasH: gl.getUniformLocation(_glProg, 'uCanvasH'),
+      opacity: gl.getUniformLocation(_glProg, 'uOpacity'),
+      bright:  gl.getUniformLocation(_glProg, 'uBright'),
+      reflect: gl.getUniformLocation(_glProg, 'uReflect'),
+    };
+    _glTex = gl.createTexture();
+    _glTexSrc = null;
+    _glTexCache.clear();
+    return true;
+  } catch (e) {
+    console.warn('[QS] WebGL warp unavailable, using CPU fallback:', e);
+    _glFailed = true;
+    _gl = null;
+    return false;
+  }
+}
+
+function _glWarp(targetCtx, cw, ch, s) {
+  if (!_glInit()) return false;
+  const gl = _gl;
+
+  if (_glCanvas.width !== cw || _glCanvas.height !== ch) {
+    _glCanvas.width = cw; _glCanvas.height = ch;
+  }
+  if (gl.drawingBufferWidth < cw || gl.drawingBufferHeight < ch) return false;
+
+  const sw = srcTexCanvas.width, sh = srcTexCanvas.height;
+
+  gl.viewport(0, 0, cw, ch);
+  gl.useProgram(_glProg);
+
+  gl.activeTexture(gl.TEXTURE0);
+  let tex = _glTexCache.get(srcTexCanvas);
+  if (!tex) {
+    tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcTexCanvas);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    _glTexCache.set(srcTexCanvas, tex);
+  } else {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+  }
+
+  const src = [[0, 0], [sw, 0], [0, sh], [sw, sh]];
+  const dst = [[s.tl.x, s.tl.y], [s.tr.x, s.tr.y], [s.bl.x, s.bl.y], [s.br.x, s.br.y]];
+  const Hinv = computeH(dst, src);   // house px -> window texture px (row-major)
+  const [a, b, c, d, e, f, g, h, i] = Hinv;
+  gl.uniformMatrix3fv(_glLoc.H, false, new Float32Array([a, d, g, b, e, h, c, f, i]));
+  gl.uniform1i(_glLoc.tex, 0);
+  gl.uniform2f(_glLoc.src, sw, sh);
+  gl.uniform1f(_glLoc.canvasH, ch);
+  gl.uniform1f(_glLoc.opacity, _curOp != null ? _curOp : +document.getElementById('opacitySlider').value / 100);
+  gl.uniform1f(_glLoc.bright,  _curBr != null ? _curBr : +document.getElementById('brightnessSlider').value / 100);
+  gl.uniform1f(_glLoc.reflect, +document.getElementById('reflectSlider').value / 100);
+
+  gl.disable(gl.BLEND);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  targetCtx.save();
+  targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+  targetCtx.drawImage(_glCanvas, 0, 0, cw, ch, 0, 0, cw, ch);
+  targetCtx.restore();
+  return true;
+}
+
+function _applyHomographyWarp(targetCtx, cw, ch, dstCorners) {
+  try {
+    if (_glWarp(targetCtx, cw, ch, dstCorners)) return;
+  } catch (e) {
+    console.warn('[QS] WebGL warp failed, switching to CPU:', e);
+    _glFailed = true;
+  }
+  _applyHomographyWarpCPU(targetCtx, cw, ch, dstCorners);
+}
+
+function _applyHomographyWarpCPU(targetCtx, cw, ch, dstCorners) {
+  const sw = srcTexCanvas.width, sh = srcTexCanvas.height;
+
+  // compute homography src (window canvas) → dst (given quad, already in
+  // the target canvas's own pixel space)
+  const s = dstCorners;
+  const src = [[0,0],[sw,0],[0,sh],[sw,sh]];
+  const dst = [
+    [s.tl.x, s.tl.y],
+    [s.tr.x, s.tr.y],
+    [s.bl.x, s.bl.y],
+    [s.br.x, s.br.y],
+  ];
+  const H    = computeH(src, dst);
+  const Hinv = computeH(dst, src);  // inverse: house → window
+
+  // bounding box of the destination quad to limit pixel loop
+  const xs   = dst.map(p => p[0]), ys = dst.map(p => p[1]);
+  const x0   = Math.max(0, Math.floor(Math.min(...xs)));
+  const x1   = Math.min(cw, Math.ceil(Math.max(...xs)));
+  const y0   = Math.max(0, Math.floor(Math.min(...ys)));
+  const y1   = Math.min(ch, Math.ceil(Math.max(...ys)));
+
+  const opacity    = _curOp != null ? _curOp : +document.getElementById('opacitySlider').value / 100;
+  const brightness = _curBr != null ? _curBr : +document.getElementById('brightnessSlider').value / 100;
+
+  const srcCtx  = srcTexCanvas.getContext('2d');
+  const srcData = srcCtx.getImageData(0, 0, sw, sh).data;
+  const destImg = targetCtx.getImageData(0, 0, cw, ch);
+  const destData= destImg.data;
+
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const p  = applyH(Hinv, x, y);
+      if (p.x < 0 || p.x >= sw - 1 || p.y < 0 || p.y >= sh - 1) continue;
+      /* bilinear sample — smooth edges instead of jagged nearest-pixel */
+      const fx = Math.floor(p.x), fy = Math.floor(p.y);
+      const dx = p.x - fx,        dy = p.y - fy;
+      const i00=(fy*sw+fx)*4, i10=i00+4, i01=i00+sw*4, i11=i01+4;
+      const w00=(1-dx)*(1-dy), w10=dx*(1-dy), w01=(1-dx)*dy, w11=dx*dy;
+      const sr = srcData[i00]*w00+srcData[i10]*w10+srcData[i01]*w01+srcData[i11]*w11;
+      const sg = srcData[i00+1]*w00+srcData[i10+1]*w10+srcData[i01+1]*w01+srcData[i11+1]*w11;
+      const sb2= srcData[i00+2]*w00+srcData[i10+2]*w10+srcData[i01+2]*w01+srcData[i11+2]*w11;
+      const sa = (srcData[i00+3]*w00+srcData[i10+3]*w10+srcData[i01+3]*w01+srcData[i11+3]*w11)/255;
+      if (sa < 0.01) continue;
+      const alpha= sa * opacity;
+      const di   = (y * cw + x) * 4;
+      destData[di]   = Math.min(255, sr  * brightness) * alpha + destData[di]   * (1 - alpha);
+      destData[di+1] = Math.min(255, sg  * brightness) * alpha + destData[di+1] * (1 - alpha);
+      destData[di+2] = Math.min(255, sb2 * brightness) * alpha + destData[di+2] * (1 - alpha);
+      destData[di+3] = 255;
+    }
+  }
+  targetCtx.putImageData(destImg, 0, 0);
+}
+
+/* ================================================================
+   HOMOGRAPHY MATH
+   ================================================================ */
+function computeH(src, dst) {
+  // DLT: build 8×9 matrix, solve for null space
+  const A = [];
+  for (let i = 0; i < 4; i++) {
+    const [sx, sy] = src[i], [dx, dy] = dst[i];
+    A.push([-sx,-sy,-1, 0, 0, 0, dx*sx, dx*sy, dx]);
+    A.push([ 0,  0,  0,-sx,-sy,-1, dy*sx, dy*sy, dy]);
+  }
+  // set h[8]=1 and solve 8×8
+  const M = A.map(row => [...row.slice(0,8), -row[8]]);
+  for (let col = 0; col < 8; col++) {
+    let maxRow = col;
+    for (let r = col+1; r < 8; r++)
+      if (Math.abs(M[r][col]) > Math.abs(M[maxRow][col])) maxRow = r;
+    [M[col], M[maxRow]] = [M[maxRow], M[col]];
+    const pivot = M[col][col];
+    if (Math.abs(pivot) < 1e-10) continue;
+    for (let r = 0; r < 8; r++) {
+      if (r === col) continue;
+      const f = M[r][col] / pivot;
+      for (let j = col; j <= 8; j++) M[r][j] -= f * M[col][j];
+    }
+  }
+  const h = M.map((row, i) => row[8] / row[i]);
+  h.push(1);
+  return h;
+}
+
+function applyH(H, x, y) {
+  const [a,b,c,d,e,f,g,hh,i] = H;
+  const w = g*x + hh*y + i;
+  return { x: (a*x + b*y + c) / w, y: (d*x + e*y + f) / w };
+}
+
+/* ================================================================
+   REALISM — soft contact shadow + daylight matching
+   ================================================================ */
+function _drawWindowShadow(ctx, s) {
+  const amt = +document.getElementById('shadowSlider').value / 100;
+  if (!amt) return;
+  const cw = ctx.canvas.width, ch = ctx.canvas.height;
+  const w    = Math.hypot(s.tr.x - s.tl.x, s.tr.y - s.tl.y);
+  const blur = Math.max(4, w * 0.035);
+  const off  = Math.max(2, w * 0.012);
+  const BIG  = 100000;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // clip out the window quad so the shadow never tints the glass itself
+  ctx.beginPath();
+  ctx.rect(0, 0, cw, ch);
+  ctx.moveTo(s.tl.x, s.tl.y);
+  ctx.lineTo(s.tr.x, s.tr.y);
+  ctx.lineTo(s.br.x, s.br.y);
+  ctx.lineTo(s.bl.x, s.bl.y);
+  ctx.closePath();
+  ctx.clip('evenodd');
+
+  // draw the shape far off-canvas; only its offset shadow lands on the photo
+  ctx.shadowColor   = 'rgba(0,0,0,' + (0.45 * amt) + ')';
+  ctx.shadowBlur    = blur;
+  ctx.shadowOffsetX = BIG + off;
+  ctx.shadowOffsetY = off * 1.4;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.moveTo(s.tl.x - BIG, s.tl.y);
+  ctx.lineTo(s.tr.x - BIG, s.tr.y);
+  ctx.lineTo(s.br.x - BIG, s.br.y);
+  ctx.lineTo(s.bl.x - BIG, s.bl.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function matchDaylight() {
+  if (!corners) return;
+  try {
+    const cw = houseCanvas.width, ch = houseCanvas.height;
+    const c  = document.createElement('canvas');
+    c.width = cw; c.height = ch;
+    const x = c.getContext('2d');
+    drawBackground(x, cw, ch);
+
+    const pts = ['tl','tr','bl','br'].map(k => corners[k]);
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const bw = Math.max(...xs) - Math.min(...xs);
+    const bh = Math.max(...ys) - Math.min(...ys);
+    const padX = bw * 0.4, padY = bh * 0.4;
+    const x0 = Math.max(0, Math.floor(Math.min(...xs) - padX));
+    const y0 = Math.max(0, Math.floor(Math.min(...ys) - padY));
+    const x1 = Math.min(cw, Math.ceil(Math.max(...xs) + padX));
+    const y1 = Math.min(ch, Math.ceil(Math.max(...ys) + padY));
+    if (x1 - x0 < 2 || y1 - y0 < 2) return;
+
+    const d = x.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+    let sum = 0, n = 0;
+    for (let i = 0; i < d.length; i += 16) {
+      sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      n++;
+    }
+    const lum = n ? sum / n / 255 : 0.6;          // 0..1 scene brightness
+    const b   = Math.min(1.6, Math.max(0.4, 0.55 + lum * 0.6));
+    const pct = Math.round(b * 100);
+
+    document.getElementById('brightnessSlider').value = pct;
+    document.getElementById('brVal').textContent = pct + '%';
+    if (openings[activeIdx]) openings[activeIdx].brightness = pct / 100;
+    scheduleVis();
+  } catch (e) {
+    console.warn('[QS] matchDaylight failed:', e);
+  }
+}
+
+/* ================================================================
+   HANDLE DRAWING
+   ================================================================ */
+function drawHandles() {
+  if (!corners) return;
+  const ctx = houseCtx;
+
+  // faint outline + number badge for the other openings
+  openings.forEach((op, i) => {
+    if (i === activeIdx || !op.corners) return;
+    const o = { tl: toScreen(op.corners.tl), tr: toScreen(op.corners.tr),
+                bl: toScreen(op.corners.bl), br: toScreen(op.corners.br) };
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(o.tl.x, o.tl.y); ctx.lineTo(o.tr.x, o.tr.y);
+    ctx.lineTo(o.br.x, o.br.y); ctx.lineTo(o.bl.x, o.bl.y);
+    ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(o.tl.x + 12, o.tl.y + 12, 9, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(27,36,48,.85)'; ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 10px Inter, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(i + 1), o.tl.x + 12, o.tl.y + 12);
+    ctx.restore();
+  });
+  const s = { tl: toScreen(corners.tl), tr: toScreen(corners.tr),
+              bl: toScreen(corners.bl), br: toScreen(corners.br) };
+  if (!freeCorners) { _drawEasyHandles(ctx, s); return; }
+  ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+  ctx.beginPath();
+  ctx.moveTo(s.tl.x, s.tl.y);
+  ctx.lineTo(s.tr.x, s.tr.y);
+  ctx.lineTo(s.br.x, s.br.y);
+  ctx.lineTo(s.bl.x, s.bl.y);
+  ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+  for (const k of ['tl','tr','br','bl']) {
+    const p = s[k];
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 10, 0, Math.PI*2);
+    ctx.fillStyle = k === lastCorner ? '#C97B3D' : 'white'; ctx.fill();
+    ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle = k === lastCorner ? 'white' : '#C97B3D';
+    ctx.font = 'bold 8px Inter, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(k.toUpperCase(), p.x, p.y);
+  }
+}
+
+function _drawEasyHandles(ctx, s) {
+  ctx.save();
+  const b = _bbox(corners);
+  const a = toScreen({ x: b.x0, y: b.y0 });
+  const z = toScreen({ x: b.x1, y: b.y1 });
+
+  // window outline (follows the quad) + clean bounding box
+  ctx.setLineDash([6, 4]); ctx.lineWidth = 2; ctx.strokeStyle = '#C97B3D';
+  ctx.beginPath();
+  ctx.moveTo(s.tl.x, s.tl.y); ctx.lineTo(s.tr.x, s.tr.y);
+  ctx.lineTo(s.br.x, s.br.y); ctx.lineTo(s.bl.x, s.bl.y);
+  ctx.closePath(); ctx.stroke();
+  ctx.setLineDash([]); ctx.lineWidth = 1.5;
+  ctx.strokeRect(a.x, a.y, z.x - a.x, z.y - a.y);
+
+  // handles: squares on corners, pills on edges
+  for (const h of _handlePoints()) {
+    const isCorner = h.fx !== .5 && h.fy !== .5;
+    const w  = isCorner ? 13 : (h.fy === .5 ? 8 : 20);
+    const ht = isCorner ? 13 : (h.fy === .5 ? 20 : 8);
+    const active = resizing && resizing.h.id === h.id;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(h.x - w / 2, h.y - ht / 2, w, ht, 3);
+    else ctx.rect(h.x - w / 2, h.y - ht / 2, w, ht);
+    ctx.fillStyle = active ? '#C97B3D' : '#FFFFFF';
+    ctx.fill();
+    ctx.strokeStyle = '#C97B3D'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ================================================================
+   PAINTED HOUSE (fallback background)
+   ================================================================ */
+function drawPaintedHouse(ctx, w, h) {
+  const sky = ctx.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, '#C8DDE6'); sky.addColorStop(.55, '#E4DCC6'); sky.addColorStop(1, '#C6B48A');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+  const hl = w*.08, hr = w*.92, ht = h*.30, hb = h;
+  ctx.fillStyle = '#D6CAB2'; ctx.fillRect(hl, ht, hr-hl, hb-ht);
+  ctx.fillStyle = '#56432F';
+  ctx.beginPath();
+  ctx.moveTo(hl-w*.04, ht); ctx.lineTo(w/2, ht-h*.17); ctx.lineTo(hr+w*.04, ht);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#7B9B5E'; ctx.fillRect(0, h*.82, w, h);
+  [[.12,.36,.08,.14],[.28,.36,.08,.14],[.64,.36,.08,.14],[.80,.36,.08,.14]].forEach(([lx,ly,lw,lh]) => {
+    ctx.fillStyle = 'rgba(140,185,200,.45)';
+    ctx.fillRect(hl+(hr-hl)*lx, ht+(hb-ht)*ly, (hr-hl)*lw, (hb-ht)*lh);
+    ctx.strokeStyle = '#8C7457'; ctx.lineWidth = 2;
+    ctx.strokeRect(hl+(hr-hl)*lx, ht+(hb-ht)*ly, (hr-hl)*lw, (hb-ht)*lh);
+  });
+  ctx.fillStyle = '#3A2A1A';
+  ctx.fillRect(w*.43, h*.52, w*.14, h*.30);
+}
+
+/* ================================================================
+   PHOTO UPLOAD
+   ================================================================ */
+async function handlePhotoUpload(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+
+  // 1. show local preview instantly
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => { bgImage = img; render(); setStatus('stPhoto','● Photo loaded',true); };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+
+  // 2. upload to server in background
+  try {
+    const fd = new FormData();
+    fd.append('photo', file);
+    const res = await fetch(`${API}/windows/${QS_WINDOW_ID}/photo`, {
+      method: 'POST',
+      headers: {'X-CSRFToken': CSRF_TOKEN},
+      body: fd,
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    console.log('[QS] Photo uploaded:', d.photo_url);
+  } catch(e) {
+    console.error('[QS] Photo upload failed:', e);
+  }
+}
+
+/* ================================================================
+   AUTO-SAVE VISUALISATION STATE
+   ================================================================ */
+let _visTimer = null;
+function scheduleVis() {
+  setStatus('stVisSave', '○ Saving…', false);
+  clearTimeout(_visTimer);
+  _visTimer = setTimeout(saveVisState, 800);
+  render();
+}
+
+async function saveVisState() {
+  try {
+    const opacity    = +document.getElementById('opacitySlider').value / 100;
+    const brightness = +document.getElementById('brightnessSlider').value / 100;
+    const res = await fetch(`${API}/windows/${QS_WINDOW_ID}/visualisation`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken':CSRF_TOKEN},
+      body: JSON.stringify({
+        corners: {
+          tl: [corners.tl.x, corners.tl.y],
+          tr: [corners.tr.x, corners.tr.y],
+          bl: [corners.bl.x, corners.bl.y],
+          br: [corners.br.x, corners.br.y],
+        },
+        opacity, brightness,
+        openings: _openingsPayload(),
+      }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    setStatus('stVisSave', '● Saved', true);
+  } catch(e) {
+    console.error('[QS] saveVisState failed:', e);
+    setStatus('stVisSave', '✕ Save failed', false);
+  }
+}
+
+/* ================================================================
+   BEFORE / AFTER
+   ================================================================ */
+let _showingBefore = false;
+function toggleBeforeAfter() {
+  _showingBefore = !_showingBefore;
+  showOverlay    = !_showingBefore;
+  document.getElementById('btnBefore').style.background =  _showingBefore ? 'var(--navy)' : 'rgba(255,255,255,.85)';
+  document.getElementById('btnBefore').style.color      =  _showingBefore ? 'white'       : 'var(--navy)';
+  document.getElementById('btnAfter').style.background  = !_showingBefore ? 'var(--navy)' : 'rgba(255,255,255,.85)';
+  document.getElementById('btnAfter').style.color       = !_showingBefore ? 'white'       : 'var(--navy)';
+  render();
+}
+
+/* ================================================================
+   SAVE / DOWNLOAD PNG — clean composite only, no handles/guides/UI.
+   Exported at the source photo's native resolution when available,
+   otherwise upscaled 2x from the on-screen canvas for print quality.
+   ================================================================ */
+function buildExportCanvas() {
+  const cw = houseCanvas.width, ch = houseCanvas.height;
+  let exportScale = 2;
+  if (bgImage) exportScale = Math.max(1, bgImage.width / cw);
+
+  const ex   = document.createElement('canvas');
+  ex.width   = Math.round(cw * exportScale);
+  ex.height  = Math.round(ch * exportScale);
+  const ectx = ex.getContext('2d');
+
+  drawBackground(ectx, ex.width, ex.height);
+
+  _paintAll(ectx, ex.width, ex.height,
+            p => ({ x: p.x * exportScale, y: p.y * exportScale }), true);
+  return ex;
+}
+
+function saveVisual() {
+  const ex = buildExportCanvas();
+  const link = document.createElement('a');
+  link.download = `window-${QS_WINDOW_ID}-visualisation.png`;
+  link.href = ex.toDataURL('image/png');
+  link.click();
+}
+
+/* ================================================================
+   SAVE VERSION — stores the clean composite as a new render version,
+   then asks the server to re-price any open quotation that uses this
+   unit. Prices are always computed server-side; nothing price-related
+   is sent from the browser.
+   ================================================================ */
+async function saveVersion() {
+  const btn = document.getElementById('btnSaveVersion');
+  if (btn) btn.disabled = true;
+  setStatus('stVisSave', '○ Saving version…', false);
+  try {
+    await saveVisState();
+
+    const ex = buildExportCanvas();
+    const res = await fetch(`${API}/windows/${QS_WINDOW_ID}/render`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken':CSRF_TOKEN},
+      body: JSON.stringify({ image: ex.toDataURL('image/png') }),
+    });
+    if (!res.ok) throw new Error('render HTTP ' + res.status);
+    const saved = await res.json();
+
+    const sync = await fetch(`${API}/windows/${QS_WINDOW_ID}/sync-quotations`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken':CSRF_TOKEN},
+      body: '{}',
+    });
+    if (!sync.ok) throw new Error('sync HTTP ' + sync.status);
+    const priced = await sync.json();
+
+    const quotes = priced.quotations || [];
+    const reset  = quotes.reduce((n, q) => n + (q.approvals_reset || 0), 0);
+    let msg = '● Version ' + saved.version + ' saved';
+    if (quotes.length) {
+      msg += ' · total ' + {{ currency_symbol|tojson }} + Number(quotes[0].grand_total).toLocaleString();
+      if (reset) msg += ' · ' + reset + ' approval(s) reset';
+    }
+    setStatus('stVisSave', msg, true);
+    if (saved.render_url) { RENDER_URLS[QS_WINDOW_ID] = saved.render_url; }
+  } catch (e) {
+    console.error('[QS] saveVersion failed:', e);
+    setStatus('stVisSave', '✕ Version not saved', false);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/* ================================================================
+   HELPERS
+   ================================================================ */
+function swapWindow(windowId) {
+  // Load a different window's render texture without leaving the page
+  const url = `/projects/{{ project.id }}/windows/${windowId}/visualise`;
+  window.location.href = url;
+}
+
+function setStatus(id, text, on) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('on', on);
+}
+</script>
+<script src="{{ url_for('static', filename='js/photoreal/layer-map.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/scene-lighting.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/interior-gen.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/shaders.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/renderer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photoreal/photoreal-core.js') }}"></script>
+<script>
+  window.addEventListener('load', function () {
+    if (typeof render === 'function') render();
+  });
+</script>
+{% endblock %}
