@@ -45,6 +45,7 @@
           {{ share_link_button('master_quote', quotation.id) }}{{ share_link_script() }}
           {% endif %}
           <a href="{{ url_for('proposal.download_master_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Master Quote (PDF)</a>
+          <a href="{{ url_for('quotation.download_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Download PDF</a>
           <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>
       </div>
