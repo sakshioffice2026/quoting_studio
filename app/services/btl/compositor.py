@@ -46,7 +46,38 @@ def _scene_stats(clean_bgr, quad_mask):
     detail = gray - cv2.GaussianBlur(gray, (0, 0), 1.5)
     noise_std = float(detail[ring].std()) / 255.0
     lap_var = float(cv2.Laplacian(gray, cv2.CV_32F)[ring].var())
-    return mean_bgr, noise_std, lap_var
+    return mean_bgr, noise_std, lap_var, ring
+
+
+def _estimate_light(clean_bgr, ring, bx0, by0, bw, bh):
+    """Estimate light direction from the brightness gradient of the wall around the window.
+
+    Returns (lx, ly): >0 means brighter towards right / bottom.
+    """
+    prior_x, prior_y = -0.06, -0.10
+    ys_i, xs_i = np.nonzero(ring)
+    if xs_i.size < 400:
+        return prior_x, prior_y
+
+    if xs_i.size > 20000:
+        idx = np.random.default_rng(3).choice(xs_i.size, 20000, replace=False)
+        xs_i, ys_i = xs_i[idx], ys_i[idx]
+
+    gray = cv2.cvtColor(clean_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    lum = gray[ys_i, xs_i]
+    mean = max(float(lum.mean()), 1.0)
+    nx = (xs_i.astype(np.float32) - bx0) / bw - 0.5
+    ny = (ys_i.astype(np.float32) - by0) / bh - 0.5
+
+    def slope(n):
+        var = float(n.var())
+        if var < 1e-6:
+            return 0.0
+        return float(((n - n.mean()) * (lum - mean)).mean()) / var / mean
+
+    lx = float(np.clip(0.5 * prior_x + 0.5 * slope(nx), -0.25, 0.25))
+    ly = float(np.clip(0.5 * prior_y + 0.5 * slope(ny), -0.25, 0.25))
+    return lx, ly
 
 
 def _interior_colour(original_bgr, quad):
@@ -66,6 +97,38 @@ def _interior_colour(original_bgr, quad):
 def _sky_colour(clean_bgr):
     rows = max(1, int(0.12 * clean_bgr.shape[0]))
     return (clean_bgr[:rows].reshape(-1, 3).astype(np.float32).mean(axis=0) / 255.0)
+
+
+def _scene_reflection(clean_bgr, quad):
+    """Soft mirrored copy of the surroundings, laid over the window bounding box (float 0..1 BGR)."""
+    h, w = clean_bgr.shape[:2]
+    xs, ys = quad[:, 0], quad[:, 1]
+    bw = float(xs.max() - xs.min())
+    bh = float(ys.max() - ys.min())
+
+    x0 = int(max(0, xs.min() - bw))
+    x1 = int(min(w, xs.max() + bw))
+    y0 = int(max(0, ys.min() - 0.5 * bh))
+    y1 = int(min(h, ys.max() + 0.5 * bh))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+
+    bx0, by0 = int(xs.min()), int(ys.min())
+    bx1, by1 = int(xs.max()) + 1, int(ys.max()) + 1
+    bw_i, bh_i = max(bx1 - bx0, 2), max(by1 - by0, 2)
+
+    crop = cv2.flip(clean_bgr[y0:y1, x0:x1], 1)
+    refl = cv2.resize(crop, (bw_i, bh_i), interpolation=cv2.INTER_AREA)
+    refl = cv2.GaussianBlur(refl, (0, 0), max(2.0, 0.04 * max(bw_i, bh_i)))
+
+    dx0, dy0 = max(bx0, 0), max(by0, 0)
+    dx1, dy1 = min(bx1, w), min(by1, h)
+    if dx1 <= dx0 or dy1 <= dy0:
+        return None
+
+    full = np.zeros((h, w, 3), np.float32)
+    full[dy0:dy1, dx0:dx1] = refl[dy0 - by0:dy1 - by0, dx0 - bx0:dx1 - bx0].astype(np.float32) / 255.0
+    return full
 
 
 def _is_interior(clean_bgr, options):
@@ -142,12 +205,12 @@ def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
 
     quad_mask = np.zeros((h, w), np.uint8)
     cv2.fillConvexPoly(quad_mask, np.round(quad).astype(np.int32), 255)
-    mean_bgr, noise_std, lap_var = _scene_stats(clean_bgr, quad_mask)
+    mean_bgr, noise_std, lap_var, ring = _scene_stats(clean_bgr, quad_mask)
 
     if match_colour:
         luminance = float(mean_bgr.mean())
-        gain = float(np.clip(luminance / 140.0, 0.75, 1.15))
-        tint = 1.0 + 0.08 * (mean_bgr / max(luminance, 1.0) - 1.0)
+        gain = float(np.clip(luminance / 140.0, 0.72, 1.18))
+        tint = 1.0 + 0.12 * (mean_bgr / max(luminance, 1.0) - 1.0)
         rgb = np.clip(rgb * gain * tint[None, None, :], 0.0, 1.0)
 
     xs_q, ys_q = quad[:, 0], quad[:, 1]
@@ -158,9 +221,12 @@ def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
     xs = (np.arange(w, dtype=np.float32) - bx0) / bw
     ys = (np.arange(h, dtype=np.float32) - by0) / bh
 
-    # frame lighting: sun from the top-left, applied to the frame only
+    lx, ly = _estimate_light(clean_bgr, ring, bx0, by0, bw, bh)
+    dir_x = 1.0 if lx <= 0.0 else -1.0
+
+    # frame lighting follows the brightness gradient of the surrounding wall
     frame_a = np.clip(alpha - glass, 0.0, 1.0)
-    lightmap = 1.0 + 0.10 * (0.5 - ys)[:, None] + 0.06 * (0.5 - xs)[None, :]
+    lightmap = 1.0 + ly * (ys - 0.5)[:, None] + lx * (xs - 0.5)[None, :]
     lightmap = np.clip(lightmap, 0.8, 1.2).astype(np.float32)
     rgb = rgb * (1.0 + (lightmap[..., None] - 1.0) * frame_a[..., None])
     rgb = np.clip(rgb, 0.0, 1.0)
@@ -171,10 +237,10 @@ def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
     glass = cv2.GaussianBlur(glass, (0, 0), sigma)
     glass = np.minimum(glass, alpha)
 
-    # bevel: lit rim on the top-left edges, shaded rim on the bottom-right
+    # bevel: lit rim on the light-facing edges, shaded rim on the opposite edges
     k = max(1, int(0.006 * max(bw, bh)))
-    hi = np.clip(alpha - _shift(alpha, k, k), 0.0, 1.0)
-    lo = np.clip(alpha - _shift(alpha, -k, -k), 0.0, 1.0)
+    hi = np.clip(alpha - _shift(alpha, k * dir_x, k), 0.0, 1.0)
+    lo = np.clip(alpha - _shift(alpha, -k * dir_x, -k), 0.0, 1.0)
     rgb = rgb + 0.16 * hi[..., None] * (1.0 - rgb)
     rgb = rgb * (1.0 - 0.24 * lo[..., None])
     rgb = np.clip(rgb, 0.0, 1.0)
@@ -183,11 +249,16 @@ def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
 
     off = max(2, int(0.012 * bw))
 
-    # cast shadow on the wall (bottom-right) + ambient occlusion all round
-    cast = cv2.GaussianBlur(_shift(alpha, off, off), (0, 0), off * 1.2) * (1.0 - alpha)
+    # cast shadow on the wall (away from the light) + ambient occlusion all round
+    cast = cv2.GaussianBlur(_shift(alpha, off * dir_x, off), (0, 0), off * 1.2) * (1.0 - alpha)
     base *= (1.0 - 0.38 * shadow_k * cast)[..., None]
     ao = cv2.GaussianBlur(alpha, (0, 0), off * 3.0) * (1.0 - alpha)
     base *= (1.0 - 0.22 * shadow_k * ao)[..., None]
+
+    # contact line where frame meets wall
+    edge = np.clip(alpha - cv2.erode(alpha, _ellipse(3)), 0.0, 1.0)
+    edge_out = cv2.GaussianBlur(edge, (0, 0), 1.2) * (1.0 - alpha)
+    base *= (1.0 - 0.18 * shadow_k * edge_out)[..., None]
 
     if interior_mode:
         # transparent glass: keep the view that was behind the old window/door
@@ -196,7 +267,7 @@ def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
         glass_weight = 0.95
         sheen_k = 0.5
     else:
-        # glass: dark room colour with a sky reflection that fades towards the bottom
+        # glass: dark room colour, sky tint fading downward, mirrored scene reflection
         interior = (_interior_colour(original_bgr, quad) / 255.0).astype(np.float32)
         sky = _sky_colour(clean_bgr)
         row_factor = np.ones(h, np.float32)
@@ -208,16 +279,28 @@ def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
             mix_amt[y_start:y_end] = (0.18 * reflect_k) * np.linspace(1.0, 0.0, n, dtype=np.float32)
         interior_img = row_factor[:, None, None] * interior[None, None, :]
         glass_img = interior_img * (1.0 - mix_amt[:, None, None]) + sky[None, None, :] * mix_amt[:, None, None]
-        glass_img = np.broadcast_to(glass_img, (h, w, 3))
+        glass_img = np.array(np.broadcast_to(glass_img, (h, w, 3)), dtype=np.float32)
+
+        refl = _scene_reflection(clean_bgr, quad)
+        if refl is not None:
+            fres = np.clip(0.55 + 0.45 * (1.0 - np.clip(ys, 0.0, 1.0)), 0.0, 1.0)[:, None]
+            refl_amt = np.clip(0.16 * reflect_k * fres, 0.0, 0.5)
+            glass_img = glass_img * (1.0 - refl_amt[..., None]) + refl * refl_amt[..., None]
+
         glass_weight = 0.90
         sheen_k = 1.0
+
+    # glass darkens next to the frame (depth between pane and frame)
+    frame_inner = np.clip(alpha - glass, 0.0, 1.0)
+    frame_soft = cv2.GaussianBlur(frame_inner, (0, 0), max(2.0, 0.02 * max(bw, bh)))
+    glass_img = glass_img * (1.0 - 0.32 * shadow_k * (frame_soft * glass))[..., None]
 
     weight = (glass * glass_weight)[..., None]
     base = base * (1.0 - weight) + glass_img * weight
 
-    # reveal depth: shadow cast inside the opening from the top and left
+    # reveal depth: shadow cast inside the opening from the light side
     d = off * 2.0
-    reveal = np.clip(glass - _shift(glass, d, d), 0.0, 1.0)
+    reveal = np.clip(glass - _shift(glass, d * dir_x, d), 0.0, 1.0)
     reveal = cv2.GaussianBlur(reveal, (0, 0), off)
     base *= (1.0 - 0.6 * shadow_k * reveal)[..., None]
 

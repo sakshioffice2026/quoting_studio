@@ -11,18 +11,21 @@ from PIL import Image
 INPAINT_MODEL = os.environ.get("INPAINT_MODEL", "stable-diffusion-v1-5/stable-diffusion-inpainting")
 CONTROLNET_MODEL = os.environ.get("CONTROLNET_MODEL", "lllyasviel/control_v11p_sd15_canny")
 
-MAX_SIDE = 768
-CANNY_LOW = 100
-CANNY_HIGH = 200
-CONTROL_SCALE = 1.0
+MAX_SIDE = int(os.environ.get("MAX_SIDE", "768"))
+CONTROL_SCALE = float(os.environ.get("CONTROL_SCALE", "1.0"))
+CONTROL_GUIDANCE_END = float(os.environ.get("CONTROL_GUIDANCE_END", "0.95"))
+GUIDANCE = float(os.environ.get("GUIDANCE", "5.0"))
+COLOUR_MATCH = float(os.environ.get("COLOUR_MATCH", "0.7"))
 
 PROMPT = (
-    "photo of a house exterior with a new modern window, realistic glass, "
-    "natural daylight, sharp frame edges, high detail, photorealistic"
+    "RAW photo of a house with a newly installed window, frame sitting recessed in the wall opening, "
+    "soft shadow inside the reveal, clean sealant line, glass with natural sky reflection, "
+    "same lighting and colour as the surrounding wall, sharp focus, photorealistic, 8k, film grain"
 )
 NEGATIVE_PROMPT = (
-    "blurry, distorted frame, warped lines, extra windows, text, watermark, "
-    "cartoon, painting, low quality, deformed"
+    "cartoon, illustration, 3d render, cgi, painting, flat colours, sticker, pasted, cutout, floating, "
+    "blurry, distorted frame, warped lines, extra windows, extra bars, changed window shape, "
+    "oversaturated, glow, text, watermark, low quality, deformed"
 )
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -61,9 +64,35 @@ def _fit_size(w, h):
 
 def _canny(image_rgb):
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
-    edges = cv2.Canny(gray, CANNY_LOW, CANNY_HIGH)
+    gray = cv2.GaussianBlur(gray, (0, 0), 1.2)
+    median = float(np.median(gray))
+    low = int(max(20, 0.66 * median))
+    high = int(min(255, max(low + 40, 1.33 * median)))
+    edges = cv2.Canny(gray, low, high)
+    edges = cv2.dilate(edges, np.ones((2, 2), np.uint8))
     edges = np.stack([edges] * 3, axis=-1)
     return Image.fromarray(edges)
+
+
+def _match_colour(result_rgb, original_rgb, region_mask, amount):
+    sel = region_mask > 127
+    if int(sel.sum()) < 64 or amount <= 0.0:
+        return result_rgb
+
+    res = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    org = cv2.cvtColor(original_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+
+    for c in range(3):
+        r_mean = float(res[..., c][sel].mean())
+        r_std = float(res[..., c][sel].std()) + 1e-6
+        o_mean = float(org[..., c][sel].mean())
+        o_std = float(org[..., c][sel].std()) + 1e-6
+        ratio = float(np.clip(o_std / r_std, 0.7, 1.4))
+        matched = (res[..., c] - r_mean) * ratio + o_mean
+        res[..., c] = np.where(sel, res[..., c] * (1.0 - amount) + matched * amount, res[..., c])
+
+    res = np.clip(res, 0, 255).astype(np.uint8)
+    return cv2.cvtColor(res, cv2.COLOR_LAB2RGB)
 
 
 def enhance(image_path, mask_path, strength, steps, seed):
@@ -96,14 +125,20 @@ def enhance(image_path, mask_path, strength, steps, seed):
         control_image=control,
         strength=strength,
         num_inference_steps=steps,
-        guidance_scale=6.5,
+        guidance_scale=GUIDANCE,
         controlnet_conditioning_scale=CONTROL_SCALE,
+        control_guidance_end=CONTROL_GUIDANCE_END,
         generator=generator,
     ).images[0]
 
-    result = result.resize((ow, oh), Image.LANCZOS)
+    result_np = np.array(result.convert("RGB"))
+    work_np = np.array(work)
+    result_np = _match_colour(result_np, work_np, np.array(mask), COLOUR_MATCH)
+    result = Image.fromarray(result_np).resize((ow, oh), Image.LANCZOS)
 
-    soft_mask = mask_img.resize((ow, oh), Image.BILINEAR)
+    soft = np.array(mask_img.resize((ow, oh), Image.BILINEAR), dtype=np.float32)
+    soft = cv2.GaussianBlur(soft, (0, 0), max(1.5, 0.004 * max(ow, oh)))
+    soft_mask = Image.fromarray(np.clip(soft, 0, 255).astype(np.uint8))
     out = Image.composite(result, original, soft_mask)
 
     out_path = os.path.join(tempfile.mkdtemp(), "enhanced.png")

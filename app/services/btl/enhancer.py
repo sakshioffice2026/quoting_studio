@@ -106,7 +106,7 @@ def _build_mask(h, w, quad, span, mode):
     quad_mask = np.zeros((h, w), np.uint8)
     cv2.fillConvexPoly(quad_mask, np.round(quad).astype(np.int32), 255)
 
-    grow = _ellipse(0.06 * span)
+    grow = _ellipse(0.08 * span)
     outer = cv2.dilate(quad_mask, grow)
 
     if mode == 'full':
@@ -116,6 +116,20 @@ def _build_mask(h, w, quad, span, mode):
     inner = cv2.erode(quad_mask, shrink)
     band = cv2.subtract(outer, inner)
     return band
+
+
+def _detail(img_bgr):
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    return gray - cv2.GaussianBlur(gray, (0, 0), 1.5)
+
+
+def _grain_gap(original_bgr, new_bgr, sel):
+    """Extra noise std needed so the enhanced area has the same grain as the photo."""
+    if int(sel.sum()) < 64:
+        return 0.0
+    std_o = min(float(_detail(original_bgr)[sel].std()), 8.0)
+    std_n = float(_detail(new_bgr)[sel].std())
+    return float(np.sqrt(max(0.0, std_o ** 2 - std_n ** 2)))
 
 
 def enhance(result_bgr, quad, strength=0.35, steps=20, seed=7, timeout=None):
@@ -184,6 +198,15 @@ def enhance(result_bgr, quad, strength=0.35, steps=20, seed=7, timeout=None):
 
     if enhanced.shape[:2] != (ch, cw):
         enhanced = cv2.resize(enhanced, (cw, ch), interpolation=cv2.INTER_AREA)
+
+    # restore the fine grain that the diffusion output loses
+    sel = cmask > 127
+    gap = _grain_gap(crop, enhanced, sel)
+    if gap > 0.0:
+        rng = np.random.default_rng(13)
+        noise = rng.normal(0.0, gap, size=(ch, cw)).astype(np.float32)
+        noise = cv2.GaussianBlur(noise, (0, 0), 0.6)
+        enhanced = np.clip(enhanced.astype(np.float32) + noise[..., None], 0, 255).astype(np.uint8)
 
     k = max(5, int(0.02 * max(cw, ch))) | 1
     soft = cv2.GaussianBlur(cmask.astype(np.float32) / 255.0, (0, 0), k / 2.0)
