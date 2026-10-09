@@ -13,7 +13,11 @@ from ...models.quotation import Quotation
 from ...models.visual_scene import (
     GLASS_TINTS, VisualScene, VisualSceneOpening,
 )
-from .design_render_service import _hex, _num, _opening_marks, _shape_path
+from .design_render_service import (
+    _finish_spec, _frame_hex, _hex, _num, _opening_marks, _shape_path,
+    _svg_glass_overlay, _svg_sheen_gradient, _svg_textured_filter,
+    _svg_wood_filter,
+)
 from .pricing import calculate_price
 
 ALLOWED_PHOTO_EXT = {'jpg', 'jpeg', 'png', 'webp'}
@@ -226,6 +230,10 @@ def apply_options(design: dict, options: dict) -> dict:
     if isinstance(colour, str) and _HEX_RE.match(colour):
         frame['color'] = colour.upper()
         frame['sashColor'] = colour.upper()
+        # a woodgrain foil would hide the chosen colour; painted / textured /
+        # metallic finishes keep the colour and stay as they are
+        if str(frame.get('finish') or '').strip().lower() == 'wood':
+            frame['finish'] = ''
 
     bars = options.get('bars')
     if isinstance(bars, dict):
@@ -249,8 +257,9 @@ def render_overlay_svg(design: dict, width_mm: float, height_mm: float,
                        glass_alpha: float = GLASS_ALPHA_DEFAULT) -> str:
     frame = design.get('frame') or {}
     shape = str(design.get('shape') or 'rectangle').lower()
-    colour = _hex(frame.get('color'), '#2B2F33')
-    sash = _hex(frame.get('sashColor'), colour)
+    finish = _finish_spec(frame)
+    colour = _frame_hex(frame)
+    sash = colour if (finish and finish['kind'] == 'wood') else _hex(frame.get('sashColor'), colour)
     bar_mm = _num(frame.get('thickness'), 58.0)
     rise_mm = _num(design.get('archRise'), 400.0)
     tint = GLASS_TINTS.get(glass_tint, GLASS_TINTS['clear'])
@@ -262,17 +271,60 @@ def render_overlay_svg(design: dict, width_mm: float, height_mm: float,
     rise = rise_mm * scale
 
     parts = []
+    extra_defs = []
     clip_id = f'ov-{uid}'
 
     if shape == 'circular':
         cx, cy = W / 2, H / 2
-        parts.append(f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="{W / 2:.1f}" '
-                     f'ry="{H / 2:.1f}" fill="{colour}"/>')
         inner = (f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" '
                  f'rx="{max(W / 2 - bar, 1):.1f}" ry="{max(H / 2 - bar, 1):.1f}"/>')
     else:
-        parts.append(f'<path d="{_shape_path(shape, 0, 0, W, H, rise)}" fill="{colour}"/>')
         inner = (f'<path d="{_shape_path(shape, bar, bar, W - 2 * bar, H - 2 * bar, max(rise - bar, 4))}"/>')
+
+    def shape_el(fill, extra=''):
+        if shape == 'circular':
+            return (f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="{W / 2:.1f}" '
+                    f'ry="{H / 2:.1f}" fill="{fill}" {extra}/>')
+        return f'<path d="{_shape_path(shape, 0, 0, W, H, rise)}" fill="{fill}" {extra}/>'
+
+    if finish is None:
+        parts.append(shape_el(colour))
+    elif finish['kind'] == 'wood' and shape in ('rectangle', 'rect', ''):
+        b = bar
+        fh, fv = f'wh-{uid}', f'wv-{uid}'
+        sh, sv = f'sh-{uid}', f'sv-{uid}'
+        extra_defs.append(_svg_wood_filter(fh, finish['wood'], False, scale))
+        extra_defs.append(_svg_wood_filter(fv, finish['wood'], True, scale))
+        extra_defs.append(_svg_sheen_gradient(sh, 'h', finish['gloss'], False))
+        extra_defs.append(_svg_sheen_gradient(sv, 'v', finish['gloss'], False))
+        bars_pts = (
+            (f'0,0 {W:.1f},0 {W - b:.1f},{b:.1f} {b:.1f},{b:.1f}', fh, sh),
+            (f'0,{H:.1f} {W:.1f},{H:.1f} {W - b:.1f},{H - b:.1f} {b:.1f},{H - b:.1f}', fh, sh),
+            (f'0,0 {b:.1f},{b:.1f} {b:.1f},{H - b:.1f} 0,{H:.1f}', fv, sv),
+            (f'{W:.1f},0 {W - b:.1f},{b:.1f} {W - b:.1f},{H - b:.1f} {W:.1f},{H:.1f}', fv, sv),
+        )
+        for pts, filt, sheen in bars_pts:
+            parts.append(f'<polygon points="{pts}" fill="#000" filter="url(#{filt})"/>')
+            parts.append(f'<polygon points="{pts}" fill="url(#{sheen})"/>')
+        for x1, y1, x2, y2 in (
+            (0, 0, b, b), (W, 0, W - b, b), (0, H, b, H - b), (W, H, W - b, H - b),
+        ):
+            parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                         f'stroke="#000000" stroke-opacity="0.38" stroke-width="1.6"/>')
+    else:
+        if finish['kind'] == 'wood':
+            fid = f'wh-{uid}'
+            extra_defs.append(_svg_wood_filter(fid, finish['wood'], False, scale))
+            parts.append(shape_el('#000', f'filter="url(#{fid})"'))
+        elif finish['kind'] == 'textured':
+            fid = f'tx-{uid}'
+            extra_defs.append(_svg_textured_filter(fid))
+            parts.append(shape_el(colour, f'filter="url(#{fid})"'))
+        else:
+            parts.append(shape_el(colour))
+        gid = f'sd-{uid}'
+        extra_defs.append(_svg_sheen_gradient(gid, 'd', finish['gloss'], finish['kind'] == 'metallic'))
+        parts.append(shape_el(f'url(#{gid})'))
 
     ix, iy = bar, bar
     iw, ih = W - 2 * bar, H - 2 * bar
@@ -284,7 +336,7 @@ def render_overlay_svg(design: dict, width_mm: float, height_mm: float,
     if not panes:
         panes = [{'x': 0, 'y': 0, 'w': 1, 'h': 1, 'opening': 'Fixed'}]
 
-    for pane in panes:
+    for pane_index, pane in enumerate(panes):
         if not isinstance(pane, dict):
             continue
         try:
@@ -307,6 +359,8 @@ def render_overlay_svg(design: dict, width_mm: float, height_mm: float,
             parts.append(
                 f'<polygon points="{px:.1f},{py:.1f} {px + pw * 0.55:.1f},{py:.1f} '
                 f'{px:.1f},{py + ph * 0.55:.1f}" fill="#FFFFFF" fill-opacity="0.10"/>')
+            parts.append(_svg_glass_overlay(uid, pane_index, pane.get('texture'),
+                                            px, py, pw, ph, extra_defs))
         else:
             parts.append(
                 f'<rect x="{px:.1f}" y="{py:.1f}" width="{pw:.1f}" height="{ph:.1f}" '
@@ -338,9 +392,10 @@ def render_overlay_svg(design: dict, width_mm: float, height_mm: float,
 
     parts.append('</g>')
 
+    defs_markup = f'<defs>{"".join(extra_defs)}</defs>' if extra_defs else ''
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W:.0f} {H:.0f}" '
             f'width="{W:.0f}" height="{H:.0f}" preserveAspectRatio="none">'
-            + ''.join(parts) + '</svg>')
+            + defs_markup + ''.join(parts) + '</svg>')
 
 
 # ------------------------------------------------------------------ #

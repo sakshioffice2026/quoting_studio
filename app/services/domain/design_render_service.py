@@ -43,6 +43,31 @@ DOOR_LABELS = {
     "fullset": "Full set (door + side lights + fanlight)",
 }
 
+# key -> (label, kind, gloss 0..1)
+FINISHES = {
+    "painted_smooth": ("Smooth painted", "paint", 0.35),
+    "painted_satin": ("Satin painted", "paint", 0.18),
+    "painted_matt": ("Matt painted", "paint", 0.05),
+    "textured": ("Textured RAL", "textured", 0.04),
+    "wood": ("Woodgrain foil", "wood", 0.10),
+    "metallic": ("Metallic / anodised", "metallic", 0.60),
+}
+
+# key -> (label, base, dark, light, along, across, pore, rings, seed)
+WOODS = {
+    "golden_oak": ("Golden Oak", "#B07A3B", "#7E4F22", "#D29C57", 0.0035, 0.085, 0.9, 0.55, 3),
+    "natural_oak": ("Natural Oak", "#C79A5E", "#946A35", "#E2BC82", 0.0035, 0.085, 0.8, 0.50, 5),
+    "light_oak": ("Light Oak", "#D8B787", "#B08A55", "#EBD3AA", 0.0030, 0.080, 0.7, 0.45, 8),
+    "dark_oak": ("Dark Oak", "#6B4423", "#3F2512", "#8D6238", 0.0035, 0.085, 0.9, 0.60, 13),
+    "walnut": ("Walnut", "#5A3A24", "#321D10", "#7A5337", 0.0030, 0.070, 0.8, 0.65, 21),
+    "rosewood": ("Rosewood", "#6E2F25", "#3E160F", "#924638", 0.0030, 0.060, 0.7, 0.70, 34),
+    "mahogany": ("Mahogany", "#5B2A1F", "#331510", "#7C3D2C", 0.0030, 0.065, 0.7, 0.60, 55),
+    "teak": ("Teak", "#A06A3A", "#6F4520", "#C38E58", 0.0035, 0.075, 0.8, 0.55, 89),
+    "cherry": ("Cherry", "#8A4A32", "#5C2D1B", "#AE6A4A", 0.0030, 0.070, 0.6, 0.50, 144),
+    "black_ash": ("Black Ash", "#2A2522", "#120F0D", "#443C37", 0.0035, 0.090, 0.9, 0.45, 233),
+    "grey_oak": ("Grey Oak", "#8A8379", "#5C564E", "#B0A89B", 0.0035, 0.085, 0.8, 0.50, 377),
+}
+
 
 # ------------------------------------------------------------------ #
 #  Helpers
@@ -76,6 +101,165 @@ def _parse(raw) -> dict:
         return value if isinstance(value, dict) else {}
     except (TypeError, ValueError):
         return {}
+
+
+def _finish_spec(frame: dict):
+    key = str(frame.get("finish") or "").strip().lower()
+    if key not in FINISHES:
+        return None
+    label, kind, gloss = FINISHES[key]
+    wood_key = str(frame.get("wood") or "natural_oak").strip().lower()
+    if wood_key not in WOODS:
+        wood_key = "natural_oak"
+    return {"key": key, "label": label, "kind": kind, "gloss": gloss,
+            "wood_key": wood_key, "wood": WOODS[wood_key]}
+
+
+def _frame_hex(frame: dict) -> str:
+    spec = _finish_spec(frame)
+    if spec and spec["kind"] == "wood":
+        return spec["wood"][1]
+    return _hex(frame.get("color"), "#2B2F33")
+
+
+def _mix_hex(a: str, b: str, t: float) -> str:
+    ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb))
+
+
+def _clamp_freq(value: float) -> float:
+    return min(0.45, max(0.0005, value))
+
+
+# ------------------------------------------------------------------ #
+#  SVG finish defs
+# ------------------------------------------------------------------ #
+
+def _svg_wood_filter(fid: str, wood: tuple, vertical: bool, scale: float) -> str:
+    _label, base, dark, light, along, across, pore, rings, seed = wood
+    scale = max(scale, 0.02)
+    fa, fc = along / scale, across / scale
+
+    def bf(a: float, c: float) -> str:
+        a, c = _clamp_freq(a), _clamp_freq(c)
+        return f"{c:.4f} {a:.4f}" if vertical else f"{a:.4f} {c:.4f}"
+
+    stops = [dark, _mix_hex(dark, base, 0.55), base, light]
+    table = [
+        " ".join(f"{int(s[i:i + 2], 16) / 255:.3f}" for s in stops)
+        for i in (1, 3, 5)
+    ]
+    return (
+        f'<filter id="{fid}" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">'
+        f'<feTurbulence type="fractalNoise" baseFrequency="{bf(fa, fc)}" numOctaves="3" seed="{seed}" result="n1"/>'
+        f'<feColorMatrix in="n1" type="matrix" values="1 0 0 0 0  1 0 0 0 0  1 0 0 0 0  0 0 0 0 1" result="g1"/>'
+        f'<feComponentTransfer in="g1" result="g1c">'
+        f'<feFuncR type="linear" slope="2.4" intercept="-0.7"/>'
+        f'<feFuncG type="linear" slope="2.4" intercept="-0.7"/>'
+        f'<feFuncB type="linear" slope="2.4" intercept="-0.7"/></feComponentTransfer>'
+        f'<feComponentTransfer in="g1c" result="tint">'
+        f'<feFuncR type="table" tableValues="{table[0]}"/>'
+        f'<feFuncG type="table" tableValues="{table[1]}"/>'
+        f'<feFuncB type="table" tableValues="{table[2]}"/></feComponentTransfer>'
+        f'<feTurbulence type="fractalNoise" baseFrequency="{bf(fa * 3, fc * 4)}" numOctaves="2" seed="{seed + 7}" result="n2"/>'
+        f'<feColorMatrix in="n2" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -{1.6 * pore:.3f} 0 0 0 {0.8 * pore:.3f}" result="pores"/>'
+        f'<feTurbulence type="fractalNoise" baseFrequency="{bf(fa * 0.35, fc * 0.22)}" numOctaves="2" seed="{seed + 19}" result="n3"/>'
+        f'<feColorMatrix in="n3" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -{1.4 * rings:.3f} 0 0 0 {0.7 * rings:.3f}" result="rings"/>'
+        f'<feMerge result="wood"><feMergeNode in="tint"/><feMergeNode in="pores"/><feMergeNode in="rings"/></feMerge>'
+        f'<feComposite in="wood" in2="SourceAlpha" operator="in"/>'
+        f'</filter>'
+    )
+
+
+def _svg_textured_filter(fid: str) -> str:
+    return (
+        f'<filter id="{fid}" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">'
+        f'<feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="2" seed="5" result="n"/>'
+        f'<feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.5 0 0 0 -0.6" result="dark"/>'
+        f'<feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  -1.3 0 0 0 0.55" result="light"/>'
+        f'<feMerge result="all"><feMergeNode in="SourceGraphic"/><feMergeNode in="dark"/><feMergeNode in="light"/></feMerge>'
+        f'<feComposite in="all" in2="SourceAlpha" operator="in"/>'
+        f'</filter>'
+    )
+
+
+def _svg_sheen_gradient(gid: str, orient: str, gloss: float, metallic: bool) -> str:
+    if orient == "v":
+        coords = 'x1="0" y1="0" x2="1" y2="0"'
+    elif orient == "h":
+        coords = 'x1="0" y1="0" x2="0" y2="1"'
+    else:
+        coords = 'x1="0" y1="0" x2="0.6" y2="1"'
+
+    spec = min(0.8, gloss * 1.1)
+    shade = 0.12 + 0.10 * gloss
+
+    def stop(offset: str, colour: str, opacity: float) -> str:
+        return f'<stop offset="{offset}" stop-color="{colour}" stop-opacity="{opacity:.3f}"/>'
+
+    if metallic:
+        stops = [
+            stop("0", "#FFFFFF", 0.45), stop("0.20", "#FFFFFF", 0.10),
+            stop("0.38", "#000000", 0.18), stop("0.55", "#FFFFFF", 0.50),
+            stop("0.78", "#000000", 0.12), stop("1", "#000000", 0.34),
+        ]
+    else:
+        stops = [
+            stop("0", "#FFFFFF", spec * 0.55), stop("0.28", "#FFFFFF", spec),
+            stop("0.44", "#FFFFFF", spec * 0.10), stop("0.75", "#000000", shade * 0.30),
+            stop("1", "#000000", shade),
+        ]
+    return f'<linearGradient id="{gid}" {coords}>{"".join(stops)}</linearGradient>'
+
+
+def _svg_glass_overlay(uid: str, idx: int, texture: str, x: float, y: float, w: float, h: float,
+                       defs: list[str]) -> str:
+    key = re.sub(r"[\s\-]+", "_", str(texture or "").strip().lower())
+    if not key or key == "clear" or w <= 0 or h <= 0:
+        return ""
+
+    box = f'x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" pointer-events="none"'
+
+    def noise(tag: str, freq: str, octaves: int, seed: int, a: str, b: str, opacity: float) -> str:
+        fid = f"gn-{uid}-{idx}-{tag}"
+        defs.append(
+            f'<filter id="{fid}" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">'
+            f'<feTurbulence type="fractalNoise" baseFrequency="{freq}" numOctaves="{octaves}" seed="{seed}" result="n"/>'
+            f'<feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  {a} 0 0 0 {b}" result="w"/>'
+            f'<feComposite in="w" in2="SourceAlpha" operator="in"/></filter>'
+        )
+        return f'<rect {box} fill="#FFFFFF" opacity="{opacity}" filter="url(#{fid})"/>'
+
+    if key == "satin":
+        return noise("a", "0.55", 2, 4, "0.5", "0.25", 0.50)
+    if key == "frosted":
+        return noise("a", "0.90", 2, 11, "0.9", "0.10", 0.62)
+    if key == "stippolyte":
+        return noise("a", "0.55", 2, 4, "0.5", "0.25", 0.40) + noise("b", "0.16", 1, 9, "-9", "4.3", 0.55)
+    if key == "cotswold":
+        return noise("a", "0.55", 2, 4, "0.5", "0.25", 0.30) + noise("b", "0.020 0.050", 2, 6, "-3.2", "1.9", 0.35)
+    if key == "reeded":
+        pid = f"gp-{uid}-{idx}-r"
+        defs.append(
+            f'<linearGradient id="{pid}g" x1="0" y1="0" x2="1" y2="0">'
+            f'<stop offset="0" stop-color="#FFFFFF" stop-opacity="0.38"/>'
+            f'<stop offset="0.5" stop-color="#000000" stop-opacity="0.10"/>'
+            f'<stop offset="1" stop-color="#FFFFFF" stop-opacity="0.38"/></linearGradient>'
+            f'<pattern id="{pid}" width="6" height="20" patternUnits="userSpaceOnUse">'
+            f'<rect x="0" y="0" width="6" height="20" fill="url(#{pid}g)"/></pattern>'
+        )
+        return f'<rect {box} fill="url(#{pid})"/>'
+    if key == "charcoal_sticks":
+        pid = f"gp-{uid}-{idx}-c"
+        defs.append(
+            f'<pattern id="{pid}" width="14" height="40" patternUnits="userSpaceOnUse">'
+            f'<rect x="3" y="2" width="1.2" height="22" fill="#1F2428" opacity="0.75"/>'
+            f'<rect x="8" y="20" width="1.2" height="14" fill="#1F2428" opacity="0.75"/>'
+            f'<rect x="11" y="4" width="1.2" height="20" fill="#1F2428" opacity="0.75"/></pattern>'
+        )
+        return noise("a", "0.55", 2, 4, "0.5", "0.25", 0.30) + f'<rect {box} fill="url(#{pid})"/>'
+    return noise("a", "0.55", 2, 4, "0.5", "0.25", 0.35)
 
 
 # ------------------------------------------------------------------ #
@@ -140,8 +324,9 @@ def render_svg(design: dict, width_mm: float, height_mm: float, uid: str) -> str
     """Returns an inline <svg> string for one window/door."""
     frame = design.get("frame") or {}
     shape = str(design.get("shape") or "rectangle").lower()
-    colour = _hex(frame.get("color"), "#2B2F33")
-    sash_colour = _hex(frame.get("sashColor"), colour)
+    finish = _finish_spec(frame)
+    colour = _frame_hex(frame)
+    sash_colour = colour if (finish and finish["kind"] == "wood") else _hex(frame.get("sashColor"), colour)
     bar_mm = _num(frame.get("thickness"), 58.0)
     rise_mm = _num(design.get("archRise"), 400.0)
     has_cill = bool(frame.get("cill"))
@@ -158,24 +343,71 @@ def render_svg(design: dict, width_mm: float, height_mm: float, uid: str) -> str
     vb_h = H + margin_t + margin_b + (10 if has_cill else 0)
 
     parts: list[str] = []
+    defs: list[str] = []
 
     # Outer frame + inner opening
     clip_id = f"clip-{uid}"
     if shape == "circular":
         cx, cy = ox + W / 2, oy + H / 2
-        parts.append(f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="{W / 2:.1f}" ry="{H / 2:.1f}" fill="{colour}"/>')
         irx, iry = max(W / 2 - bar, 1), max(H / 2 - bar, 1)
         inner_shape = f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="{irx:.1f}" ry="{iry:.1f}"/>'
     else:
-        parts.append(f'<path d="{_shape_path(shape, ox, oy, W, H, rise)}" fill="{colour}"/>')
         inner_shape = (
             f'<path d="{_shape_path(shape, ox + bar, oy + bar, W - 2 * bar, H - 2 * bar, max(rise - bar, 4))}"/>'
         )
 
+    def shape_el(fill: str, extra: str = "") -> str:
+        if shape == "circular":
+            return (f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="{W / 2:.1f}" ry="{H / 2:.1f}" '
+                    f'fill="{fill}" {extra}/>')
+        return f'<path d="{_shape_path(shape, ox, oy, W, H, rise)}" fill="{fill}" {extra}/>'
+
+    if finish is None:
+        parts.append(shape_el(colour))
+    elif finish["kind"] == "wood" and shape in ("rectangle", "rect", ""):
+        b = bar
+        fh, fv = f"wh-{uid}", f"wv-{uid}"
+        sh, sv = f"sh-{uid}", f"sv-{uid}"
+        defs.append(_svg_wood_filter(fh, finish["wood"], False, scale))
+        defs.append(_svg_wood_filter(fv, finish["wood"], True, scale))
+        defs.append(_svg_sheen_gradient(sh, "h", finish["gloss"], False))
+        defs.append(_svg_sheen_gradient(sv, "v", finish["gloss"], False))
+        bars = (
+            (f"{ox:.1f},{oy:.1f} {ox + W:.1f},{oy:.1f} {ox + W - b:.1f},{oy + b:.1f} {ox + b:.1f},{oy + b:.1f}", fh, sh),
+            (f"{ox:.1f},{oy + H:.1f} {ox + W:.1f},{oy + H:.1f} {ox + W - b:.1f},{oy + H - b:.1f} {ox + b:.1f},{oy + H - b:.1f}", fh, sh),
+            (f"{ox:.1f},{oy:.1f} {ox + b:.1f},{oy + b:.1f} {ox + b:.1f},{oy + H - b:.1f} {ox:.1f},{oy + H:.1f}", fv, sv),
+            (f"{ox + W:.1f},{oy:.1f} {ox + W - b:.1f},{oy + b:.1f} {ox + W - b:.1f},{oy + H - b:.1f} {ox + W:.1f},{oy + H:.1f}", fv, sv),
+        )
+        for pts, filt, sheen in bars:
+            parts.append(f'<polygon points="{pts}" fill="#000" filter="url(#{filt})"/>')
+            parts.append(f'<polygon points="{pts}" fill="url(#{sheen})"/>')
+        for x1, y1, x2, y2 in (
+            (ox, oy, ox + b, oy + b), (ox + W, oy, ox + W - b, oy + b),
+            (ox, oy + H, ox + b, oy + H - b), (ox + W, oy + H, ox + W - b, oy + H - b),
+        ):
+            parts.append(
+                f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                f'stroke="#000000" stroke-opacity="0.38" stroke-width="0.9"/>'
+            )
+    else:
+        if finish["kind"] == "wood":
+            fid = f"wh-{uid}"
+            defs.append(_svg_wood_filter(fid, finish["wood"], False, scale))
+            parts.append(shape_el("#000", f'filter="url(#{fid})"'))
+        elif finish["kind"] == "textured":
+            fid = f"tx-{uid}"
+            defs.append(_svg_textured_filter(fid))
+            parts.append(shape_el(colour, f'filter="url(#{fid})"'))
+        else:
+            parts.append(shape_el(colour))
+        gid = f"sd-{uid}"
+        defs.append(_svg_sheen_gradient(gid, "d", finish["gloss"], finish["kind"] == "metallic"))
+        parts.append(shape_el(f"url(#{gid})"))
+
     ix, iy = ox + bar, oy + bar
     iw, ih = W - 2 * bar, H - 2 * bar
 
-    parts.append(f'<defs><clipPath id="{clip_id}">{inner_shape}</clipPath></defs>')
+    defs.append(f'<clipPath id="{clip_id}">{inner_shape}</clipPath>')
     parts.append(f'<g clip-path="url(#{clip_id})">')
     parts.append(f'<rect x="{ix:.1f}" y="{iy:.1f}" width="{iw:.1f}" height="{ih:.1f}" fill="#DCEBF5"/>')
 
@@ -183,7 +415,7 @@ def render_svg(design: dict, width_mm: float, height_mm: float, uid: str) -> str
     if not panes:
         panes = [{"x": 0, "y": 0, "w": 1, "h": 1, "opening": "Fixed"}]
 
-    for pane in panes:
+    for pane_index, pane in enumerate(panes):
         if not isinstance(pane, dict):
             continue
         try:
@@ -202,6 +434,13 @@ def render_svg(design: dict, width_mm: float, height_mm: float, uid: str) -> str
             f'<rect x="{px:.1f}" y="{py:.1f}" width="{pw:.1f}" height="{ph:.1f}" '
             f'fill="{fill}" stroke="{sash_colour}" stroke-width="3"/>'
         )
+        if infill in ("glass", ""):
+            parts.append(_svg_glass_overlay(uid, pane_index, pane.get("texture"), px, py, pw, ph, defs))
+            parts.append(
+                f'<rect x="{px + 1.5:.1f}" y="{py + 1.5:.1f}" width="{max(pw - 3, 1):.1f}" '
+                f'height="{max(ph - 3, 1):.1f}" fill="none" stroke="#000000" stroke-opacity="0.14" '
+                f'stroke-width="3" pointer-events="none"/>'
+            )
         if opening.lower() != "fixed":
             parts.append(
                 f'<rect x="{px + 4:.1f}" y="{py + 4:.1f}" width="{max(pw - 8, 1):.1f}" height="{max(ph - 8, 1):.1f}" '
@@ -254,6 +493,7 @@ def render_svg(design: dict, width_mm: float, height_mm: float, uid: str) -> str
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w:.0f} {vb_h:.0f}" '
         f'width="100%" role="img" aria-label="Design drawing" style="max-height:640px;">'
+        + f'<defs>{"".join(defs)}</defs>'
         + "".join(parts)
         + "</svg>"
     )
@@ -274,10 +514,17 @@ def _details(window, design: dict, width_mm: float, height_mm: float) -> list[tu
     if material:
         rows.append(("Material", str(material)))
 
+    finish = _finish_spec(frame)
+
     colour_name = frame.get("colorName") or (window.frame_colour_name if window else None)
     ral = frame.get("ral") or (window.ral_code if window else "")
-    if colour_name:
-        rows.append(("Frame colour", f"{colour_name}" + (f" ({ral})" if ral else "")))
+    if finish and finish["kind"] == "wood":
+        rows.append(("Frame finish", f"{finish['label']} — {finish['wood'][0]}"))
+    else:
+        if colour_name:
+            rows.append(("Frame colour", f"{colour_name}" + (f" ({ral})" if ral else "")))
+        if finish:
+            rows.append(("Frame finish", finish["label"]))
 
     if str(design.get("unitType") or "").lower() == "door":
         dtype = str(door.get("dtype") or "single").lower()
@@ -533,9 +780,10 @@ def _draw_unit(page, design: dict, width_mm: float, height_mm: float, box: tuple
     bx, by, bw, bh = box
     frame = design.get("frame") or {}
     shape = str(design.get("shape") or "rectangle").lower()
-    frame_hex = _hex(frame.get("color"), "#2B2F33")
+    finish = _finish_spec(frame)
+    frame_hex = _frame_hex(frame)
     colour = _rgb(frame_hex)
-    sash = _rgb(_hex(frame.get("sashColor"), frame_hex))
+    sash = colour if (finish and finish["kind"] == "wood") else _rgb(_hex(frame.get("sashColor"), frame_hex))
     bar_mm = _num(frame.get("thickness"), 58.0)
     rise_mm = _num(design.get("archRise"), 400.0)
     has_cill = bool(frame.get("cill"))

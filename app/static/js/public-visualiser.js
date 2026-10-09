@@ -29,6 +29,224 @@
     return h;
   }
 
+  /* ---------- frame finishes (painted / textured / woodgrain / metallic) ---------- */
+  var FINISHES = {
+    painted_smooth: { kind: 'paint', gloss: 0.35 },
+    painted_satin: { kind: 'paint', gloss: 0.18 },
+    painted_matt: { kind: 'paint', gloss: 0.05 },
+    textured: { kind: 'textured', gloss: 0.04 },
+    wood: { kind: 'wood', gloss: 0.10 },
+    metallic: { kind: 'metallic', gloss: 0.60 }
+  };
+  /* base, dark, light, seed, grain-line contrast, pore density */
+  var WOODS = {
+    golden_oak: { base: '#B07A3B', dark: '#7E4F22', light: '#D29C57', seed: 3, pore: 0.9 },
+    natural_oak: { base: '#C79A5E', dark: '#946A35', light: '#E2BC82', seed: 5, pore: 0.8 },
+    light_oak: { base: '#D8B787', dark: '#B08A55', light: '#EBD3AA', seed: 8, pore: 0.7 },
+    dark_oak: { base: '#6B4423', dark: '#3F2512', light: '#8D6238', seed: 13, pore: 0.9 },
+    walnut: { base: '#5A3A24', dark: '#321D10', light: '#7A5337', seed: 21, pore: 0.8 },
+    rosewood: { base: '#6E2F25', dark: '#3E160F', light: '#924638', seed: 34, pore: 0.7 },
+    mahogany: { base: '#5B2A1F', dark: '#331510', light: '#7C3D2C', seed: 55, pore: 0.7 },
+    teak: { base: '#A06A3A', dark: '#6F4520', light: '#C38E58', seed: 89, pore: 0.8 },
+    cherry: { base: '#8A4A32', dark: '#5C2D1B', light: '#AE6A4A', seed: 144, pore: 0.6 },
+    black_ash: { base: '#2A2522', dark: '#120F0D', light: '#443C37', seed: 233, pore: 0.9 },
+    grey_oak: { base: '#8A8379', dark: '#5C564E', light: '#B0A89B', seed: 377, pore: 0.8 }
+  };
+
+  function finishSpec(frame) {
+    frame = frame || {};
+    var key = String(frame.finish || '').trim().toLowerCase();
+    var def = FINISHES[key];
+    if (!def) return null;
+    var wk = String(frame.wood || 'natural_oak').trim().toLowerCase();
+    if (!WOODS[wk]) wk = 'natural_oak';
+    return { key: key, kind: def.kind, gloss: def.gloss, woodKey: wk, wood: WOODS[wk] };
+  }
+
+  function rng(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function hexRgb(hex) {
+    var h = String(hex || '#000000').replace('#', '');
+    return [parseInt(h.slice(0, 2), 16) || 0, parseInt(h.slice(2, 4), 16) || 0, parseInt(h.slice(4, 6), 16) || 0];
+  }
+  function mixRgb(a, b, t) {
+    return [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t), Math.round(a[2] + (b[2] - a[2]) * t)];
+  }
+
+  /* wood texture: grain lines run along the bar length */
+  function grainCanvas(cw, ch, wood, vertical) {
+    var cv = document.createElement('canvas');
+    cv.width = cw; cv.height = ch;
+    var g = cv.getContext('2d');
+    var rand = rng(wood.seed * 7919 + (vertical ? 1 : 0));
+    var dark = hexRgb(wood.dark), base = hexRgb(wood.base), light = hexRgb(wood.light);
+    var across = vertical ? cw : ch, along = vertical ? ch : cw;
+    g.fillStyle = wood.base; g.fillRect(0, 0, cw, ch);
+
+    var p1 = rand() * 6.28, p2 = rand() * 6.28, p3 = rand() * 6.28;
+    var i, v, c, rgb;
+    for (i = 0; i < across; i++) {
+      v = 0.5 + 0.22 * Math.sin(i * 0.11 + p1) + 0.14 * Math.sin(i * 0.37 + p2) + 0.10 * Math.sin(i * 0.013 + p3) + (rand() - 0.5) * 0.30;
+      v = Math.max(0, Math.min(1, v));
+      rgb = v < 0.5 ? mixRgb(dark, base, v * 2) : mixRgb(base, light, (v - 0.5) * 2);
+      g.fillStyle = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
+      if (vertical) g.fillRect(i, 0, 1, along); else g.fillRect(0, i, along, 1);
+    }
+
+    /* long streaks along the grain */
+    var streaks = Math.round(across * 0.9), s, pos, len, start;
+    for (s = 0; s < streaks; s++) {
+      pos = rand() * across; len = 30 + rand() * 260; start = rand() * along - len * 0.3;
+      g.fillStyle = rand() < 0.55 ? 'rgba(0,0,0,' + (0.04 + rand() * 0.07).toFixed(3) + ')'
+        : 'rgba(255,255,255,' + (0.03 + rand() * 0.06).toFixed(3) + ')';
+      if (vertical) g.fillRect(pos, start, 1 + rand() * 1.5, len); else g.fillRect(start, pos, len, 1 + rand() * 1.5);
+    }
+
+    /* pores */
+    var pores = Math.round(across * along * 0.0035 * wood.pore);
+    g.fillStyle = 'rgba(0,0,0,0.20)';
+    for (s = 0; s < pores; s++) {
+      pos = rand() * across; start = rand() * along; len = 2 + rand() * 7;
+      if (vertical) g.fillRect(pos, start, 1, len); else g.fillRect(start, pos, len, 1);
+    }
+
+    /* occasional knots */
+    var knots = Math.min(3, Math.floor(along / 500)), k, kx, ky, kr, kg;
+    for (k = 0; k < knots; k++) {
+      if (rand() > 0.6) continue;
+      ky = across * (0.3 + rand() * 0.4); kx = along * (0.1 + rand() * 0.8);
+      kr = Math.max(3, across * (0.10 + rand() * 0.06));
+      var cx = vertical ? ky : kx, cy = vertical ? kx : ky;
+      kg = g.createRadialGradient(cx, cy, 0, cx, cy, kr * 1.6);
+      kg.addColorStop(0, 'rgba(' + dark[0] + ',' + dark[1] + ',' + dark[2] + ',0.85)');
+      kg.addColorStop(0.5, 'rgba(' + dark[0] + ',' + dark[1] + ',' + dark[2] + ',0.45)');
+      kg.addColorStop(1, 'rgba(' + dark[0] + ',' + dark[1] + ',' + dark[2] + ',0)');
+      g.save();
+      g.translate(cx, cy);
+      if (!vertical) g.scale(1.7, 1); else g.scale(1, 1.7);
+      g.translate(-cx, -cy);
+      g.fillStyle = kg;
+      g.beginPath(); g.arc(cx, cy, kr * 1.6, 0, Math.PI * 2); g.fill();
+      g.restore();
+    }
+    return cv;
+  }
+
+  function sheenStops(gloss, metallic) {
+    var spec = Math.min(0.8, gloss * 1.1), shade = 0.12 + 0.10 * gloss;
+    if (metallic) {
+      return [[0, 'rgba(255,255,255,.45)'], [0.20, 'rgba(255,255,255,.10)'], [0.38, 'rgba(0,0,0,.18)'],
+              [0.55, 'rgba(255,255,255,.50)'], [0.78, 'rgba(0,0,0,.12)'], [1, 'rgba(0,0,0,.34)']];
+    }
+    return [[0, 'rgba(255,255,255,' + (spec * 0.55).toFixed(3) + ')'],
+            [0.28, 'rgba(255,255,255,' + spec.toFixed(3) + ')'],
+            [0.44, 'rgba(255,255,255,' + (spec * 0.10).toFixed(3) + ')'],
+            [0.75, 'rgba(0,0,0,' + (shade * 0.30).toFixed(3) + ')'],
+            [1, 'rgba(0,0,0,' + shade.toFixed(3) + ')']];
+  }
+
+  function fillSheen(g, x0, y0, x1, y1, fin, bounds) {
+    var gr = g.createLinearGradient(x0, y0, x1, y1);
+    sheenStops(fin.gloss, fin.kind === 'metallic').forEach(function (st) { gr.addColorStop(st[0], st[1]); });
+    g.fillStyle = gr;
+    g.fillRect(bounds[0], bounds[1], bounds[2], bounds[3]);
+  }
+
+  function speckle(g, cw, ch) {
+    var r = rng(77), n = Math.round(cw * ch * 0.06), i;
+    for (i = 0; i < n; i++) {
+      g.fillStyle = r() < 0.55 ? 'rgba(0,0,0,0.34)' : 'rgba(255,255,255,0.26)';
+      g.fillRect(r() * cw, r() * ch, 1, 1);
+    }
+  }
+
+  /* paints the finish over the frame ring (clipped to it) */
+  function paintFinish(g, fin, ring, cw, ch, bt, shape, isDoor, spring) {
+    var rect = (shape === 'rectangle' || shape === 'rect' || !shape);
+    var bb = isDoor ? 0 : bt;
+    g.save();
+    g.clip(ring, 'evenodd');
+
+    if (fin.kind === 'wood') {
+      var tH = grainCanvas(cw, ch, fin.wood, false);
+      var tV = grainCanvas(cw, ch, fin.wood, true);
+      if (rect) {
+        var polys = [
+          [[0, 0], [cw, 0], [cw - bt, bt], [bt, bt]], tH,
+          [[0, ch], [cw, ch], [cw - bb, ch - bb], [bb, ch - bb]], tH,
+          [[0, 0], [bt, bt], [bt, ch - bb], [0, ch]], tV,
+          [[cw, 0], [cw - bt, bt], [cw - bt, ch - bb], [cw, ch]], tV
+        ];
+        for (var pi = 0; pi < polys.length; pi += 2) {
+          var pts = polys[pi];
+          g.save();
+          g.beginPath();
+          g.moveTo(pts[0][0], pts[0][1]);
+          for (var q = 1; q < pts.length; q++) g.lineTo(pts[q][0], pts[q][1]);
+          g.closePath();
+          g.clip();
+          g.drawImage(polys[pi + 1], 0, 0);
+          g.restore();
+        }
+        /* mitre joints */
+        g.strokeStyle = 'rgba(0,0,0,.38)'; g.lineWidth = Math.max(1, bt * 0.03);
+        g.beginPath();
+        g.moveTo(0, 0); g.lineTo(bt, bt);
+        g.moveTo(cw, 0); g.lineTo(cw - bt, bt);
+        if (!isDoor) { g.moveTo(0, ch); g.lineTo(bt, ch - bt); g.moveTo(cw, ch); g.lineTo(cw - bt, ch - bt); }
+        g.stroke();
+      } else {
+        g.drawImage(tH, 0, 0);
+        if (shape !== 'circular') {
+          var top = Math.max(0, spring);
+          g.save();
+          g.beginPath();
+          g.rect(0, top, bt, ch - top); g.rect(cw - bt, top, bt, ch - top);
+          g.clip();
+          g.drawImage(tV, 0, 0);
+          g.restore();
+        }
+      }
+    } else if (fin.kind === 'textured') {
+      speckle(g, cw, ch);
+    }
+
+    /* sheen: light across each bar's thickness */
+    var sh = fin.gloss;
+    if (fin.kind === 'wood' || fin.kind === 'paint' || fin.kind === 'metallic' || fin.kind === 'textured') {
+      if (rect) {
+        g.save(); g.beginPath(); g.rect(0, 0, cw, bt); g.clip();
+        fillSheen(g, 0, 0, 0, bt, fin, [0, 0, cw, bt]); g.restore();
+        if (!isDoor) {
+          g.save(); g.beginPath(); g.rect(0, ch - bt, cw, bt); g.clip();
+          fillSheen(g, 0, ch - bt, 0, ch, fin, [0, ch - bt, cw, bt]); g.restore();
+        }
+        g.save(); g.beginPath(); g.rect(0, bt, bt, ch - 2 * bt); g.clip();
+        fillSheen(g, 0, 0, bt, 0, fin, [0, bt, bt, ch - 2 * bt]); g.restore();
+        g.save(); g.beginPath(); g.rect(cw - bt, bt, bt, ch - 2 * bt); g.clip();
+        fillSheen(g, cw - bt, 0, cw, 0, fin, [cw - bt, bt, bt, ch - 2 * bt]); g.restore();
+      } else {
+        fillSheen(g, 0, 0, cw * 0.6, ch, fin, [0, 0, cw, ch]);
+      }
+      /* painted / metallic highlight line on the lit edge */
+      if (fin.kind === 'paint' || fin.kind === 'metallic') {
+        g.strokeStyle = 'rgba(255,255,255,' + Math.min(0.5, 0.15 + sh * 0.8).toFixed(2) + ')';
+        g.lineWidth = Math.max(1, bt * 0.04);
+        g.stroke(ring);
+      }
+    }
+    g.restore();
+  }
+
   /* ---------- texture from design JSON ---------- */
   function rasterDesign(d, tint) {
     d = d || {};
@@ -42,6 +260,8 @@
     var isDoor = d.unitType === 'door';
     var bar = (d.frame && d.frame.thickness) || 68;
     var col = (d.frame && d.frame.color) || '#2B2F33';
+    var fin = finishSpec(d.frame);
+    if (fin && fin.kind === 'wood') col = fin.wood.base;
     var rise = (d.archRise != null) ? d.archRise : Math.min(W * 0.25, 400);
     var panes = (d.panes && d.panes.length) ? d.panes
       : (d.cells && d.cells.length) ? d.cells
@@ -79,6 +299,7 @@
     ring.addPath(outer); ring.addPath(inner);
     g.fillStyle = col;
     g.fill(ring, 'evenodd');
+    if (fin) paintFinish(g, fin, ring, cw, ch, bar * s, shape, isDoor, (0 + rise) * s);
 
     g.save();
     g.clip(inner);
