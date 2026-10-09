@@ -1,8 +1,21 @@
+import os
+
 from flask import Blueprint, render_template, current_app, abort
 from flask_login import login_required, current_user
 from ..models import Project, Window, Visualisation
 
 visualiser_bp = Blueprint('visualiser', __name__)
+
+
+def _design_render_url(window_id):
+    """Only the editor's own design render counts as a window texture.
+    Composite photos (btl_cache/, window-<id>-v<n>-*.png) are never textures."""
+    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    filename = f'window-{window_id}.png'
+    if os.path.isfile(os.path.join(upload_dir, 'renders', filename)):
+        return f'/uploads/renders/{filename}'
+    return None
+
 
 @visualiser_bp.route('/projects/<int:project_id>/windows/<int:window_id>/visualise')
 @login_required
@@ -21,17 +34,14 @@ def view(project_id, window_id):
         # all windows for Swap design dropdown
         all_windows = project.windows.order_by(Window.sequence_order).all()
 
-        render_url = ('/uploads/' + vis.rendered_path) if (vis and vis.rendered_path) else None
+        render_url = _design_render_url(window_id)
 
-        # render URL for every window in the project (used by multi-opening designs)
+        # design render URL for every window in the project (multi-opening designs)
         render_urls = {}
         for w in all_windows:
-            wv = (Visualisation.query
-                  .filter_by(window_id=w.id)
-                  .order_by(Visualisation.created_at.desc())
-                  .first())
-            if wv and wv.rendered_path:
-                render_urls[w.id] = '/uploads/' + wv.rendered_path
+            url = _design_render_url(w.id)
+            if url:
+                render_urls[w.id] = url
 
         # design geometry for every unit (windows AND doors) so the visualiser
         # can draw a texture client-side when no saved render exists

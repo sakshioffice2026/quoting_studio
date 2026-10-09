@@ -5,6 +5,7 @@ from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
 from ...extensions import db
+from ...models import Window
 from ...services.window_overlay_png import render_overlay_png
 from ._helpers import _own_window
 from .visualisation import _latest_visualisation, _new_version
@@ -80,6 +81,13 @@ def btl_compose(window_id):
         if corners is None:
             return jsonify({'error': 'Place the four corners first'}), 400
 
+        px = data.get('corners_px')
+        if isinstance(px, dict):
+            try:
+                corners = {k: (float(px[k][0]), float(px[k][1])) for k in CORNER_KEYS}
+            except (KeyError, IndexError, TypeError, ValueError):
+                pass
+
         photo_path = os.path.join(current_app.config['UPLOAD_FOLDER'], vis.photo_path)
         if not os.path.isfile(photo_path):
             return jsonify({'error': 'Photo file not found'}), 404
@@ -111,10 +119,45 @@ def btl_compose(window_id):
                 enhance_req = False
                 enhance_note = f'Daily enhance limit reached ({used}/{cap})'
 
-        overlay = render_overlay_png(window.design_json, window.width_mm, window.height_mm)
+        layer_specs = []
+        raw_openings = data.get('openings_px')
+        if isinstance(raw_openings, list):
+            for item in raw_openings[:12]:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    c = {k: (float(item['corners'][k][0]), float(item['corners'][k][1]))
+                         for k in CORNER_KEYS}
+                except (KeyError, IndexError, TypeError, ValueError):
+                    continue
+                try:
+                    design_id = int(item.get('design_window_id'))
+                except (TypeError, ValueError):
+                    design_id = None
+                src_window = window
+                if design_id and design_id != window_id:
+                    src_window = Window.query.filter_by(
+                        id=design_id, tenant_id=current_user.tenant_id).first() or window
+                layer_specs.append((src_window, c))
+        if not layer_specs:
+            layer_specs = [(window, corners)]
+
+        overlay_cache = {}
+        layers = []
+        for src_window, c in layer_specs:
+            if src_window.id not in overlay_cache:
+                overlay_cache[src_window.id] = render_overlay_png(
+                    src_window.design_json, src_window.width_mm, src_window.height_mm)
+            layers.append((overlay_cache[src_window.id], c))
+
+        overlay = b''.join(png for png, _c in layers)
+        key_options = dict(options)
+        key_options['_layers'] = [
+            [round(c[k][0], 1), round(c[k][1], 1)] for _png, c in layers for k in CORNER_KEYS
+        ]
 
         def key_for(enhance_flag):
-            return limits.cache_key(photo_path, overlay, corners, options,
+            return limits.cache_key(photo_path, overlay, corners, key_options,
                                     enhance_flag, strength, use_sam, use_lama)
 
         rel_cpu = limits.cache_relpath(key_for(False), False)
@@ -137,17 +180,18 @@ def btl_compose(window_id):
                     'used': used, 'cap': cap,
                 }), 429
 
-            result = pipeline.run(photo_path, overlay, corners, options=options,
-                                  use_sam=use_sam, use_lama=use_lama)
+            result = pipeline.run_layers(photo_path, layers, options=options,
+                                        use_sam=use_sam, use_lama=use_lama)
             rel_path = rel_cpu
 
             if enhance_req:
                 try:
-                    result = enhancer.enhance(
-                        result,
-                        [corners[k] for k in CORNER_KEYS],
-                        strength=strength,
-                    )
+                    for _png, layer_corners in layers:
+                        result = enhancer.enhance(
+                            result,
+                            [layer_corners[k] for k in CORNER_KEYS],
+                            strength=strength,
+                        )
                     enhanced = True
                     rel_path = rel_enh
                 except enhancer.EnhanceError as exc:
