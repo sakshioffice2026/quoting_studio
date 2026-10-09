@@ -7,9 +7,11 @@ from concurrent.futures import TimeoutError as FutureTimeout
 import cv2
 import numpy as np
 
-CROP_PADDING = 0.25
+CROP_PADDING = 0.45
 DEFAULT_QUEUE_WAIT_SECONDS = 30.0
 MAX_WAITING = 3
+MIN_SEND_SIDE = 640
+MAX_SEND_SIDE = 768
 
 _gate = threading.Semaphore(1)
 _pool = ThreadPoolExecutor(max_workers=2)
@@ -17,11 +19,15 @@ _waiting = 0
 _waiting_lock = threading.Lock()
 
 
-def _queue_wait():
+def _env_float(name, default):
     try:
-        return max(0.0, float(os.environ.get('BTL_ENHANCE_QUEUE_WAIT', DEFAULT_QUEUE_WAIT_SECONDS)))
-    except ValueError:
-        return DEFAULT_QUEUE_WAIT_SECONDS
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _queue_wait():
+    return max(0.0, _env_float('BTL_ENHANCE_QUEUE_WAIT', DEFAULT_QUEUE_WAIT_SECONDS))
 
 
 def _acquire_slot():
@@ -91,15 +97,38 @@ def _call_remote(image_path, mask_path, strength, steps, seed):
     return _result_path(result)
 
 
+def _ellipse(k):
+    k = max(3, int(k)) | 1
+    return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+
+
+def _build_mask(h, w, quad, span, mode):
+    quad_mask = np.zeros((h, w), np.uint8)
+    cv2.fillConvexPoly(quad_mask, np.round(quad).astype(np.int32), 255)
+
+    grow = _ellipse(0.06 * span)
+    outer = cv2.dilate(quad_mask, grow)
+
+    if mode == 'full':
+        return outer
+
+    shrink = _ellipse(0.025 * span)
+    inner = cv2.erode(quad_mask, shrink)
+    band = cv2.subtract(outer, inner)
+    return band
+
+
 def enhance(result_bgr, quad, strength=0.35, steps=20, seed=7, timeout=None):
     if not is_configured():
         raise EnhanceError('Enhance service is not configured')
 
     if timeout is None:
-        try:
-            timeout = float(os.environ.get('BTL_ENHANCE_TIMEOUT', '120'))
-        except ValueError:
-            timeout = 120.0
+        timeout = _env_float('BTL_ENHANCE_TIMEOUT', 120.0)
+
+    mode = (os.environ.get('BTL_ENHANCE_MODE', 'seam') or 'seam').strip().lower()
+    if mode not in ('seam', 'full'):
+        mode = 'seam'
+    blend = float(np.clip(_env_float('BTL_ENHANCE_BLEND', 0.7), 0.0, 1.0))
 
     h, w = result_bgr.shape[:2]
     quad = np.asarray(quad, dtype=np.float32)
@@ -113,14 +142,24 @@ def enhance(result_bgr, quad, strength=0.35, steps=20, seed=7, timeout=None):
     if cx1 - cx0 < 16 or cy1 - cy0 < 16:
         raise EnhanceError('Window area is too small to enhance')
 
+    full_mask = _build_mask(h, w, quad, span, mode)
+
     crop = result_bgr[cy0:cy1, cx0:cx1]
+    cmask = full_mask[cy0:cy1, cx0:cx1]
     ch, cw = crop.shape[:2]
 
-    full_mask = np.zeros((h, w), np.uint8)
-    cv2.fillConvexPoly(full_mask, np.round(quad).astype(np.int32), 255)
-    grow = max(5, int(0.02 * span)) | 1
-    full_mask = cv2.dilate(full_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (grow, grow)))
-    cmask = full_mask[cy0:cy1, cx0:cx1]
+    side = float(max(cw, ch))
+    send_scale = 1.0
+    if side < MIN_SEND_SIDE:
+        send_scale = MIN_SEND_SIDE / side
+    elif side > MAX_SEND_SIDE:
+        send_scale = MAX_SEND_SIDE / side
+    sw = max(64, int(round(cw * send_scale)))
+    sh = max(64, int(round(ch * send_scale)))
+
+    interp = cv2.INTER_LANCZOS4 if send_scale > 1.0 else cv2.INTER_AREA
+    send_img = cv2.resize(crop, (sw, sh), interpolation=interp)
+    send_mask = cv2.resize(cmask, (sw, sh), interpolation=cv2.INTER_NEAREST)
 
     _acquire_slot()
 
@@ -128,8 +167,8 @@ def enhance(result_bgr, quad, strength=0.35, steps=20, seed=7, timeout=None):
         with tempfile.TemporaryDirectory() as tmp:
             image_path = os.path.join(tmp, 'composite.png')
             mask_path = os.path.join(tmp, 'mask.png')
-            cv2.imwrite(image_path, crop)
-            cv2.imwrite(mask_path, cmask)
+            cv2.imwrite(image_path, send_img)
+            cv2.imwrite(mask_path, send_mask)
 
             future = _pool.submit(_call_remote, image_path, mask_path, float(strength), int(steps), int(seed))
             try:
@@ -144,11 +183,11 @@ def enhance(result_bgr, quad, strength=0.35, steps=20, seed=7, timeout=None):
         _gate.release()
 
     if enhanced.shape[:2] != (ch, cw):
-        enhanced = cv2.resize(enhanced, (cw, ch), interpolation=cv2.INTER_CUBIC)
+        enhanced = cv2.resize(enhanced, (cw, ch), interpolation=cv2.INTER_AREA)
 
     k = max(5, int(0.02 * max(cw, ch))) | 1
-    inner = cv2.erode(cmask, np.ones((k, k), np.uint8))
-    soft = cv2.GaussianBlur(inner.astype(np.float32) / 255.0, (0, 0), k / 2.0)[..., None]
+    soft = cv2.GaussianBlur(cmask.astype(np.float32) / 255.0, (0, 0), k / 2.0)
+    soft = np.clip(soft, 0.0, 1.0)[..., None] * blend
 
     blended = crop.astype(np.float32) * (1.0 - soft) + enhanced.astype(np.float32) * soft
 

@@ -1,3 +1,5 @@
+import os
+
 import cv2
 import numpy as np
 
@@ -9,6 +11,11 @@ def _shift(img, dx, dy):
     m = np.float32([[1, 0, dx], [0, 1, dy]])
     return cv2.warpAffine(img, m, (w, h), flags=cv2.INTER_LINEAR,
                           borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+
+
+def _ellipse(k):
+    k = max(3, int(k)) | 1
+    return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
 
 
 def _warp_overlay(overlay_bgra, quad, size):
@@ -61,6 +68,60 @@ def _sky_colour(clean_bgr):
     return (clean_bgr[:rows].reshape(-1, 3).astype(np.float32).mean(axis=0) / 255.0)
 
 
+def _is_interior(clean_bgr, options):
+    """True when the photo was taken indoors (no sky in the top of the frame).
+
+    Override with options['interior'] (True/False/'on'/'off'/'auto') or the
+    BTL_INTERIOR environment variable (auto | on | off).
+    """
+    flag = options.get('interior')
+    if flag is None:
+        flag = os.environ.get('BTL_INTERIOR', 'auto')
+
+    if isinstance(flag, bool):
+        return flag
+    flag = str(flag).strip().lower()
+    if flag in ('on', '1', 'true', 'yes', 'interior'):
+        return True
+    if flag in ('off', '0', 'false', 'no', 'exterior'):
+        return False
+
+    h = clean_bgr.shape[0]
+    top = clean_bgr[:max(1, int(0.25 * h))].astype(np.int16)
+    b, g, r = top[..., 0], top[..., 1], top[..., 2]
+    sky = (b > r + 20) & (b >= g) & (b > 90)
+    return float(sky.mean()) < 0.10
+
+
+def _through_view(original_bgr, clean_bgr, quad):
+    """What is seen through the new glass: the original view with the old
+    frame and glazing bars removed (grey closing erases thin dark structures)."""
+    h, w = original_bgr.shape[:2]
+    view_full = clean_bgr.astype(np.float32) / 255.0
+
+    xs, ys = quad[:, 0], quad[:, 1]
+    span = float(max(xs.max() - xs.min(), ys.max() - ys.min(), 1.0))
+    pad = int(0.08 * span) + 2
+    x0, x1 = int(max(0, xs.min() - pad)), int(min(w, xs.max() + pad))
+    y0, y1 = int(max(0, ys.min() - pad)), int(min(h, ys.max() + pad))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return view_full
+
+    crop = original_bgr[y0:y1, x0:x1]
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    k = max(7, int(0.12 * span)) | 1
+    closed = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, _ellipse(k))
+    blackhat = cv2.subtract(closed, gray)
+    bars = ((gray < 70) & (blackhat > 30)).astype(np.uint8) * 255
+    bars = cv2.dilate(bars, _ellipse(max(3, int(0.02 * span))))
+    radius = max(3, int(0.03 * span))
+    view = cv2.inpaint(crop, bars, radius, cv2.INPAINT_TELEA)
+    view = cv2.GaussianBlur(view, (0, 0), 0.8)
+
+    view_full[y0:y1, x0:x1] = view.astype(np.float32) / 255.0
+    return view_full
+
+
 def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
     options = options or {}
     shadow_k = float(options.get('shadow', 1.0))
@@ -70,6 +131,10 @@ def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
 
     h, w = clean_bgr.shape[:2]
     quad = np.asarray(quad, dtype=np.float32)
+
+    interior_mode = _is_interior(clean_bgr, options)
+    if interior_mode:
+        shadow_k *= 0.4
 
     warped, glass = _warp_overlay(overlay_bgra, quad, (w, h))
     alpha = warped[..., 3]
@@ -124,21 +189,30 @@ def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
     ao = cv2.GaussianBlur(alpha, (0, 0), off * 3.0) * (1.0 - alpha)
     base *= (1.0 - 0.22 * shadow_k * ao)[..., None]
 
-    # glass: dark room colour with a sky reflection that fades towards the bottom
-    interior = (_interior_colour(original_bgr, quad) / 255.0).astype(np.float32)
-    sky = _sky_colour(clean_bgr)
-    row_factor = np.ones(h, np.float32)
-    mix_amt = np.zeros(h, np.float32)
-    y_start, y_end = max(0, int(by0)), min(h, int(by1) + 1)
-    if y_end > y_start:
-        n = y_end - y_start
-        row_factor[y_start:y_end] = np.linspace(0.85, 1.1, n, dtype=np.float32)
-        mix_amt[y_start:y_end] = (0.18 * reflect_k) * np.linspace(1.0, 0.0, n, dtype=np.float32)
-    interior_img = row_factor[:, None, None] * interior[None, None, :]
-    glass_img = interior_img * (1.0 - mix_amt[:, None, None]) + sky[None, None, :] * mix_amt[:, None, None]
-    glass_img = np.broadcast_to(glass_img, (h, w, 3))
+    if interior_mode:
+        # transparent glass: keep the view that was behind the old window/door
+        through = _through_view(original_bgr, clean_bgr, quad)
+        glass_img = np.clip(through * 0.97 + 0.015, 0.0, 1.0)
+        glass_weight = 0.95
+        sheen_k = 0.5
+    else:
+        # glass: dark room colour with a sky reflection that fades towards the bottom
+        interior = (_interior_colour(original_bgr, quad) / 255.0).astype(np.float32)
+        sky = _sky_colour(clean_bgr)
+        row_factor = np.ones(h, np.float32)
+        mix_amt = np.zeros(h, np.float32)
+        y_start, y_end = max(0, int(by0)), min(h, int(by1) + 1)
+        if y_end > y_start:
+            n = y_end - y_start
+            row_factor[y_start:y_end] = np.linspace(0.85, 1.1, n, dtype=np.float32)
+            mix_amt[y_start:y_end] = (0.18 * reflect_k) * np.linspace(1.0, 0.0, n, dtype=np.float32)
+        interior_img = row_factor[:, None, None] * interior[None, None, :]
+        glass_img = interior_img * (1.0 - mix_amt[:, None, None]) + sky[None, None, :] * mix_amt[:, None, None]
+        glass_img = np.broadcast_to(glass_img, (h, w, 3))
+        glass_weight = 0.90
+        sheen_k = 1.0
 
-    weight = (glass * 0.90)[..., None]
+    weight = (glass * glass_weight)[..., None]
     base = base * (1.0 - weight) + glass_img * weight
 
     # reveal depth: shadow cast inside the opening from the top and left
@@ -151,7 +225,7 @@ def compose(clean_bgr, original_bgr, overlay_bgra, quad, options=None):
 
     t = xs[None, :] * 0.6 + ys[:, None] * 0.4
     band = np.exp(-((t - 0.35) / 0.12) ** 2) * 0.55 + np.exp(-((t - 0.75) / 0.07) ** 2) * 0.30
-    sheen = (band * 0.30 * reflect_k).astype(np.float32)
+    sheen = (band * 0.30 * reflect_k * sheen_k).astype(np.float32)
     out = 1.0 - (1.0 - out) * (1.0 - sheen[..., None] * glass[..., None])
 
     if grain_k > 0 and noise_std > 0:

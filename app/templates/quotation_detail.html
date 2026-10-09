@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from '_ui_macros.html' import pill, stage_tracker %}
+{% from '_share_link_button.html' import share_link_button, share_link_script %}
 {% block title %}{{ quotation.quotation_number }} — FenestraOne{% endblock %}
 
 {% block body %}
@@ -37,6 +38,13 @@
             <button type="submit" class="btn btn-secondary btn-sm" style="color:#B91C1C;">🗑 Delete</button>
           </form>
           {% endif %}
+          {% if quotation.is_editable %}
+          <a href="{{ url_for('quotation.index', merge=quotation.id) }}" class="btn btn-secondary btn-sm">⇄ Merge with other drafts</a>
+          {% endif %}
+          {% if quotation.status in (QuotationStatus.SENT, QuotationStatus.NEGOTIATION, QuotationStatus.ACCEPTED) %}
+          {{ share_link_button('master_quote', quotation.id) }}{{ share_link_script() }}
+          {% endif %}
+          <a href="{{ url_for('proposal.download_master_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Master Quote (PDF)</a>
           <a href="{{ url_for('quotation.download_pdf', quotation_id=quotation.id) }}" class="btn btn-secondary btn-sm">⬇ Download PDF</a>
           <a href="{{ url_for('quotation.index') }}" class="btn btn-secondary btn-sm">← All Quotations</a>
         </div>
@@ -87,6 +95,34 @@
         </div>
       </div>
     </div>
+
+    {# =================== 2a. MASTER QUOTATION SECTIONS =================== #}
+    {% if master_sections is defined and master_sections %}
+    <div class="ui-card">
+      <div class="ui-card-title">Master Quotation — what the customer sees</div>
+      <p class="muted" style="margin:6px 0 12px;">
+        Tick the sections to show in the customer link and PDF.
+        {% if master_has_override %}<strong>Custom for this quotation.</strong>{% else %}Using the default template.{% endif %}
+      </p>
+      <form method="post" action="{{ url_for('quotation.save_master_sections', quotation_id=quotation.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
+          {% for s in master_sections %}
+          <label style="display:flex;gap:8px;align-items:flex-start;padding:10px;border:1px solid #E5E7EB;border-radius:8px;{{ 'opacity:.75;' if s.required }}">
+            <input type="checkbox" name="sections" value="{{ s.key }}" {{ 'checked' if s.enabled }} {{ 'disabled' if s.required }} style="margin-top:3px;">
+            {% if s.required %}<input type="hidden" name="sections" value="{{ s.key }}">{% endif %}
+            <span><strong>{{ s.label }}</strong>{% if s.required %} <span class="muted">(always shown)</span>{% endif %}<br><span class="muted" style="font-size:12px;">{{ s.help }}</span></span>
+          </label>
+          {% endfor %}
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+          <button type="submit" name="action" value="quotation" class="btn btn-primary btn-sm">Save for this quotation</button>
+          <button type="submit" name="action" value="default" class="btn btn-secondary btn-sm">Save as default for all</button>
+          {% if master_has_override %}<button type="submit" name="action" value="reset" class="btn btn-secondary btn-sm">Use default template</button>{% endif %}
+        </div>
+      </form>
+    </div>
+    {% endif %}
 
     {# =================== 2b. INSTALLATION / TRANSPORT / AMC / WARRANTY =================== #}
     {% if quotation.installation_charge or quotation.transport_charge or quotation.amc_offered or quotation.other_charges or quotation.warranty_months %}
@@ -457,6 +493,36 @@
       {% endif %}
     </div>
     {% endif %}
+
+    {# =================== PROPOSAL HISTORY =================== #}
+    {% set proposal_rows = quotation.proposals.order_by(None).all()|sort(attribute='revision_no', reverse=True) %}
+    <div class="ui-card" style="margin-top:16px;">
+      <div class="ui-card-title" style="margin-bottom:10px;">Proposal History</div>
+      {% if proposal_rows %}
+      <div style="overflow-x:auto;">
+        <table class="table" style="width:100%;">
+          <thead><tr><th>Revision</th><th>Quotation Version</th><th>Template</th><th>Total</th><th>Created</th><th>Files</th></tr></thead>
+          <tbody>
+            {% for p in proposal_rows %}
+            <tr>
+              <td>r{{ p.revision_no }}</td>
+              <td>v{{ p.quotation_version or '—' }}</td>
+              <td>{{ p.template_name or '—' }}</td>
+              <td>{{ quotation.currency_symbol }}{{ '{:,.2f}'.format(p.grand_total|float) if p.grand_total else '—' }}</td>
+              <td>{{ p.created_at.strftime('%d %b %Y %H:%M') if p.created_at else '—' }}</td>
+              <td style="display:flex; gap:6px; flex-wrap:wrap;">
+                {% if p.docx_path %}<a href="{{ url_for('proposal.history_docx', quotation_id=quotation.id, proposal_id=p.id) }}" class="btn btn-secondary btn-sm">DOCX</a>{% endif %}
+                {% if p.pdf_path %}<a href="{{ url_for('proposal.history_pdf', quotation_id=quotation.id, proposal_id=p.id) }}" class="btn btn-secondary btn-sm">PDF</a>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="action-note">No proposals generated yet.</p>
+      {% endif %}
+    </div>
 
   </div>
 </div>

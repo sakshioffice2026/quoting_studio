@@ -217,7 +217,7 @@ def _payment_section(quotation, symbol: str) -> dict:
         running += amount
         rows.append({
             "stage":    PaymentStage.LABELS.get(stage, stage),
-            "percent":  f"{pct:f}".rstrip("0").rstrip(".") + "%",
+            "percent":  (f"{pct:f}".rstrip("0").rstrip(".") if "." in f"{pct:f}" else f"{pct:f}") + "%",
             "amount":   _money(amount, symbol),
             "received": "-",
             "status":   "Planned",
