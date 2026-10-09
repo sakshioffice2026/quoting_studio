@@ -3,6 +3,7 @@
 
 {% block head %}
 <meta name="csrf-token" content="{{ csrf_token() }}">
+<script src="{{ url_for('static', filename='js/finish-library.js') }}"></script>
 <script src="{{ url_for('static', filename='js/drawing-engine.js') }}"></script>
 <script src="{{ url_for('static', filename='js/drawing-phase2.js') }}"></script>
 <script src="{{ url_for('static', filename='js/drawing-phase3.js') }}"></script>
@@ -817,12 +818,26 @@ function renderTab(){
       <button class="split-btn" style="width:100%;margin-top:4px;" onclick="QSPhase2.openProfile()">⊞ Manage Frame Profiles…</button>`;
   } else if(currentTab==='finish'){
     el.innerHTML = `
-      <div class="sec-head">Frame colour / finish</div>
-      <div class="swatches" id="swatches"></div>
+      <div class="sec-head">Finish</div>
+      <div class="field"><select id="fFinish" onchange="setFinish(this.value)">
+        <option value="">Standard (flat colour)</option>
+        ${window.QSFinish ? Object.keys(QSFinish.FINISHES).map(k=>
+          `<option value="${k}">${QSFinish.FINISHES[k].name}</option>`).join('') : ''}
+      </select></div>
+      <div id="woodBox" style="display:none;">
+        <div class="sec-head">Wood</div>
+        <div class="swatches" id="woodSw"></div>
+        <div id="woodNm" style="font-size:12px;color:var(--navy);margin-top:6px;"></div>
+      </div>
+      <div id="colBox">
+        <div class="sec-head">Colour</div>
+        <div class="swatches" id="swatches"></div>
+        <div id="colNm" style="font-size:12px;color:var(--navy);margin-top:6px;"></div>
+      </div>
       <div class="field" style="margin-top:12px;"><label>Applies to</label>
         <select><option>All frames</option><option>This frame only</option></select></div>
       <button class="split-btn" style="width:100%;" onclick="QSPhase2.openFinish()">⊞ Manage Frame Finish…</button>`;
-    buildSwatches();
+    buildFinishPanel();
   } else if(currentTab==='glass'){
     const paneGlazing = pane ? pane.glazing : '';
     const glassRows = GLASS_UNITS.length
@@ -874,13 +889,18 @@ function renderTab(){
       ${pane ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
         <div><div style="font-size:11px;color:#566;margin-bottom:4px;font-weight:500;">Texture</div>
           <select class="ni" style="width:100%;" onchange="setTexture(this.value)">
-            ${['Clear','Satin','Stippolyte','Cotswold','Charcoal Sticks'].map(t=>
+            ${['Clear','Satin','Stippolyte','Cotswold','Charcoal Sticks','Reeded','Frosted','Pyramid','Georgian wired'].map(t=>
               `<option ${((pane.texture||'Clear')===t)?'selected':''}>${t}</option>`).join('')}
           </select></div>
         <div><div style="font-size:11px;color:#566;margin-bottom:4px;font-weight:500;">Leaded</div>
           <select class="ni" style="width:100%;" onchange="setLeaded(this.value)">
             ${[['none','None'],['square','Square'],['diamond','Diamond']].map(([v,l])=>
               `<option value="${v}" ${((pane.leaded||'none')===v)?'selected':''}>${l}</option>`).join('')}
+          </select></div>
+        <div><div style="font-size:11px;color:#566;margin-bottom:4px;font-weight:500;">Tint</div>
+          <select class="ni" style="width:100%;" onchange="setTint(this.value)">
+            ${[['clear','Clear'],['grey','Grey'],['bronze','Bronze'],['bluegreen','Blue-green'],['reflective','Neutral reflective']].map(([v,l])=>
+              `<option value="${v}" ${((pane.tint||'clear')===v)?'selected':''}>${l}</option>`).join('')}
           </select></div>
       </div>` : ''}
       ${GLASS_UNITS.length ? `<div class="split-btns" style="margin-top:10px;">
@@ -914,14 +934,65 @@ function renderTab(){
 function buildSwatches(){
   const w=document.getElementById('swatches'); if(!w)return;
   w.innerHTML='';
-  FRAME_COLORS.forEach(c=>{
+  const list = window.QSFinish
+    ? QSFinish.RAL.map(c=>({hex:c.hex, name:c.name, ral:c.code}))
+    : FRAME_COLORS;
+  list.forEach(c=>{
     const d=document.createElement('div');
-    d.className='sw'+(model.frame.color===c.hex?' sel':'');
-    d.style.background=c.hex; d.title=c.name;
+    d.className='sw'+((model.frame.color||'').toUpperCase()===c.hex.toUpperCase()?' sel':'');
+    d.style.background=c.hex;
+    d.title=c.name+(c.ral?' (RAL '+c.ral+')':'');
     d.onclick=()=>{ model.frame.color=c.hex; model.frame.colorName=c.name;
+      model.frame.ral=c.ral||'';
       buildSwatches(); dc.render(); scheduleSave(); };
     w.appendChild(d);
   });
+  const nm=document.getElementById('colNm');
+  if(nm) nm.textContent=(model.frame.colorName||'')+(model.frame.ral?' · RAL '+model.frame.ral:'');
+}
+
+function buildFinishPanel(){
+  const F=window.QSFinish;
+  if(!F){ buildSwatches(); return; }
+  const sel=document.getElementById('fFinish');
+  if(sel) sel.value=model.frame.finish||'';
+  const isWood=model.frame.finish==='wood';
+  const wb=document.getElementById('woodBox'), cb=document.getElementById('colBox');
+  if(wb) wb.style.display=isWood?'block':'none';
+  if(cb) cb.style.display=isWood?'none':'block';
+  const ws=document.getElementById('woodSw');
+  if(ws){
+    ws.innerHTML='';
+    Object.keys(F.WOODS).forEach(k=>{
+      const t=F.WOODS[k];
+      const d=document.createElement('div');
+      d.className='sw'+(model.frame.wood===k?' sel':'');
+      d.style.background='linear-gradient(90deg,'+t.dark+','+t.base+' 45%,'+t.light+' 70%,'+t.base+')';
+      d.title=t.name;
+      d.onclick=()=>{ applyWood(k); buildFinishPanel(); dc.render(); scheduleSave(); };
+      ws.appendChild(d);
+    });
+    const wn=document.getElementById('woodNm');
+    if(wn){ const cur=F.WOODS[model.frame.wood]; wn.textContent=cur?cur.name:''; }
+  }
+  buildSwatches();
+}
+
+function applyWood(k){
+  const t=window.QSFinish && QSFinish.WOODS[k]; if(!t) return;
+  const f=model.frame;
+  if(!f.paintColor){ f.paintColor=f.color; f.paintName=f.colorName||''; }
+  f.wood=k; f.color=t.base; f.colorName=t.name; f.ral='';
+}
+
+function setFinish(v){
+  const f=model.frame;
+  if(f.finish==='wood' && v!=='wood' && f.paintColor){
+    f.color=f.paintColor; f.colorName=f.paintName||''; f.paintColor=''; f.paintName='';
+  }
+  f.finish=v||'';
+  if(v==='wood') applyWood(f.wood||'natural_oak');
+  buildFinishPanel(); dc.render(); scheduleSave();
 }
 
 /* ---------- handlers ---------- */
@@ -1029,6 +1100,8 @@ function setSashColor(v){ model.frame.sashColor=v||'';
   dc.render();scheduleSave(); }
 function setTexture(v){ const p=model.panes.find(x=>x.id===dc.selectedPaneId);
   if(p){ p.texture=v; dc.render(); scheduleSave(); renderTab(); } }
+function setTint(v){ const p=model.panes.find(x=>x.id===dc.selectedPaneId);
+  if(p){ p.tint=v; dc.render(); scheduleSave(); renderTab(); } }
 function setLeaded(v){ const p=model.panes.find(x=>x.id===dc.selectedPaneId);
   if(p){ p.leaded=v; dc.render(); scheduleSave(); renderTab(); } }
 function setShape(s){

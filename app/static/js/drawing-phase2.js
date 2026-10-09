@@ -206,8 +206,17 @@
          : t === 'sash'  ? 'sashColor'
          : 'cillColor';
   }
+  let _finKey = '';
+  function _finishTypeOptions() {
+    const FIN = window.QSFinish;
+    if (!FIN) return FINISH_TYPES.map(x => `<option>${x}</option>`).join('');
+    return '<option value="">Standard (flat colour)</option>' +
+      Object.keys(FIN.FINISHES).map(k =>
+        `<option value="${k}" ${_finKey === k ? 'selected' : ''}>${FIN.FINISHES[k].name}</option>`).join('');
+  }
   function openFinish() {
     _finishTarget = 'frame';
+    _finKey = (window.model.frame.finish || '');
     modal(
       'Manage Frame Finish',
       `<div class="p2-tabs">
@@ -216,10 +225,10 @@
          <div class="p2-tab" data-t="cill" onclick="QSPhase2._finishTab('cill')">CILL</div>
        </div>
        <div class="p2-finish-controls">
-         <div class="p2-field inline"><label>Type</label>
-           <select id="finType">${FINISH_TYPES.map(x=>`<option>${x}</option>`).join('')}</select></div>
-         <div class="p2-field inline"><label>Base</label>
-           <select id="finBase">${FINISH_BASES.map(x=>`<option>${x}</option>`).join('')}</select></div>
+         <div class="p2-field inline"><label>Finish</label>
+           <select id="finType" onchange="QSPhase2._finishType(this.value)">${_finishTypeOptions()}</select></div>
+         ${window.QSFinish ? '' : `<div class="p2-field inline"><label>Base</label>
+           <select id="finBase">${FINISH_BASES.map(x=>`<option>${x}</option>`).join('')}</select></div>`}
        </div>
        <div class="p2-toggle-row" style="margin:6px 0 14px;">
          <label class="p2-switch"><input type="checkbox" id="sameBoth" checked><span class="p2-slider"></span></label>
@@ -246,11 +255,37 @@
   }
   function _buildColourGrid() {
     const grid = document.getElementById('p2colourGrid');
+    const FIN = window.QSFinish;
+    const fr = window.model.frame;
+
+    // woodgrain foil: show the timbers instead of RAL colours (frame tab only)
+    if (FIN && _finKey === 'wood' && _finishTarget === 'frame') {
+      const wk = FIN.WOODS[fr.wood] ? fr.wood : 'natural_oak';
+      const w0 = FIN.WOODS[wk];
+      _pendingFinish = { hex: w0.base, name: w0.name, ral: '', wood: wk };
+      grid.innerHTML = Object.keys(FIN.WOODS).map(k => {
+        const t = FIN.WOODS[k];
+        return `
+        <div class="p2-colour-card ${k===wk?'sel':''}" data-wood="${k}"
+             onclick="QSPhase2._pickWood('${k}')">
+          <div class="p2-colour-sw" style="background:linear-gradient(90deg,${t.dark},${t.base} 45%,${t.light} 70%,${t.base})"></div>
+          <div class="p2-colour-nm">${t.name}</div>
+          <div class="p2-colour-ral">Woodgrain foil</div>
+        </div>`;
+      }).join('');
+      return;
+    }
+
     const key = _finishKey(_finishTarget);
-    const cur = window.model.frame[key] || window.model.frame.color;
-    const curEntry = FINISH_COLOURS.find(c => c.hex === cur) || FINISH_COLOURS[0];
+    const leaving = fr.finish === 'wood' && _finKey !== 'wood' && fr.paintColor && _finishTarget === 'frame';
+    const cur = leaving ? fr.paintColor : (fr[key] || fr.color);
+    const list = FIN
+      ? FIN.RAL.map(c => ({ name: c.name, ral: c.code ? ('RAL ' + c.code) : '', hex: c.hex }))
+      : FINISH_COLOURS;
+    const curEntry = list.find(c => c.hex.toUpperCase() === String(cur).toUpperCase())
+      || { hex: cur, name: leaving ? (fr.paintName || 'Custom') : (fr.colorName || 'Custom'), ral: fr.ral || '' };
     _pendingFinish = { hex: curEntry.hex, name: curEntry.name, ral: curEntry.ral };
-    grid.innerHTML = FINISH_COLOURS.map(c => `
+    grid.innerHTML = list.map(c => `
       <div class="p2-colour-card ${c.hex===curEntry.hex?'sel':''}" data-hex="${c.hex}"
            onclick="QSPhase2._pickFinish('${c.hex}','${c.name}','${c.ral}')">
         <div class="p2-colour-sw" style="background:${c.hex}"></div>
@@ -263,9 +298,31 @@
     document.querySelectorAll('.p2-colour-card').forEach(c =>
       c.classList.toggle('sel', c.dataset.hex === hex));
   }
+  function _finishType(v) {
+    _finKey = v || '';
+    _buildColourGrid();
+  }
+  function _pickWood(k) {
+    const t = window.QSFinish && window.QSFinish.WOODS[k];
+    if (!t) return;
+    _pendingFinish = { hex: t.base, name: t.name, ral: '', wood: k };
+    document.querySelectorAll('.p2-colour-card').forEach(c =>
+      c.classList.toggle('sel', c.dataset.wood === k));
+  }
   function _applyFinish(scope) {
     const f = _pendingFinish;
     if (!f) { closeModal(); return; }
+
+    // finish type (painted / textured / woodgrain / metallic) lives on the frame
+    if (window.QSFinish && (scope === 'all' || _finishTarget === 'frame')) {
+      const fr = window.model.frame;
+      const toWood = _finKey === 'wood' && f.wood;
+      if (toWood && !fr.paintColor) { fr.paintColor = fr.color; fr.paintName = fr.colorName || ''; }
+      if (!toWood && fr.finish === 'wood') { fr.paintColor = ''; fr.paintName = ''; }
+      fr.finish = _finKey;
+      if (toWood) fr.wood = f.wood;
+    }
+
     if (scope === 'all') {
       window.model.frame.color = f.hex;
       window.model.frame.colorName = f.name;
@@ -376,7 +433,7 @@
     openOpeners, openProfile, openFinish, openGlass, close: closeModal,
     _pickOpen, _applyOpen,
     _profTab, _profToggle, _profSelect,
-    _finishTab, _pickFinish, _applyFinish,
+    _finishTab, _pickFinish, _applyFinish, _finishType, _pickWood,
     _glassTab, _pickGlass, _pendTex, _pendSpacer, _applyGlass, _toggleStandard, _renderGlassPanes,
     OPENING_TYPES, FINISH_COLOURS,
   };

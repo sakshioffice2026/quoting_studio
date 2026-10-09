@@ -68,6 +68,8 @@ class WindowModel {
       handleColor: opts.handleColor || 'chrome',     // chrome|black|gold|white
       handleType: opts.handleType || 'lever',         // lever|monkeytail|tbar|cockspur|knob
       ral: opts.ral || '',
+      finish: opts.finish || '',                      // ''|painted_smooth|painted_satin|painted_matt|textured|wood|metallic
+      wood: opts.wood || 'natural_oak',               // key in QSFinish.WOODS (used when finish==='wood')
     };
     this.hardware = opts.hardware || {};
     this.extras   = opts.extras   || {};
@@ -1112,7 +1114,9 @@ class DrawingCanvas {
     this.svg.appendChild(refl);
 
     // obscure / privacy glass texture (any texture other than Clear)
-    if (p.texture && p.texture !== 'Clear') {
+    if (window.QSFinish) {
+      window.QSFinish.decorateGlass(this.svg, gx, gy, gw, gh, p, this.mmToPx(1));
+    } else if (p.texture && p.texture !== 'Clear') {
       const ob = this._rect(gx, gy, gw, gh, { fill:'url(#qsObscure)', stroke:'none', sw:0 });
       ob.setAttribute('pointer-events','none');
       this.svg.appendChild(ob);
@@ -1728,8 +1732,15 @@ class DrawingCanvas {
     frame.setAttribute('stroke-width', '1.5');
     svg.appendChild(frame);
 
+    // realistic finish over the frame band (replaces legacy timber grain)
+    let finishedBand = false;
+    if (window.QSFinish && window.QSFinish.isActive(this.model.frame)) {
+      finishedBand = window.QSFinish.decoratePath(
+        svg, outerD + ' ' + innerD, this.model.frame, this.mmToPx(1), 'h');
+    }
+
     // woodgrain over the frame band (timber) — also evenodd-clipped to the band
-    if ((this.model.frame.material||'') === 'Timber') {
+    if (!finishedBand && (this.model.frame.material||'') === 'Timber') {
       const grain = document.createElementNS(SVGNS,'path');
       grain.setAttribute('d', outerD + ' ' + innerD);
       grain.setAttribute('fill-rule','evenodd');
@@ -2346,8 +2357,17 @@ class DrawingCanvas {
     // base colour
     const base = this._rect(x, y, w, h, { fill: col, stroke:'none', sw:0 });
     bg.appendChild(base);
+    // realistic finish (painted sheen / textured / woodgrain foil / metallic)
+    let finished = false;
+    if (window.QSFinish && window.QSFinish.isActive(this.model.frame)) {
+      finished = window.QSFinish.decorateBar(
+        this.svg, x, y, w, h,
+        (side==='left'||side==='right') ? 'v' : 'h',
+        Object.assign({}, this.model.frame, { color: col }),
+        this.mmToPx(1), bg);
+    }
     // procedural woodgrain for timber frames (feTurbulence — no images needed)
-    if ((this.model.frame.material||'') === 'Timber') {
+    if (!finished && (this.model.frame.material||'') === 'Timber') {
       const grain = this._rect(x, y, w, h, { fill:'#000', stroke:'none', sw:0 });
       grain.setAttribute('filter', (side==='left'||side==='right') ? 'url(#qsWoodV)' : 'url(#qsWoodH)');
       grain.setAttribute('pointer-events','none');
