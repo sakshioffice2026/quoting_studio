@@ -97,7 +97,12 @@
 
     <div class="pub-split">
       <div>
-        {% if item.has_photo %}
+        {% if item.has_photo and item.has_before %}
+          {% from 'public_share/_before_after.html' import before_after %}
+          {{ before_after(url_for('public_share.visual_before', token=link.token, line_id=item.line_id),
+                          url_for('public_share.visual_image', token=link.token, line_id=item.line_id),
+                          item.label ~ ' on your home') }}
+        {% elif item.has_photo %}
           <img src="{{ url_for('public_share.visual_image', token=link.token, line_id=item.line_id) }}"
                alt="{{ item.label }} on your home"
                style="width:100%;height:auto;border-radius:10px;display:block;">

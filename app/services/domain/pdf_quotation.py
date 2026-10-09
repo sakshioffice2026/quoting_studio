@@ -7,6 +7,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _load_visuals(quotation):
+    try:
+        from ..quote_visuals import collect
+        return collect(quotation)
+    except Exception as exc:
+        logger.warning('Quote visuals skipped for %s: %s',
+                       getattr(quotation, 'quotation_number', '?'), exc)
+        return []
+
+
 _PDF_TEMPLATE = r"""
 <!DOCTYPE html>
 <html>
@@ -68,6 +79,16 @@ _PDF_TEMPLATE = r"""
     color: #8A93A6; font-weight: 700;
     border-bottom: 1pt solid #E2DDD0;
     padding-bottom: 4pt; margin-bottom: 10pt; margin-top: 16pt;
+  }
+
+  .visual { page-break-inside: avoid; margin-bottom: 14pt; }
+  .visual-label { font-size: 9pt; font-weight: 700; margin-bottom: 4pt; }
+  .visual-row { display: flex; gap: 8pt; }
+  .visual-cell { flex: 1; }
+  .visual-cell img { width: 100%; border: 0.5pt solid #E2DDD0; }
+  .visual-cap {
+    font-size: 7pt; text-transform: uppercase; letter-spacing: 0.06em;
+    color: #8A93A6; margin-top: 2pt;
   }
 
   table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-bottom: 14pt; }
@@ -143,6 +164,27 @@ _PDF_TEMPLATE = r"""
     {% endfor %}
   </tbody>
 </table>
+
+{% if visuals %}
+<div class="section-title">Your windows, visualised</div>
+{% for v in visuals %}
+<div class="visual">
+  <div class="visual-label">{{ v.label }}</div>
+  <div class="visual-row">
+    {% if v.before_uri %}
+    <div class="visual-cell">
+      <img src="{{ v.before_uri }}">
+      <div class="visual-cap">Before</div>
+    </div>
+    {% endif %}
+    <div class="visual-cell">
+      <img src="{{ v.after_uri }}">
+      <div class="visual-cap">With new windows</div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
 
 {% if quotation.installation_charge or quotation.transport_charge or quotation.other_charges or quotation.amc_offered or quotation.warranty_months %}
 <div class="section-title">Installation, Transport, AMC &amp; Warranty</div>
@@ -307,6 +349,40 @@ def _generate_with_reportlab(quotation, project, tenant) -> bytes:
     ]))
     story.append(spec_table)
 
+    # ---- Visualisations ----
+    visuals = _load_visuals(quotation)
+    if visuals:
+        from reportlab.platypus import Image as RLImage, KeepTogether
+        story.append(Paragraph('YOUR WINDOWS, VISUALISED', section))
+        for v in visuals:
+            pairs = [(data, cap) for data, cap in (
+                (v.get('before_jpeg'), 'Before'),
+                (v.get('after_jpeg'), 'With new windows'),
+            ) if data]
+            if not pairs:
+                continue
+            max_w = (82 if len(pairs) == 2 else 120) * mm
+            max_h = 85 * mm
+            images, captions = [], []
+            for data, cap in pairs:
+                img = RLImage(io.BytesIO(data))
+                ratio = min(max_w / float(img.imageWidth), max_h / float(img.imageHeight))
+                img.drawWidth = img.imageWidth * ratio
+                img.drawHeight = img.imageHeight * ratio
+                images.append(img)
+                captions.append(Paragraph(cap.upper(), meta))
+            vis_table = Table([images, captions], colWidths=[max_w + 4 * mm] * len(pairs), hAlign='LEFT')
+            vis_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            story.append(KeepTogether([
+                Paragraph(f"<b>{v['label']}</b>", styles['Normal']),
+                Spacer(1, 3),
+                vis_table,
+                Spacer(1, 8),
+            ]))
+
     # ---- Installation / transport / AMC / warranty ----
     extra_rows = [['Item', 'Details', 'Amount']]
     if quotation.installation_charge:
@@ -396,6 +472,7 @@ def generate_quotation_pdf(quotation, project, tenant) -> bytes:
             project=project,
             tenant=tenant,
             sym=_pdf_symbol(quotation, tenant, safe=False),
+            visuals=_load_visuals(quotation),
         )
 
         pdf_bytes = HTML(string=html_str).write_pdf()

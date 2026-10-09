@@ -1,0 +1,775 @@
+{
+  "length": 1000.0,
+  "out_dir": "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections",
+  "total": 33,
+  "passed": 33,
+  "failed": 0,
+  "with_warnings": 6,
+  "sections": [
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\app\\cad_sections\\cad_sections\\bead.dxf",
+      "name": "bead",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\bead_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          58.000000000116415,
+          64.99999999994179
+        ]
+      ],
+      "across": 58.000000000116415,
+      "depth": 64.99999999994179,
+      "area": 2217.1410223895055,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 2217142.1215479337
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\app\\cad_sections\\cad_sections\\glazing_bar.dxf",
+      "name": "glazing_bar",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\glazing_bar_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          60.0,
+          58.00000000023284
+        ]
+      ],
+      "across": 60.0,
+      "depth": 58.00000000023284,
+      "area": 2141.263719240385,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 2141261.218592363
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\app\\cad_sections\\cad_sections\\head.dxf",
+      "name": "head",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\head_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          90.0,
+          35.0
+        ]
+      ],
+      "across": 90.0,
+      "depth": 35.0,
+      "area": 2816.5651090037263,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 2816566.3706143596
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\app\\cad_sections\\cad_sections\\jamb.dxf",
+      "name": "jamb",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\jamb_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          67.0,
+          90.00000000000003
+        ]
+      ],
+      "across": 67.0,
+      "depth": 90.00000000000003,
+      "area": 3640.694244331178,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 3640696.266735305
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\app\\cad_sections\\cad_sections\\meeting_stile.dxf",
+      "name": "meeting_stile",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\meeting_stile_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          85.00020196288827,
+          27.0
+        ]
+      ],
+      "across": 85.00020196288827,
+      "depth": 27.0,
+      "area": 1270.0024233171725,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [
+        "Open polyline auto-closed with a 12.000 mm straight edge from (27.727, 15.209) to (15.727, 15.209); fix the DXF at source"
+      ],
+      "volume": 1270002.4233171728
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\app\\cad_sections\\cad_sections\\sill.dxf",
+      "name": "sill",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\sill_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          164.99999999999997,
+          60.00000000000001
+        ]
+      ],
+      "across": 164.99999999999997,
+      "depth": 60.00000000000001,
+      "area": 6091.314708978321,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 6091298.356223746
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\additional support(specific to l 20 door,l 20 door also has the standard additional support).dxf",
+      "name": "additional_support_specific_to_l_20_door_l_20_door_also_has_the_standard_additional_support",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\additional_support_specific_to_l_20_door_l_20_door_also_has_the_standard_additional_support_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          58.000000000116415,
+          84.99999999999996
+        ]
+      ],
+      "across": 58.000000000116415,
+      "depth": 84.99999999999996,
+      "area": 3591.2637192361944,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 3591261.2185881715
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\additional support.dxf",
+      "name": "additional_support",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\additional_support_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          85.00020196288827,
+          27.0
+        ]
+      ],
+      "across": 85.00020196288827,
+      "depth": 27.0,
+      "area": 1270.0024233171725,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [
+        "Open polyline auto-closed with a 12.000 mm straight edge from (27.727, 15.209) to (15.727, 15.209); fix the DXF at source"
+      ],
+      "volume": 1270002.4233171728
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\hinge between doors(specific for d 19 door).dxf",
+      "name": "hinge_between_doors_specific_for_d_19_door",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\hinge_between_doors_specific_for_d_19_door_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          165.00000000005818,
+          40.000000000349246
+        ]
+      ],
+      "across": 165.00000000005818,
+      "depth": 40.000000000349246,
+      "area": 6422.1613362860635,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 6422141.112013988
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\interlocking part(2 specific for d19, d19 also has interlocking part 1)..dxf",
+      "name": "interlocking_part_2_specific_for_d19_d19_also_has_interlocking_part_1",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\interlocking_part_2_specific_for_d19_d19_also_has_interlocking_part_1_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          58.00000000011642,
+          85.0
+        ]
+      ],
+      "across": 58.00000000011642,
+      "depth": 85.0,
+      "area": 3753.416222607446,
+      "holes": 0,
+      "skipped_entities": {
+        "LWPOLYLINE_construction_linetype": 1
+      },
+      "warnings": [],
+      "volume": 3753413.6761388043
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\lower base of door frame (part 1` specific to L16 door).dxf",
+      "name": "lower_base_of_door_frame_part_1_specific_to_L16_door",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\lower_base_of_door_frame_part_1_specific_to_L16_door_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          84.0,
+          30.000007843365886
+        ]
+      ],
+      "across": 84.0,
+      "depth": 30.000007843365886,
+      "area": 2005.2492624852432,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 2005229.262273
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\lower base of door frame (part 2` specific to L16 door).dxf",
+      "name": "lower_base_of_door_frame_part_2_specific_to_L16_door",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\lower_base_of_door_frame_part_2_specific_to_L16_door_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          90.00000000000001,
+          59.99999985777282
+        ]
+      ],
+      "across": 90.00000000000001,
+      "depth": 59.99999985777282,
+      "area": 3716.0176267170887,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 3716019.756825102
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\lower base of door frame-1.dxf",
+      "name": "lower_base_of_door_frame-1",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\lower_base_of_door_frame-1_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          165.00000000005812,
+          45.0
+        ]
+      ],
+      "across": 165.00000000005812,
+      "depth": 45.0,
+      "area": 6074.59295653815,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 6074573.587131219
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\lower base of door frame.dxf",
+      "name": "lower_base_of_door_frame",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\lower_base_of_door_frame_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          164.99999999999997,
+          60.00000000000001
+        ]
+      ],
+      "across": 164.99999999999997,
+      "depth": 60.00000000000001,
+      "area": 6091.314708978321,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 6091298.356223746
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\lower base specific to d19 door.dxf",
+      "name": "lower_base_specific_to_d19_door",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\lower_base_specific_to_d19_door_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          124.99999999996429,
+          23.999999235779107
+        ]
+      ],
+      "across": 124.99999999996429,
+      "depth": 23.999999235779107,
+      "area": 518.3669526062417,
+      "holes": 1,
+      "skipped_entities": {
+        "INSERT_exploded": 1,
+        "LINE_ignored_layer": 2,
+        "HATCH": 1
+      },
+      "warnings": [
+        "Ignored stray open edge chain near (51.845, 27.447), 2.780 mm long; clean the DXF at source"
+      ],
+      "volume": 518366.447612759
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parth in which glass is fitted(specific to door d 19).dxf",
+      "name": "parth_in_which_glass_is_fitted_specific_to_door_d_19",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parth_in_which_glass_is_fitted_specific_to_door_d_19_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          108.00000000011634,
+          58.00000000000001
+        ]
+      ],
+      "across": 108.00000000011634,
+      "depth": 58.00000000000001,
+      "area": 4705.220185284813,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 4705217.981777598
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\partition between glass-1.dxf",
+      "name": "partition_between_glass-1",
+      "ok": true,
+      "shapes": 2,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\partition_between_glass-1_Shape_1_1000mm.step",
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\partition_between_glass-1_Shape_2_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          29.999999999999996,
+          25.0
+        ],
+        [
+          90.0,
+          72.0
+        ]
+      ],
+      "across": 29.999999999999996,
+      "depth": 25.0,
+      "area": 538.221499207024,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [
+        "DXF holds 2 separate shapes; exported as 2 separate solids (Shape_1..Shape_2, left to right)"
+      ],
+      "volume": 4547781.147852568
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\partition between glass.dxf",
+      "name": "partition_between_glass",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\partition_between_glass_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          58.000000000116415,
+          64.99999999994179
+        ]
+      ],
+      "across": 58.000000000116415,
+      "depth": 64.99999999994179,
+      "area": 2217.1410223895055,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 2217142.1215479337
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parts specific to door d2\\lower base of frame.dxf",
+      "name": "parts_specific_to_door_d2_lower_base_of_frame",
+      "ok": true,
+      "shapes": 3,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_lower_base_of_frame_Shape_1_1000mm.step",
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_lower_base_of_frame_Shape_2_1000mm.step",
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_lower_base_of_frame_Shape_3_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          122.19999828219898,
+          24.997475907391465
+        ],
+        [
+          4.959049868763438,
+          12.354322778880888
+        ],
+        [
+          12.101967206494923,
+          12.105117258448798
+        ]
+      ],
+      "across": 122.19999828219898,
+      "depth": 24.997475907391465,
+      "area": 449.24652346181523,
+      "holes": 2,
+      "skipped_entities": {
+        "INSERT_exploded": 4,
+        "LINE_ignored_layer": 4,
+        "HATCH": 2,
+        "REGION": 3
+      },
+      "warnings": [
+        "DXF holds 3 separate shapes; exported as 3 separate solids (Shape_1..Shape_3, left to right)"
+      ],
+      "volume": 497115.4073323514
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parts specific to door d2\\lower base support 1.dxf",
+      "name": "parts_specific_to_door_d2_lower_base_support_1",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_lower_base_support_1_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          58.0,
+          107.99999999999994
+        ]
+      ],
+      "across": 58.0,
+      "depth": 107.99999999999994,
+      "area": 5480.296169941505,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 5480294.339444969
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parts specific to door d2\\lower base support 2.dxf",
+      "name": "parts_specific_to_door_d2_lower_base_support_2",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_lower_base_support_2_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          37.0,
+          55.0
+        ]
+      ],
+      "across": 37.0,
+      "depth": 55.0,
+      "area": 1166.4187541351785,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 1166413.4776705594
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parts specific to door d2\\lower base support 3.dxf",
+      "name": "parts_specific_to_door_d2_lower_base_support_3",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_lower_base_support_3_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          90.00041385088109,
+          30.22558231968353
+        ]
+      ],
+      "across": 90.00041385088109,
+      "depth": 30.22558231968353,
+      "area": 1308.0135094343143,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [
+        "Open polyline auto-closed with a 91.083 mm straight edge from (14.032, 46.180) to (104.033, 32.180); fix the DXF at source"
+      ],
+      "volume": 1308016.2481272542
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parts specific to door d2\\partition between glass type 1.dxf",
+      "name": "parts_specific_to_door_d2_partition_between_glass_type_1",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_partition_between_glass_type_1_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          58.0,
+          108.0
+        ]
+      ],
+      "across": 58.0,
+      "depth": 108.0,
+      "area": 5088.144146496397,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 5088139.822572847
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parts specific to door d2\\partition between glass type 2.dxf",
+      "name": "parts_specific_to_door_d2_partition_between_glass_type_2",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_partition_between_glass_type_2_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          58.000000000116415,
+          107.99999999994175
+        ]
+      ],
+      "across": 58.000000000116415,
+      "depth": 107.99999999994175,
+      "area": 4711.141022389508,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 4711142.121547931
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parts specific to door d2\\supports perpendicular to the door height 1.dxf",
+      "name": "parts_specific_to_door_d2_supports_perpendicular_to_the_door_height_1",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_supports_perpendicular_to_the_door_height_1_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          140.0000000000582,
+          58.000000000058215
+        ]
+      ],
+      "across": 140.0000000000582,
+      "depth": 58.000000000058215,
+      "area": 6561.220185290051,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 6561217.981782821
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parts specific to door d2\\supports perpendicular to the door height 2.dxf",
+      "name": "parts_specific_to_door_d2_supports_perpendicular_to_the_door_height_2",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_supports_perpendicular_to_the_door_height_2_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          140.0,
+          58.000000000000014
+        ]
+      ],
+      "across": 140.0,
+      "depth": 58.000000000000014,
+      "area": 6568.269664997595,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 6568270.793720913
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\parts specific to door d2\\supports perpendicular to the door height 3.dxf",
+      "name": "parts_specific_to_door_d2_supports_perpendicular_to_the_door_height_3",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\parts_specific_to_door_d2_supports_perpendicular_to_the_door_height_3_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          139.99999999999991,
+          58.0
+        ]
+      ],
+      "across": 139.99999999999991,
+      "depth": 58.0,
+      "area": 7124.144146496176,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 7124139.822572628
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\single door hinge.dxf",
+      "name": "single_door_hinge",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\single_door_hinge_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          101.06616847867035,
+          105.602840229783
+        ]
+      ],
+      "across": 101.06616847867035,
+      "depth": 105.602840229783,
+      "area": 6448.940255617717,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 6448942.2780218255
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\spacer (specific to door D19 ).dxf",
+      "name": "spacer_specific_to_door_D19",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\spacer_specific_to_door_D19_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          58.0,
+          107.99999999999993
+        ]
+      ],
+      "across": 58.0,
+      "depth": 107.99999999999993,
+      "area": 5480.296169939315,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 5480294.339442765
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\spacer (specific to door L16).dxf",
+      "name": "spacer_specific_to_door_L16",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\spacer_specific_to_door_L16_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          41.001681317982715,
+          24.47292177299317
+        ]
+      ],
+      "across": 41.001681317982715,
+      "depth": 24.47292177299317,
+      "area": 778.9372068326588,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 778937.6053873762
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\spacers.dxf",
+      "name": "spacers",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\spacers_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          21.0,
+          17.0
+        ]
+      ],
+      "across": 21.0,
+      "depth": 17.0,
+      "area": 235.28561130634688,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 235287.30785200908
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\support in which glass is fitted.dxf",
+      "name": "support_in_which_glass_is_fitted",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\support_in_which_glass_is_fitted_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          60.0,
+          58.00000000023284
+        ]
+      ],
+      "across": 60.0,
+      "depth": 58.00000000023284,
+      "area": 2141.263719240385,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 2141261.218592363
+    },
+    {
+      "dxf": "D:\\Quoting Studio\\quoting_studio\\import_data\\Sections\\upper base of frame.dxf",
+      "name": "upper_base_of_frame",
+      "ok": true,
+      "shapes": 1,
+      "steps": [
+        "D:\\Quoting Studio\\quoting_studio\\step_generator\\output\\sections\\upper_base_of_frame_1000mm.step"
+      ],
+      "shape_sizes": [
+        [
+          90.0,
+          35.0
+        ]
+      ],
+      "across": 90.0,
+      "depth": 35.0,
+      "area": 2816.5651090037263,
+      "holes": 0,
+      "skipped_entities": {},
+      "warnings": [],
+      "volume": 2816566.3706143596
+    }
+  ],
+  "ok": true
+}

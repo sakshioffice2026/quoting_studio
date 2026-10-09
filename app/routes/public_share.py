@@ -332,6 +332,7 @@ def _visual_items(q, state) -> list[dict]:
                 pass
 
     rendered = set()
+    with_before = set()
     colours = {}
     if window_ids:
         owned_rows = Window.query.filter(
@@ -341,6 +342,8 @@ def _visual_items(q, state) -> list[dict]:
         for vis in Visualisation.query.filter(Visualisation.window_id.in_(owned)).all():
             if vis.rendered_path:
                 rendered.add(vis.window_id)
+                if vis.photo_path:
+                    with_before.add(vis.window_id)
 
     result = []
     for index, item in enumerate(q.line_items):
@@ -362,6 +365,7 @@ def _visual_items(q, state) -> list[dict]:
             'amount':        item.get('amount'),
             'notes':         item.get('notes'),
             'has_photo':     has_photo,
+            'has_before':    has_photo and int(wid) in with_before,
             'svg':           None if has_photo else _item_render_svg(item, f'v{lid}'),
             'approved':      slot.get('approved', False),
             'needs_review':  slot.get('needs_review', False),
@@ -416,6 +420,46 @@ def visual_image(token, line_id):
     if not full.startswith(base + os.sep) or not os.path.isfile(full):
         abort(404)
     return send_file(full, mimetype='image/png')
+
+
+@public_share_bp.route('/<token>/visual/before/<int:line_id>')
+def visual_before(token, line_id):
+    link, err = _visual_link(token)
+    if err:
+        return err
+
+    q = quotation_service.get_quotation(link.tenant_id, link.resource_id)
+    if not q:
+        abort(404)
+
+    item = None
+    for index, candidate in enumerate(q.line_items):
+        if visual_feedback_service.line_key(candidate, index) == line_id:
+            item = candidate
+            break
+    if not item or item.get('window_id') is None:
+        abort(404)
+
+    try:
+        window_id = int(item['window_id'])
+    except (TypeError, ValueError):
+        abort(404)
+
+    window = Window.query.filter_by(id=window_id, project_id=q.project_id).first()
+    if not window:
+        abort(404)
+
+    vis = (Visualisation.query.filter_by(window_id=window_id)
+           .filter(Visualisation.photo_path.isnot(None))
+           .order_by(Visualisation.created_at.desc()).first())
+    if not vis:
+        abort(404)
+
+    base = os.path.realpath(current_app.config['UPLOAD_FOLDER'])
+    full = os.path.realpath(os.path.join(base, vis.photo_path))
+    if not full.startswith(base + os.sep) or not os.path.isfile(full):
+        abort(404)
+    return send_file(full)
 
 
 @public_share_bp.route('/<token>/master/scene')

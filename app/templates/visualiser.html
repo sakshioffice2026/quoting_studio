@@ -287,6 +287,18 @@ input[type=range] { width:100%;accent-color:var(--copper); }
 
         <div class="divider"></div>
 
+        <div class="sec-head">Realistic render</div>
+        <button class="btn btn-secondary" id="btnRealistic"
+                style="width:100%;justify-content:center;margin-bottom:8px;"
+                onclick="makeRealistic()">Make realistic</button>
+        <label class="life-row">
+          <input type="checkbox" id="realEnhance">
+          AI enhance (slower, uses cloud GPU)
+        </label>
+        <div class="st-item" id="stRealistic">○ Not rendered</div>
+
+        <div class="divider"></div>
+
         <div class="sec-head">Corner positions (px)</div>
         <div class="corner-grid">
           <div class="corner-cell" id="cTL">TL —</div>
@@ -2672,6 +2684,52 @@ async function saveVersion() {
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+/* ================================================================
+   REALISTIC RENDER — server-side pipeline (+ optional cloud enhance)
+   ================================================================ */
+async function makeRealistic() {
+  const btn     = document.getElementById('btnRealistic');
+  const enhance = document.getElementById('realEnhance').checked;
+  if (btn) btn.disabled = true;
+  setStatus('stRealistic', enhance ? '○ Rendering with AI enhance…' : '○ Rendering…', false);
+  try {
+    await saveVisState();
+    const res = await fetch(`${API}/windows/${QS_WINDOW_ID}/btl/compose`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken':CSRF_TOKEN},
+      body: JSON.stringify({enhance: enhance}),
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+    let msg = '● Realistic render ready';
+    if (enhance && !d.enhanced) msg += ' (enhance skipped: ' + (d.enhance_note || 'unavailable') + ')';
+    setStatus('stRealistic', msg, true);
+    RENDER_URLS[QS_WINDOW_ID] = d.render_url;
+    showRealisticResult(d.render_url);
+  } catch (e) {
+    console.error('[QS] makeRealistic failed:', e);
+    setStatus('stRealistic', '✕ ' + e.message, false);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function showRealisticResult(url) {
+  const old = document.getElementById('realisticOverlay');
+  if (old) old.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'realisticOverlay';
+  wrap.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;' +
+    'background:rgba(15,20,28,.88);display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out;';
+  const img = document.createElement('img');
+  img.src = url;
+  img.alt = 'Realistic render';
+  img.style.cssText = 'max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.5);';
+  wrap.appendChild(img);
+  wrap.addEventListener('click', function () { wrap.remove(); });
+  document.body.appendChild(wrap);
 }
 
 /* ================================================================

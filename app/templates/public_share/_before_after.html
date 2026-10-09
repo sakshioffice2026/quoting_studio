@@ -1,0 +1,39 @@
+{% macro before_after(before_url, after_url, alt) -%}
+<div class="ba" data-ba>
+  <img class="ba-img" src="{{ after_url }}" alt="{{ alt }}">
+  <div class="ba-before"><img class="ba-img" src="{{ before_url }}" alt="Before"></div>
+  <span class="ba-tag ba-tag-l">Before</span>
+  <span class="ba-tag ba-tag-r">With new windows</span>
+  <div class="ba-handle"></div>
+  <input class="ba-range" type="range" min="0" max="100" value="50" aria-label="Compare before and after">
+</div>
+<script>
+(function () {
+  if (!window.__baStyle) {
+    window.__baStyle = 1;
+    var style = document.createElement('style');
+    style.textContent =
+      '.ba{position:relative;width:100%;overflow:hidden;border-radius:10px;line-height:0;user-select:none;-webkit-user-select:none}' +
+      '.ba-img{width:100%;height:auto;display:block}' +
+      '.ba-before{position:absolute;top:0;left:0;right:0;bottom:0;clip-path:inset(0 50% 0 0)}' +
+      '.ba-before .ba-img{width:100%;height:100%;object-fit:cover}' +
+      '.ba-handle{position:absolute;top:0;bottom:0;left:50%;width:2px;margin-left:-1px;background:#fff;box-shadow:0 0 4px rgba(0,0,0,.45);pointer-events:none}' +
+      '.ba-handle:after{content:"\\2194";position:absolute;top:50%;left:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;background:#fff;color:#1B2430;font:16px/34px Arial,sans-serif;text-align:center;box-shadow:0 1px 6px rgba(0,0,0,.4)}' +
+      '.ba-range{position:absolute;top:0;left:0;width:100%;height:100%;margin:0;opacity:0;cursor:ew-resize;touch-action:pan-y}' +
+      '.ba-tag{position:absolute;bottom:10px;padding:3px 8px;border-radius:10px;background:rgba(27,36,48,.72);color:#fff;font:600 11px/1.4 Arial,sans-serif;pointer-events:none}' +
+      '.ba-tag-l{left:10px}.ba-tag-r{right:10px}';
+    document.head.appendChild(style);
+  }
+  var root = document.currentScript.previousElementSibling;
+  var range = root.querySelector('.ba-range');
+  var before = root.querySelector('.ba-before');
+  var handle = root.querySelector('.ba-handle');
+  function set(value) {
+    before.style.clipPath = 'inset(0 ' + (100 - value) + '% 0 0)';
+    handle.style.left = value + '%';
+  }
+  range.addEventListener('input', function () { set(range.value); });
+  set(range.value);
+})();
+</script>
+{%- endmacro %}
