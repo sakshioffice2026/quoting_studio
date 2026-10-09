@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 import uuid
@@ -257,6 +258,138 @@ def save_visualisation(window_id):
         db.session.rollback()
         current_app.logger.exception('save_visualisation error window=%d: %s', window_id, exc)
         return jsonify({'error': 'Failed to save visualisation'}), 500
+
+
+ENHANCE_CORNER_KEYS = ('tl', 'tr', 'br', 'bl')
+
+
+def _enhance_strength(raw):
+    try:
+        default = float(os.environ.get('BTL_ENHANCE_STRENGTH', '0.35'))
+    except ValueError:
+        default = 0.35
+    try:
+        value = float(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        value = default
+    return min(0.6, max(0.1, value))
+
+
+def _enhance_corners(vis):
+    values = (
+        vis.corner_tl_x, vis.corner_tl_y, vis.corner_tr_x, vis.corner_tr_y,
+        vis.corner_br_x, vis.corner_br_y, vis.corner_bl_x, vis.corner_bl_y,
+    )
+    if any(v is None for v in values):
+        return None
+    return {
+        'tl': (vis.corner_tl_x, vis.corner_tl_y),
+        'tr': (vis.corner_tr_x, vis.corner_tr_y),
+        'br': (vis.corner_br_x, vis.corner_br_y),
+        'bl': (vis.corner_bl_x, vis.corner_bl_y),
+    }
+
+
+def _enhance_cache_key(src_path, corners, strength):
+    digest = hashlib.sha256()
+    with open(src_path, 'rb') as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b''):
+            digest.update(chunk)
+    payload = {
+        'v':        'enh1',
+        'src':      digest.hexdigest(),
+        'corners':  {k: [round(float(corners[k][0]), 1), round(float(corners[k][1]), 1)]
+                     for k in ENHANCE_CORNER_KEYS},
+        'strength': round(float(strength), 3),
+    }
+    blob = json.dumps(payload, sort_keys=True).encode('utf-8')
+    return hashlib.sha256(blob).hexdigest()[:32]
+
+
+# POST /api/v1/windows/<id>/enhance
+# Sends the latest rendered composite and the window mask to the cloud
+# enhance service and stores the result as a new version.
+@vis_bp.route('/windows/<int:window_id>/enhance', methods=['POST'])
+@login_required
+def enhance_render(window_id):
+    try:
+        _own_window(window_id)
+        data = request.get_json(silent=True) or {}
+
+        vis = _latest_visualisation(window_id)
+        if vis is None or not vis.rendered_path:
+            return jsonify({'error': 'Render the window first'}), 400
+
+        corners = _enhance_corners(vis)
+        if corners is None:
+            return jsonify({'error': 'Place the four corners first'}), 400
+
+        try:
+            import cv2
+            from ...services.btl import enhancer, limits
+        except ImportError:
+            return jsonify({'error': 'Image processing libraries are not installed'}), 501
+
+        if not enhancer.is_configured():
+            return jsonify({'error': 'Enhance service is not configured'}), 503
+
+        tenant_id = current_user.tenant_id
+        allowed, used, cap = limits.within_cap(tenant_id, True)
+        if not allowed:
+            return jsonify({
+                'error': f'Daily enhance limit reached ({used}/{cap})',
+                'used': used, 'cap': cap,
+            }), 429
+
+        src_path = os.path.join(current_app.config['UPLOAD_FOLDER'], vis.rendered_path)
+        if not os.path.isfile(src_path):
+            return jsonify({'error': 'Rendered image not found'}), 404
+
+        strength = _enhance_strength(data.get('strength'))
+        rel_path = limits.cache_relpath(_enhance_cache_key(src_path, corners, strength), True)
+        out_path = limits.cache_fullpath(rel_path)
+        cached   = os.path.isfile(out_path)
+
+        if not cached:
+            image = cv2.imread(src_path, cv2.IMREAD_COLOR)
+            if image is None:
+                return jsonify({'error': 'Rendered image could not be read'}), 400
+
+            try:
+                result = enhancer.enhance(
+                    image,
+                    [corners[k] for k in ENHANCE_CORNER_KEYS],
+                    strength=strength,
+                )
+            except enhancer.EnhanceError as exc:
+                current_app.logger.warning('enhance_render window=%d: %s', window_id, exc)
+                return jsonify({'error': str(exc), 'fallback_url': f'/uploads/{vis.rendered_path}'}), 503
+
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            tmp_path = out_path[:-4] + f'.{uuid.uuid4().hex[:6]}.tmp.png'
+            if not cv2.imwrite(tmp_path, result):
+                return jsonify({'error': 'Failed to write enhanced render'}), 500
+            os.replace(tmp_path, out_path)
+
+        if vis.rendered_path == rel_path:
+            new_vis = vis
+        else:
+            new_vis = _new_version(window_id, vis)
+            new_vis.rendered_path = rel_path
+            db.session.commit()
+
+        return jsonify({
+            'status':     'ok',
+            'vis_id':     new_vis.id,
+            'render_url': f'/uploads/{rel_path}',
+            'cached':     cached,
+            'enhanced':   True,
+        })
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception('enhance_render error window=%d: %s', window_id, exc)
+        return jsonify({'error': 'Enhance failed'}), 500
 
 
 # POST /api/v1/windows/<id>/sync-quotations

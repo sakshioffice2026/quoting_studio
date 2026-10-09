@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 
+from .. import homography
+
 
 def _shift(img, dx, dy):
     h, w = img.shape[:2]
@@ -10,20 +12,12 @@ def _shift(img, dx, dy):
 
 
 def _warp_overlay(overlay_bgra, quad, size):
-    oh, ow = overlay_bgra.shape[:2]
-    src = np.float32([[0, 0], [ow - 1, 0], [ow - 1, oh - 1], [0, oh - 1]])
-    matrix = cv2.getPerspectiveTransform(src, np.float32(quad))
-
-    f = overlay_bgra.astype(np.float32) / 255.0
-    f[..., :3] *= f[..., 3:4]
-    warped = cv2.warpPerspective(f, matrix, size, flags=cv2.INTER_LINEAR,
-                                 borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+    warped, matrix = homography.warp_bgra(overlay_bgra, quad, size)
 
     alpha = overlay_bgra[..., 3]
     glass_src = ((alpha > 15) & (alpha < 240)).astype(np.uint8) * 255
     glass_src = cv2.erode(glass_src, np.ones((3, 3), np.uint8))
-    glass = cv2.warpPerspective(glass_src.astype(np.float32) / 255.0, matrix, size,
-                                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    glass = homography.warp_mask(glass_src, matrix, size)
     return warped, glass
 
 

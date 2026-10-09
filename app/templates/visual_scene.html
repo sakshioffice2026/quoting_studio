@@ -145,6 +145,18 @@ body { overflow: hidden; }
         <label class="bl-row" style="cursor:pointer;"><span>Hide original window</span>
           <input type="checkbox" id="hideOld" checked></label>
 
+        <div class="bl-sec">Layers</div>
+        <label class="bl-row" style="cursor:pointer;"><span>Stone sill</span>
+          <input type="checkbox" id="lyrSill" checked></label>
+        <label class="bl-row" style="cursor:pointer;"><span>Depth &amp; cast shadow</span>
+          <input type="checkbox" id="lyrShadow" checked></label>
+        <label class="bl-row" style="cursor:pointer;"><span>Glass reflection</span>
+          <input type="checkbox" id="lyrReflect" checked></label>
+        <label class="bl-row" style="cursor:pointer;"><span>Frame bevel</span>
+          <input type="checkbox" id="lyrBevel" checked></label>
+        <label class="bl-row" style="cursor:pointer;"><span>Photo grain</span>
+          <input type="checkbox" id="lyrGrain" checked></label>
+
         <div style="display:flex;gap:6px;margin-top:6px;">
           <button class="btn btn-secondary btn-sm" id="btnApply" style="flex:1;">Apply to design</button>
           <button class="btn btn-ghost btn-sm" id="btnRemove">Remove</button>
@@ -339,6 +351,8 @@ function scheduleRefresh(o) {
 const layer = document.createElement('canvas');
 const lctx  = layer.getContext('2d');
 let realism = 0.7, hideOld = true, noisePat = null;
+const layers = {sill: true, shadow: true, reflect: true, bevel: true, grain: true};
+function allLayersOn() { return Object.keys(layers).every(k => layers[k]); }
 
 function mid(a, b) { return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}; }
 function scaleQuad(c, k) {
@@ -406,7 +420,7 @@ function paintOpeningCore(o) {
 
 function paintOpening(o, fast) {
   const c = o.corners, R = fast ? 0 : realism;
-  if (R > 0 && paintOpeningCore(o)) return;
+  if (R > 0 && allLayersOn() && paintOpeningCore(o)) return;
   const w = Math.hypot(c.tr.x - c.tl.x, c.tr.y - c.tl.y);
   const h = Math.hypot(c.bl.x - c.tl.x, c.bl.y - c.tl.y);
   const ux = (c.tr.x - c.tl.x) / (w || 1), uy = (c.tr.y - c.tl.y) / (w || 1);
@@ -427,6 +441,7 @@ function paintOpening(o, fast) {
     }
 
     /* stone sill under the unit */
+    if (layers.sill) {
     const ex = w * 0.035, sh = h * 0.05;
     const bl = {x: c.bl.x - ux * ex, y: c.bl.y - uy * ex};
     const br = {x: c.br.x + ux * ex, y: c.br.y + uy * ex};
@@ -443,8 +458,10 @@ function paintOpening(o, fast) {
     sg.addColorStop(0, '#e4e1d9'); sg.addColorStop(1, '#a8a49a');
     ctx.fillStyle = sg; ctx.fill();
     ctx.restore();
+    }
 
     /* interior behind the glass + cast shadow on the wall */
+    if (layers.shadow) {
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,' + (0.55 * R) + ')';
     ctx.shadowBlur = Math.max(4, w * 0.035); ctx.shadowOffsetY = Math.max(2, h * 0.015);
@@ -453,6 +470,7 @@ function paintOpening(o, fast) {
     ig.addColorStop(0, '#0f141a'); ig.addColorStop(1, '#2b2622');
     ctx.fillStyle = ig; ctx.fill();
     ctx.restore();
+    }
   }
 
   /* warp the SVG onto an offscreen layer, then composite with blending */
@@ -467,6 +485,7 @@ function paintOpening(o, fast) {
   if (R <= 0) return;
 
   /* glass: top reveal shadow, sky reflection, glint */
+  if (layers.reflect) {
   const glass = scaleQuad(c, 0.9);
   ctx.save();
   quadPath(ctx, glass); ctx.clip();
@@ -486,8 +505,10 @@ function paintOpening(o, fast) {
   gl.addColorStop(0.52, 'rgba(255,255,255,0)');
   ctx.fillStyle = gl; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
+  }
 
   /* frame bevel: dark rebate line, lit top/left, shaded bottom/right */
+  if (layers.bevel) {
   const lw = Math.max(1.2, w * 0.005);
   const inner = scaleQuad(c, 0.9);
   ctx.save();
@@ -498,13 +519,16 @@ function paintOpening(o, fast) {
   strokeEdge(c.tl, c.bl, 'rgba(255,255,255,' + (0.22 * R) + ')', lw);
   strokeEdge(c.bl, c.br, 'rgba(0,0,0,' + (0.35 * R) + ')', lw);
   strokeEdge(c.tr, c.br, 'rgba(0,0,0,' + (0.30 * R) + ')', lw);
+  }
 
   /* grain matched to the photo */
+  if (layers.grain) {
   ctx.save();
   quadPath(ctx, c); ctx.clip();
   ctx.globalAlpha = 0.07 * R; ctx.globalCompositeOperation = 'overlay';
   ctx.fillStyle = getNoise(); ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
+  }
 }
 
 function render(forExport, fast) {
@@ -720,6 +744,10 @@ $('btnPersp').onclick = () => {
 $('btnBefore').onclick = () => { showAfter = !showAfter; render(); };
 $('realism').oninput = e => { realism = e.target.value / 100; $('rlVal').textContent = e.target.value + '%'; render(); };
 $('hideOld').onchange = e => { hideOld = e.target.checked; render(); };
+[['lyrSill', 'sill'], ['lyrShadow', 'shadow'], ['lyrReflect', 'reflect'],
+ ['lyrBevel', 'bevel'], ['lyrGrain', 'grain']].forEach(pair => {
+  $(pair[0]).onchange = e => { layers[pair[1]] = e.target.checked; render(); };
+});
 
 /* ---------------- photo + save ---------------- */
 function loadPhoto(url, w, h) {

@@ -8,10 +8,35 @@ import cv2
 import numpy as np
 
 CROP_PADDING = 0.25
-BUSY_WAIT_SECONDS = 5
+DEFAULT_QUEUE_WAIT_SECONDS = 30.0
+MAX_WAITING = 3
 
 _gate = threading.Semaphore(1)
 _pool = ThreadPoolExecutor(max_workers=2)
+_waiting = 0
+_waiting_lock = threading.Lock()
+
+
+def _queue_wait():
+    try:
+        return max(0.0, float(os.environ.get('BTL_ENHANCE_QUEUE_WAIT', DEFAULT_QUEUE_WAIT_SECONDS)))
+    except ValueError:
+        return DEFAULT_QUEUE_WAIT_SECONDS
+
+
+def _acquire_slot():
+    global _waiting
+    with _waiting_lock:
+        if _waiting >= MAX_WAITING:
+            raise EnhanceError('Enhance queue is full')
+        _waiting += 1
+    try:
+        got = _gate.acquire(timeout=_queue_wait())
+    finally:
+        with _waiting_lock:
+            _waiting -= 1
+    if not got:
+        raise EnhanceError('Enhance service is busy')
 
 
 class EnhanceError(RuntimeError):
@@ -97,8 +122,7 @@ def enhance(result_bgr, quad, strength=0.35, steps=20, seed=7, timeout=None):
     full_mask = cv2.dilate(full_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (grow, grow)))
     cmask = full_mask[cy0:cy1, cx0:cx1]
 
-    if not _gate.acquire(timeout=BUSY_WAIT_SECONDS):
-        raise EnhanceError('Enhance service is busy')
+    _acquire_slot()
 
     try:
         with tempfile.TemporaryDirectory() as tmp:

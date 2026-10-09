@@ -7,6 +7,47 @@ from flask import render_template_string
 
 logger = logging.getLogger(__name__)
 
+
+def _load_visuals(window_lines):
+    try:
+        from ..quote_visuals import MAX_VISUALS, _data_uri, _jpeg_bytes, _safe_path
+        from ...models import Visualisation
+
+        visuals = []
+        for line in window_lines or []:
+            if len(visuals) >= MAX_VISUALS:
+                break
+            window = line.get('window') if isinstance(line, dict) else None
+            if window is None:
+                continue
+
+            vis = (Visualisation.query.filter_by(window_id=window.id)
+                   .filter(Visualisation.rendered_path.isnot(None))
+                   .order_by(Visualisation.created_at.desc()).first())
+            if vis is None:
+                continue
+
+            after_path = _safe_path(vis.rendered_path)
+            after = _jpeg_bytes(after_path) if after_path else None
+            if after is None:
+                continue
+
+            before = None
+            before_path = _safe_path(vis.photo_path)
+            if before_path:
+                before = _jpeg_bytes(before_path)
+
+            visuals.append({
+                'label':      getattr(window, 'label', None) or 'Window',
+                'after_uri':  _data_uri(after),
+                'before_uri': _data_uri(before) if before else None,
+            })
+        return visuals
+    except Exception as exc:
+        logger.warning('Quote visuals skipped: %s', exc)
+        return []
+
+
 # Inline PDF template — self-contained so WeasyPrint needs no external assets
 _PDF_TEMPLATE = r"""
 <!DOCTYPE html>
@@ -138,6 +179,17 @@ _PDF_TEMPLATE = r"""
     margin-top: 2pt;
   }
 
+  /* ---- Visualisations ---- */
+  .visual { page-break-inside: avoid; margin-bottom: 14pt; }
+  .visual-label { font-size: 9pt; font-weight: 700; margin-bottom: 4pt; }
+  .visual-row { display: flex; gap: 8pt; }
+  .visual-cell { flex: 1; }
+  .visual-cell img { width: 100%; border: 0.5pt solid #E2DDD0; }
+  .visual-cap {
+    font-size: 7pt; text-transform: uppercase; letter-spacing: 0.06em;
+    color: #8A93A6; margin-top: 2pt;
+  }
+
   /* ---- Totals ---- */
   .totals-block {
     width: 230pt;
@@ -263,6 +315,27 @@ _PDF_TEMPLATE = r"""
   </div>
 </div>
 
+{% if visuals %}
+<div class="section-title">Your windows, visualised</div>
+{% for v in visuals %}
+<div class="visual">
+  <div class="visual-label">{{ v.label }}</div>
+  <div class="visual-row">
+    {% if v.before_uri %}
+    <div class="visual-cell">
+      <img src="{{ v.before_uri }}">
+      <div class="visual-cap">Before</div>
+    </div>
+    {% endif %}
+    <div class="visual-cell">
+      <img src="{{ v.after_uri }}">
+      <div class="visual-cap">With new windows</div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
 <!-- Materials summary -->
 <div class="section-title">Materials specified</div>
 {% set materials = window_lines | map(attribute='window') | map(attribute='material') | unique | list %}
@@ -309,6 +382,7 @@ def generate_quote_pdf(quote, project, tenant, window_lines, vat_amt) -> bytes:
             tenant=tenant,
             window_lines=window_lines,
             vat_amt=vat_amt,
+            visuals=_load_visuals(window_lines),
             currency=(tenant.currency_symbol if tenant is not None else ''),
         )
 

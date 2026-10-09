@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import time
 from datetime import datetime
 
 from flask import current_app
@@ -10,6 +11,9 @@ from ...models import Visualisation, Window
 CACHE_VERSION = '1'
 CACHE_DIR = 'btl_cache'
 CORNER_KEYS = ('tl', 'tr', 'br', 'bl')
+PRUNE_INTERVAL_SECONDS = 3600
+
+_last_prune = 0.0
 
 
 def _env_int(name, default):
@@ -72,7 +76,52 @@ def used_today(tenant_id, enhanced):
     )
 
 
+def prune_cache(force=False):
+    """Delete cache files older than BTL_CACHE_DAYS that no saved version uses."""
+    global _last_prune
+    now = time.time()
+    if not force and now - _last_prune < PRUNE_INTERVAL_SECONDS:
+        return 0
+    _last_prune = now
+
+    max_age = _env_int('BTL_CACHE_DAYS', 30)
+    if max_age <= 0:
+        return 0
+
+    folder = os.path.join(current_app.config['UPLOAD_FOLDER'], CACHE_DIR)
+    if not os.path.isdir(folder):
+        return 0
+
+    referenced = {
+        row[0]
+        for row in Visualisation.query
+        .with_entities(Visualisation.rendered_path)
+        .filter(Visualisation.rendered_path.like(CACHE_DIR + '/%'))
+        .all()
+    }
+
+    cutoff = now - max_age * 86400
+    removed = 0
+    for name in os.listdir(folder):
+        if not name.lower().endswith('.png'):
+            continue
+        rel = f'{CACHE_DIR}/{name}'
+        full = os.path.join(folder, name)
+        try:
+            if rel in referenced or os.path.getmtime(full) > cutoff:
+                continue
+            os.remove(full)
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def within_cap(tenant_id, enhanced):
+    try:
+        prune_cache()
+    except Exception:
+        current_app.logger.exception('btl cache prune failed')
     cap = daily_cap(enhanced)
     if cap <= 0:
         return True, 0, cap
